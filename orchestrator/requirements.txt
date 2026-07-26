@@ -1,0 +1,32 @@
+# Core dependencies for the Perplexity-backed Strands + Temporal orchestrator
+strands-agents>=0.1
+temporalio[strands-agents,pydantic]>=1.9.0
+
+# Upstream source of think.py, which is vendored verbatim with only async
+# streaming added. Kept as a dependency so the vendored copy stays diffable
+# against the real tool. thinking_activity.py runs it as a Temporal activity
+# rather than inline — see that module's docstring (the tool's own
+# sync-to-async bridge is incompatible with a workflow's single-threaded
+# event loop).
+strands-agents-tools>=0.8.5
+
+# Perplexity's official SDK — PerplexityModel (perplexity_model.py) is built on
+# this directly, not the generic openai package. See that module's docstring.
+perplexityai>=0.42.0
+
+# HTTP bridge so the Next.js frontend can trigger workflow runs
+fastapi>=0.115
+uvicorn[standard]>=0.32
+
+# Async HTTP client for the Agent-API-as-tool activities in perplexity_tools.py,
+# and for the unauthenticated GET /v1/models listing in run_worker.py (no
+# official SDK method covers that endpoint).
+httpx>=0.27
+
+python-dotenv
+
+# Tracing export for telemetry.py. The OpenTelemetry SDK and Temporal's
+# OpenTelemetryPlugin already come with temporalio, but the OTLP exporter
+# ships separately. Only used when OTEL_EXPORTER_OTLP_ENDPOINT is set;
+# telemetry.py degrades gracefully if it is missing.
+opentelemetry-exporter-otlp-proto-http>=1.27

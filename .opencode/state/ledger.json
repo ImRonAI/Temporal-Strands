@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "plan": "docs/superpowers/plans/2026-07-30-durable-strands-temporal-orchestrator.md",
+  "active_task": 3,
+  "blocked": null,
+  "amendments": [
+    {
+      "id": "A-001",
+      "recorded_at": "2026-07-30T00:00:00Z",
+      "decision": "Do not stage or commit during plan execution; the user owns Git integration.",
+      "affected_tasks": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    },
+    {
+      "id": "A-002",
+      "recorded_at": "2026-07-30T00:00:00Z",
+      "decision": "Use this machine-readable ledger as runtime authority instead of mutating canonical plan checkboxes.",
+      "affected_tasks": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    }
+  ],
+  "tasks": [
+    {"id": 1, "state": "completed", "contract": ".opencode/context/tasks/task-01.md", "allowed_files": ["orchestrator/requirements.txt", "orchestrator/agent.json", "orchestrator/telemetry.py", "orchestrator/config.py", "orchestrator/tests/test_config.py"], "evidence": {"red": [], "green": []}, "reviews": {"spec": {"status": "approved", "findings": []}, "quality": {"status": "approved", "findings": []}}, "next_action": "none"},
+    {"id": 2, "state": "completed", "contract": ".opencode/context/tasks/task-02.md", "allowed_files": ["orchestrator/perplexity_model.py", "orchestrator/tests/test_perplexity_model.py"], "evidence": {"red": [], "green": [{"recorded_at": "2026-07-30T00:00:00Z", "command": ".venv/bin/python -m pytest tests/test_perplexity_model.py -q", "cwd": "orchestrator", "exit_code": 0, "summary": "45 passed in 0.42s"}, {"recorded_at": "2026-07-30T00:00:00Z", "command": "git diff --check -- orchestrator/perplexity_model.py orchestrator/tests/test_perplexity_model.py", "cwd": ".", "exit_code": 0, "summary": "No whitespace errors"}]}, "reviews": {"spec": {"status": "approved", "findings": []}, "quality": {"status": "approved", "findings": []}}, "next_action": "none"},
+    {"id": 3, "state": "pending", "contract": ".opencode/context/tasks/task-03.md", "allowed_files": ["orchestrator/perplexity_operations.py", "orchestrator/tests/test_perplexity_operations.py"], "evidence": {"red": [], "green": []}, "reviews": {"spec": {"status": "pending", "findings": []}, "quality": {"status": "pending", "findings": []}}, "next_action": "Implement Task 3 with TDD"},
+    {"id": 4, "state": "pending", "contract": ".opencode/context/tasks/task-04.md", "allowed_files": ["orchestrator/memory.py", "orchestrator/tests/test_memory.py"], "evidence": {"red": [], "green": []}, "reviews": {"spec": {"status": "pending", "findings": []}, "quality": {"status": "pending", "findings": []}}, "next_action": "Wait for Task 3"},
+    {"id": 5, "state": "pending", "contract": ".opencode/context/tasks/task-05.md", "allowed_files": ["orchestrator/mcp_config.py", "orchestrator/pophive_sync.py", "orchestrator/tests/test_mcp_config.py", "orchestrator/tests/test_pophive_sync.py", "scripts/sync-pophive.sh", "package.json", ".gitignore"], "evidence": {"red": [], "green": []}, "reviews": {"spec": {"status": "pending", "findings": []}, "quality": {"status": "pending", "findings": []}}, "next_action": "Wait for Task 4"},
+    {"id": 6, "state": "pending", "contract": ".opencode/context/tasks/task-06.md", "allowed_files": ["orchestrator/graph_activity.py", "orchestrator/tests/test_graph_activity.py", "orchestrator/tests/fixtures/graph_events.json"], "evidence": {"red": [], "green": []}, "reviews": {"spec": {"status": "pending", "findings": []}, "quality": {"status": "pending", "findings": []}}, "next_action": "Verify graph prerequisite after Task 5"},
+    {"id": 7, "state": "pending", "contract": ".opencode/context/tasks/task-07.md", "allowed_files": ["orchestrator/agent_runtime.py", "orchestrator/tests/test_agent_runtime.py"], "evidence": {"red": [], "green": []}, "reviews": {"spec": {"status": "pending", "findings": []}, "quality": {"status": "pending", "findings": []}}, "next_action": "Wait for Task 6"},
+    {"id": 8, "state": "pending", "contract": ".opencode/context/tasks/task-08.md", "allowed_files": ["orchestrator/workflow.py", "orchestrator/tests/test_workflow.py"], "evidence": {"red": [], "green": []}, "reviews": {"spec": {"status": "pending", "findings": []}, "quality": {"status": "pending", "findings": []}}, "next_action": "Wait for Task 7"},
+    {"id": 9, "state": "pending", "contract": ".opencode/context/tasks/task-09.md", "allowed_files": ["orchestrator/compare_workflow.py", "orchestrator/tests/test_compare_workflow.py"], "evidence": {"red": [], "green": []}, "reviews": {"spec": {"status": "pending", "findings": []}, "quality": {"status": "pending", "findings": []}}, "next_action": "Wait for Task 8"},
+    {"id": 10, "state": "pending", "contract": ".opencode/context/tasks/task-10.md", "allowed_files": ["orchestrator/run_worker.py", "orchestrator/tests/test_run_worker.py"], "evidence": {"red": [], "green": []}, "reviews": {"spec": {"status": "pending", "findings": []}, "quality": {"status": "pending", "findings": []}}, "next_action": "Wait for Task 9"},
+    {"id": 11, "state": "pending", "contract": ".opencode/context/tasks/task-11.md", "allowed_files": ["orchestrator/server.py", "orchestrator/tests/test_server.py"], "evidence": {"red": [], "green": []}, "reviews": {"spec": {"status": "pending", "findings": []}, "quality": {"status": "pending", "findings": []}}, "next_action": "Wait for Task 10"},
+    {"id": 12, "state": "pending", "contract": ".opencode/context/tasks/task-12.md", "allowed_files": ["orchestrator/tests/test_replay.py", "orchestrator/tests/test_restart_integration.py", "orchestrator/tests/histories/chat.json", "orchestrator/tests/histories/tool.json", "orchestrator/tests/histories/approval.json", "orchestrator/tests/histories/graph.json", "orchestrator/tests/histories/continue_as_new.json"], "evidence": {"red": [], "green": []}, "reviews": {"spec": {"status": "pending", "findings": []}, "quality": {"status": "pending", "findings": []}}, "next_action": "Wait for Task 11"},
+    {"id": 13, "state": "pending", "contract": ".opencode/context/tasks/task-13.md", "allowed_files": ["orchestrator/run_workflow.py", "orchestrator/README.md", "orchestrator/tests/test_smoke_client.py"], "evidence": {"red": [], "green": []}, "reviews": {"spec": {"status": "pending", "findings": []}, "quality": {"status": "pending", "findings": []}}, "next_action": "Wait for Task 12"},
+    {"id": 14, "state": "pending", "contract": ".opencode/context/tasks/task-14.md", "allowed_files": [], "evidence": {"red": [], "green": []}, "reviews": {"spec": {"status": "pending", "findings": []}, "quality": {"status": "pending", "findings": []}}, "next_action": "Wait for Task 13"}
+  ]
+}

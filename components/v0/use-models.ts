@@ -15,13 +15,11 @@ export type UseModelsResult = {
 
 export function useModels(): UseModelsResult {
   const [models, setModels] = useState<PerplexityModel[]>([])
-  const [status, setStatus] = useState<UseModelsResult["status"]>("idle")
+  const [status, setStatus] = useState<UseModelsResult["status"]>("loading")
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    setStatus("loading")
-
     fetch("/api/models")
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load models (${res.status})`)

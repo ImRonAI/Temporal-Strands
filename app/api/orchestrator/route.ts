@@ -29,6 +29,30 @@ const IMAGE_FORMATS: Record<string, "png" | "jpeg" | "gif" | "webp"> = {
 
 type TurnImage = { format: "png" | "jpeg" | "gif" | "webp"; data: string }
 
+type GraphEnvelope = {
+  protocol_version: string
+  event_id?: string | null
+  sequence?: number | null
+  run_id: string
+  node_path: Array<{ id: string; kind: string }>
+  formation_kind: string
+  node_kind: string
+  event_type: string
+  provisional: boolean
+  payload: unknown
+}
+
+function isGraphEnvelope(data: unknown): data is GraphEnvelope {
+  if (!data || typeof data !== "object") return false
+  const value = data as Partial<GraphEnvelope>
+  return (
+    value.protocol_version === "1.0" &&
+    typeof value.run_id === "string" &&
+    typeof value.event_type === "string" &&
+    Array.isArray(value.node_path)
+  )
+}
+
 function lastUserMessage(messages: UIMessage[]): UIMessage | undefined {
   return [...messages].reverse().find((m) => m.role === "user")
 }
@@ -83,21 +107,10 @@ type OrchestratorEvent =
       | { messageStop: { stopReason: string } }
       | { metadata: unknown }
     ))
-  | { topic: "thinking"; text: string }
+  // Text deltas from thinking_activity.py: `data` is a fragment, `cycle`/`total`
+  // locate it. Non-string `data` is the tool's final ToolResult.
+  | { topic: "thinking"; tool_use?: { name?: string }; data: unknown; cycle?: number; total?: number }
   | { topic: "approval"; reason: string | null }
-  // A create_agent_response sub-agent, streamed live from inside that
-  // activity (orchestrator/perplexity_tools.py). Perplexity only exposes a
-  // background run's stream on the create call itself — retrieve has no
-  // stream option — so this is the only way to watch a sub-agent work.
-  | {
-      topic: "subagent"
-      subagent_id: string | null
-      status?: "created" | "completed"
-      delta?: string
-      reasoning?: string
-      output_item?: Record<string, unknown>
-      error?: string
-    }
   | {
       topic: "tool_results"
       tool_use_id: string
@@ -197,17 +210,9 @@ export async function POST(req: Request) {
         // Thought is for exactly this, not the single-block Reasoning
         // component) — one data-thinking-cycle part per cycle, each its
         // own ChainOfThoughtStep on the client (components/v0/agent-activity.tsx).
-        let thinkingCycleIndex = 0
-        // Accumulated sub-agent state, keyed by Perplexity response id.
-        type SubagentState = {
-          id: string
-          text: string
-          reasoning: string[]
-          outputItems: Record<string, unknown>[]
-          status: string
-          error?: string
-        }
-        const subagentState = new Map<string, SubagentState>()
+        // Accumulated text per cycle. Keyed by the activity's `cycle` number so
+        // one step renders per cycle, not per token.
+        const thinkingCycles = new Map<number, string>()
 
         const reader = turnRes.body.getReader()
         const decoder = new TextDecoder()
@@ -261,34 +266,6 @@ export async function POST(req: Request) {
             // the same reasoning stream.
             // Live sub-agent output. Accumulated per response id and
             // re-emitted as one data part per sub-agent, so the client
-            // reconciles by id and the card grows in place instead of
-            // stacking a new one per delta.
-            if ("topic" in event && event.topic === "subagent") {
-              const id = event.subagent_id ?? "pending"
-              const state = subagentState.get(id) ?? {
-                id,
-                text: "",
-                reasoning: [] as string[],
-                outputItems: [] as Record<string, unknown>[],
-                status: "running" as string,
-              }
-              if (event.delta) state.text += event.delta
-              if (event.reasoning) state.reasoning.push(event.reasoning)
-              if (event.output_item) state.outputItems.push(event.output_item)
-              if (event.error) {
-                state.status = "failed"
-                state.error = event.error
-              } else if (event.status) {
-                state.status = event.status === "completed" ? "completed" : "running"
-              }
-              subagentState.set(id, state)
-              writer.write({
-                type: "data-subagent",
-                id: `subagent-${id}`,
-                data: state,
-              })
-              continue
-            }
 
             // Human-in-the-loop prompt, pushed by the workflow. A single
             // reconciled part: the id is stable, so the reason appearing and
@@ -303,11 +280,26 @@ export async function POST(req: Request) {
             }
 
             if ("topic" in event && event.topic === "thinking") {
-              writer.write({
-                type: "data-thinking-cycle",
-                id: `thinking-${thinkingCycleIndex++}`,
-                data: { text: event.text },
-              })
+              // Text deltas carry a cycle number; append and rewrite that
+              // cycle's part. Non-string data is the tool's final ToolResult,
+              // already delivered as a tool result.
+              if (typeof event.data === "string") {
+                const cycle = typeof event.cycle === "number" ? event.cycle : 1
+                const text = (thinkingCycles.get(cycle) ?? "") + event.data
+                thinkingCycles.set(cycle, text)
+                writer.write({
+                  type: "data-thinking-cycle",
+                  id: `thinking-${cycle}`,
+                  data: { text },
+                })
+              } else if (isGraphEnvelope(event.data)) {
+                const nodeId = event.data.node_path.at(-1)?.id ?? event.data.formation_kind
+                writer.write({
+                  type: "data-graph-event",
+                  id: `graph-${event.data.run_id}-${nodeId}-${event.data.event_type}`,
+                  data: event.data,
+                })
+              }
               continue
             }
 

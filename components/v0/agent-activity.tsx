@@ -1,7 +1,7 @@
 "use client"
 
 import { DefaultGeneratedFile, type DynamicToolUIPart, type ReasoningUIPart, type UIMessage } from "ai"
-import { BrainIcon, FileIcon, WrenchIcon } from "lucide-react"
+import { BrainIcon, FileIcon, GitBranchIcon, WrenchIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -92,6 +92,27 @@ type SandboxResultsItem = {
   results?: { stdout?: string; stderr?: string; exit_code?: number; status?: string }[]
 }
 type OutputItem = SearchResultsItem | SandboxResultsItem | { type?: string; filename?: string }
+
+type GraphEnvelope = {
+  run_id: string
+  node_path: Array<{ id: string; kind: string }>
+  formation_kind: string
+  node_kind: string
+  event_type: string
+  payload: unknown
+}
+
+type GraphEventPart = {
+  type: "data-graph-event"
+  id?: string
+  data: GraphEnvelope
+}
+
+function graphEventStatus(eventType: string): "active" | "complete" {
+  return eventType === "run.accepted" || eventType.endsWith(".started")
+    ? "active"
+    : "complete"
+}
 
 // SandboxResultsOutputItem.status is its own real enum ("in_progress" |
 // "completed" | "failed" | "timed_out" — verified against the installed
@@ -280,79 +301,8 @@ function AgentChainCard({ chain }: { chain: AgentChain }) {
   )
 }
 
-// A sub-agent's LIVE output, accumulated by app/api/orchestrator/route.ts from
-// the "subagent" stream topic. Distinct from AgentChainCard, which renders the
-// finished JSON a create/retrieve tool call returned — this is what the
-// sub-agent is producing right now, while it produces it.
-type SubagentState = {
-  id: string
-  text: string
-  reasoning: string[]
-  outputItems: OutputItem[]
-  status: string
-  error?: string
-}
 
-function collectSubagents(parts: UIMessage["parts"]): SubagentState[] {
-  return parts
-    .filter(
-      (p): p is { type: "data-subagent"; id?: string; data: SubagentState } =>
-        p.type === "data-subagent"
-    )
-    .map((p) => p.data)
-}
 
-function LiveSubagentCard({ state }: { state: SubagentState }) {
-  const searchResults = state.outputItems
-    .filter((item): item is SearchResultsItem => item.type === "search_results")
-    .flatMap((item) => item.results ?? [])
-  const sandboxItems = state.outputItems.filter(
-    (item): item is SandboxResultsItem => item.type === "sandbox_results"
-  )
-
-  return (
-    <Agent className="border-white/10 bg-white/[0.02] backdrop-blur-sm">
-      <AgentHeader model={state.id} name={`Sub-agent · ${state.status}`} />
-      <AgentContent>
-        {state.reasoning.map((line, i) => (
-          <ChainOfThoughtStep
-            key={`r-${i}`}
-            icon={BrainIcon}
-            label={line}
-            status={state.status === "running" ? "active" : "complete"}
-          />
-        ))}
-
-        {searchResults.length > 0 && (
-          <ChainOfThoughtSearchResults>
-            {searchResults.slice(0, 8).map((r, i) => (
-              <ChainOfThoughtSearchResult key={`${r.url}-${i}`}>
-                {r.title ?? r.url}
-              </ChainOfThoughtSearchResult>
-            ))}
-          </ChainOfThoughtSearchResults>
-        )}
-
-        {sandboxItems.map((item, i) => (
-          <Sandbox key={i} className="border-white/10 bg-white/[0.03]">
-            <SandboxHeader
-              title="Sandbox execution"
-              state={sandboxStatusToToolState(item.status)}
-            />
-            <SandboxContent>
-              <CodeBlock code={item.code ?? ""} language={item.language ?? "python"} />
-            </SandboxContent>
-          </Sandbox>
-        ))}
-
-        {/* Streams token by token, through the same renderer the main answer
-            uses, so partial markdown stays safe mid-stream. */}
-        {state.text && <MessageResponse>{state.text}</MessageResponse>}
-        {state.error && <p className="text-destructive text-xs">{state.error}</p>}
-      </AgentContent>
-    </Agent>
-  )
-}
 
 function ListFilesArtifacts({ part }: { part: DynamicToolUIPart }) {
   if (part.state !== "output-available") return null
@@ -434,15 +384,17 @@ export function AgentActivity({
     (p): p is { type: `data-thinking-cycle`; id?: string; data: { text: string } } =>
       p.type === "data-thinking-cycle"
   )
+  const graphEvents = parts.filter(
+    (p): p is GraphEventPart => p.type === "data-graph-event"
+  )
 
-  const subagents = collectSubagents(parts)
 
   if (
     !reasoningText &&
     thinkingCycles.length === 0 &&
+    graphEvents.length === 0 &&
     toolParts.length === 0 &&
-    thinkParts.length === 0 &&
-    subagents.length === 0
+    thinkParts.length === 0
   ) {
     return null
   }
@@ -501,16 +453,19 @@ export function AgentActivity({
           />
         )}
 
-        {subagents.map((state) => (
-          <ChainOfThoughtStep
-            key={state.id}
-            icon={WrenchIcon}
-            label="Sub-agent"
-            status={state.status === "running" ? "active" : "complete"}
-          >
-            <LiveSubagentCard state={state} />
-          </ChainOfThoughtStep>
-        ))}
+        {graphEvents.map((part, i) => {
+          const node = part.data.node_path.at(-1)
+          return (
+            <ChainOfThoughtStep
+              key={part.id ?? `${part.data.run_id}-${i}`}
+              icon={GitBranchIcon}
+              label={node?.id ?? part.data.formation_kind}
+              description={`${part.data.event_type} · ${node?.kind ?? part.data.node_kind}`}
+              status={graphEventStatus(part.data.event_type)}
+            />
+          )
+        })}
+
 
         {chains.map((chain) => {
           const latestState = chain.polls.at(-1)?.state ?? chain.create.state

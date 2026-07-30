@@ -1,0 +1,50 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-07-30T00:00:00Z",
+  "libraries": {
+    "strands-temporal": {
+      "files": [
+        {
+          "filename": "strands-temporal/native-feature-compatibility.md",
+          "topic": "Native multi-agent features and Temporal compatibility",
+          "tech_stack": "Python, Temporal Workflows, Strands Agents",
+          "fetched": "2026-07-30T00:00:00Z",
+          "source": "Context7 API and official documentation"
+        }
+      ]
+    },
+    "temporalio": {
+      "files": [
+        {
+          "filename": "temporalio/production-long-horizon-chat.md",
+          "topic": "Production long-horizon chat lifecycle, messaging, reliability, streams, and fairness",
+          "tech_stack": "Python Temporal workflows with Strands Agents",
+          "fetched": "2026-07-30T00:00:00Z",
+          "source": "Context7 API (official Temporal SDK and documentation indexes)"
+        }
+      ]
+    },
+    "strands-agents": {
+      "files": [
+        {
+          "filename": "strands-agents/custom-model-stream-contract-2026-07-30.md",
+          "topic": "Custom Model provider signatures and StreamEvent wire dictionaries",
+          "tech_stack": "Python custom Model provider for Perplexity Responses streaming",
+          "fetched": "2026-07-30T00:00:00Z",
+          "source": "Context7 API and official package source"
+        }
+      ]
+    },
+    "perplexity-agent-api": {
+      "files": [
+        {
+          "filename": "perplexity-agent-api/async-responses-streaming-2026-07-30.md",
+          "topic": "Async Responses creation, tools, function replay, SSE fields, completion, failure, and exceptions",
+          "tech_stack": "Async Python custom Strands Model provider",
+          "fetched": "2026-07-30T00:00:00Z",
+          "source": "Official documentation and Python SDK source"
+        }
+      ]
+    }
+  }
+}

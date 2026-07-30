@@ -40,7 +40,6 @@ export default function Page() {
   // Reused across turns so they land as Updates on the same durable
   // orchestrator session (see orchestrator/workflow.py) instead of starting
   // a fresh one every message.
-  const [sessionId, setSessionId] = useState<string | undefined>(undefined)
 
   const { messages, setMessages, status, sendMessage, stop } = useChat({
     transport: new DefaultChatTransport({ api: "/api/orchestrator" }),
@@ -60,24 +59,23 @@ export default function Page() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId }),
       })
-      setSessionId(undefined)
       setMessages([])
     }
   }
 
-  // The orchestrator route reports the session id it started (or reused) as
-  // a custom `data-session` part on the assistant message; pick it up so
-  // the next turn continues the same session instead of starting a new one.
-  useEffect(() => {
-    for (const message of messages) {
-      for (const part of message.parts) {
+  // The orchestrator route reports the durable session as a `data-session`
+  // part. It is message data, so derive it during render instead of mirroring
+  // it into component state with an Effect.
+  const sessionId = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      for (const part of messages[i].parts) {
         if (part.type === "data-session") {
-          const data = (part as { data: { sessionId?: string } }).data
-          if (data?.sessionId) setSessionId(data.sessionId)
+          return (part as { data: { sessionId?: string } }).data.sessionId
         }
       }
     }
-  }, [messages])
+    return undefined
+  })()
 
   // A ChatWorkflow execution runs until it is signalled to end, so a session
   // the browser walks away from would otherwise stay live in Temporal for

@@ -13,5 +13,6 @@ __v0_jsx-dev-runtime.ts
 node_modules
 .next/
 .DS_Store
+.worktrees/
 # Graph tool durable state (SQLite store + session dirs)
 orchestrator/.graph-tool/

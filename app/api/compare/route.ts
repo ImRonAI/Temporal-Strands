@@ -6,7 +6,18 @@
 // per model with the same tools and the same AgentConfig identity as a chat
 // session (see orchestrator/compare_workflow.py).
 
+import { jsonSchema, parseJsonEventStream } from "ai"
+
 export const maxDuration = 1800
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CompareUpstreamEvent = Record<string, any>
+
+// Structural handlers below discriminate the frames; this only satisfies
+// parseJsonEventStream's schema requirement.
+const COMPARE_EVENT_SCHEMA = jsonSchema<CompareUpstreamEvent>({
+  type: "object",
+})
 
 const ORCHESTRATOR_URL =
   process.env.ORCHESTRATOR_URL ?? "http://localhost:8787"
@@ -49,6 +60,12 @@ export async function POST(req: Request) {
       const started = new Set<string>()
       const toolNames: Record<string, string> = {}
       const toolInputs: Record<string, unknown> = {}
+      // The open tool call per model, tracked explicitly. Recovering it from
+      // Object.keys insertion order misattributes inputs whenever a model
+      // interleaves two tool blocks, and the id surgery it required broke on
+      // any model id containing ":". The sibling orchestrator route already
+      // tracks this the same way.
+      const openTool: Record<string, { id: string; name: string }> = {}
       const thinkCount: Record<string, number> = {}
       const ensureStarted = (model: string) => {
         if (!started.has(model)) {
@@ -70,20 +87,18 @@ export async function POST(req: Request) {
           )
         }
 
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ""
-
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split("\n")
-          buffer = lines.pop() ?? ""
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue
-            const event = JSON.parse(line.slice("data: ".length))
+        // parseJsonEventStream is the AI SDK's own SSE reader: decoding,
+        // event-source framing, [DONE], and safe parsing. The hand-rolled
+        // version split on "\n" only, so a \r\n upstream left a trailing
+        // \r and JSON.parse threw -- which the outer catch then reported as
+        // a failure for every selected model.
+        for await (const parsed of parseJsonEventStream({
+          stream: res.body,
+          schema: COMPARE_EVENT_SCHEMA,
+        })) {
+          if (!parsed.success) continue
+          {
+            const event = parsed.value as CompareUpstreamEvent
 
             // Terminal frame: carries every model's final text, so any model
             // whose deltas were missed still renders a complete answer.
@@ -150,6 +165,7 @@ export async function POST(req: Request) {
             const toolUse = event?.contentBlockStart?.start?.toolUse
             if (toolUse) {
               toolNames[`${model}:${toolUse.toolUseId}`] = toolUse.name
+              openTool[model] = { id: toolUse.toolUseId, name: toolUse.name }
               continue
             }
             const delta = event?.contentBlockDelta?.delta
@@ -158,19 +174,18 @@ export async function POST(req: Request) {
             } else if (delta?.reasoningContent?.text) {
               send({ model, type: "part", part: { type: "reasoning", text: delta.reasoningContent.text } })
             } else if (delta?.toolUse?.input !== undefined) {
-              const ids = Object.keys(toolNames).filter((k) => k.startsWith(`${model}:`))
-              const last = ids[ids.length - 1]
-              if (last) {
+              const open = openTool[model]
+              if (open) {
                 let input: unknown = delta.toolUse.input
                 try { input = JSON.parse(delta.toolUse.input) } catch {}
-                toolInputs[last] = input
+                toolInputs[`${model}:${open.id}`] = input
                 send({
                   model,
                   type: "part",
                   part: {
                     type: "dynamic-tool",
-                    toolCallId: last.slice(model.length + 1),
-                    toolName: toolNames[last],
+                    toolCallId: open.id,
+                    toolName: open.name,
                     state: "input-available",
                     input,
                   },

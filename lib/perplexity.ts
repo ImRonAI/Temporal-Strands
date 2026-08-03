@@ -12,7 +12,10 @@ export type PerplexityModel = {
   owned_by: string
 }
 
-// GET /v1/models is unauthenticated, so this can be called without an API key.
+// GET /v1/models requires a bearer token as of 2026-08-02 — it returns 401
+// without one. This runs server-side only (from app/api/models/route.ts), so
+// the key never reaches the browser.
+//
 // This is the only source of model ids anywhere in the app — never hardcode a
 // model list.
 //
@@ -21,7 +24,12 @@ export type PerplexityModel = {
 // existed only for the deleted /api/chat route. All model calls now go through
 // the orchestrator, which uses Perplexity's own SDK directly.
 export async function listPerplexityModels(): Promise<PerplexityModel[]> {
+  const apiKey = process.env.PERPLEXITY_API_KEY
+  if (!apiKey) {
+    throw new Error("PERPLEXITY_API_KEY is not set")
+  }
   const res = await fetch(`${PERPLEXITY_BASE_URL}/models`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
     next: { revalidate: 300 },
   })
   if (!res.ok) {

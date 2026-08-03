@@ -1,7 +1,7 @@
 "use client"
 
 import { useChat } from "@ai-sdk/react"
-import { DefaultChatTransport } from "ai"
+import { isFileUIPart, isTextUIPart, DefaultChatTransport } from "ai"
 import { useEffect, useState } from "react"
 
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input"
@@ -26,6 +26,8 @@ import { BlurpleBackground } from "@/components/v0/blurple-background"
 import { Composer } from "@/components/v0/composer"
 import { SiteHeader } from "@/components/v0/site-header"
 
+const LINK_SAFETY = { enabled: false } as const
+
 const SUGGESTIONS = [
   "A pricing page with a yearly toggle",
   "An analytics dashboard with charts",
@@ -43,6 +45,12 @@ export default function Page() {
 
   const { messages, setMessages, status, sendMessage, stop } = useChat({
     transport: new DefaultChatTransport({ api: "/api/orchestrator" }),
+    // Without this every token re-renders the whole conversation: the two
+    // full messages x parts scans below, plus AgentActivity's filter passes
+    // for every assistant message. The default is undefined, which the SDK
+    // documents as "disables throttling". Streamdown's fade-in is CSS driven
+    // by isAnimating, so coalescing updates does not affect smoothness.
+    throttle: 50,
   })
 
   // A session's model is fixed when the session starts: a TemporalAgent's
@@ -164,9 +172,27 @@ export default function Page() {
                       />
                     )}
                     {message.parts.map((part, i) => {
-                      if (part.type === "text") {
+                      if (isTextUIPart(part)) {
                         return (
-                          <MessageResponse key={`${message.id}-${i}`}>
+                          // isAnimating drives Streamdown's own streaming
+                          // affordances — token fade-in and the caret. It
+                          // defaults to false, so without passing it text just
+                          // appears in silent chunks. MessageResponse is memo'd
+                          // on children + isAnimating, so this is the one prop
+                          // that must be live.
+                          <MessageResponse
+                            key={`${message.id}-${i}`}
+                            isAnimating={
+                              status === "streaming" &&
+                              messageIndex === messages.length - 1
+                            }
+                            // Streamdown's link-safety interstitial renders a
+                            // modal <div> inside the <p> that holds the link,
+                            // which React reports as a hydration error. These
+                            // are model-authored citations in our own UI, so
+                            // the interstitial buys nothing.
+                            linkSafety={LINK_SAFETY}
+                          >
                             {part.text}
                           </MessageResponse>
                         )
@@ -175,7 +201,7 @@ export default function Page() {
                       // so the conversation reflects what was actually sent to
                       // the agent. useChat stores them as data: URLs, which is
                       // exactly what Image renders from.
-                      if (part.type === "file") {
+                      if (isFileUIPart(part)) {
                         return (
                           <Image
                             key={`${message.id}-${i}`}
@@ -263,8 +289,15 @@ export default function Page() {
               onStop={stop}
             />
 
+            {/* Suggestions is a horizontally scrolling ScrollArea whose inner
+                row is `w-max flex-nowrap`. `justify-center` cannot center that
+                row — a w-max element is exactly as wide as its content, so
+                there is no free space to distribute, and the row simply
+                overflowed with the last chip clipped off-screen behind a
+                hidden scrollbar. Wrapping instead keeps every chip reachable
+                and lets them actually center. */}
             <div className="mt-5">
-              <Suggestions className="justify-center">
+              <Suggestions className="!w-full flex-wrap justify-center">
                 {SUGGESTIONS.map((suggestion) => (
                   <Suggestion
                     key={suggestion}

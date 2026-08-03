@@ -13,6 +13,32 @@ export type UseModelsResult = {
   error: string | null
 }
 
+// One in-flight request for the whole page, shared by every caller.
+//
+// The catalog is process-global and immutable for the life of the tab, but the
+// hook used to fetch per component instance: CompareView calls it once and
+// then renders a ModelPicker per pane, each calling it again -- three
+// concurrent identical requests with two panes, five with four. It also
+// refired whenever Composer remounted, which app/page.tsx does every time
+// `hasConversation` flips.
+let catalog: Promise<PerplexityModel[]> | null = null
+
+function loadModels(): Promise<PerplexityModel[]> {
+  catalog ??= fetch("/api/models")
+    .then((res) => {
+      if (!res.ok) throw new Error(`Failed to load models (${res.status})`)
+      return res.json() as Promise<{ data: PerplexityModel[] }>
+    })
+    .then((body) => body.data ?? [])
+    .catch((error) => {
+      // Clear on failure so a later mount can retry rather than replaying the
+      // rejection forever.
+      catalog = null
+      throw error
+    })
+  return catalog
+}
+
 export function useModels(): UseModelsResult {
   const [models, setModels] = useState<PerplexityModel[]>([])
   const [status, setStatus] = useState<UseModelsResult["status"]>("loading")
@@ -20,14 +46,10 @@ export function useModels(): UseModelsResult {
 
   useEffect(() => {
     let cancelled = false
-    fetch("/api/models")
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load models (${res.status})`)
-        return res.json() as Promise<{ data: PerplexityModel[] }>
-      })
-      .then((body) => {
+    loadModels()
+      .then((data) => {
         if (cancelled) return
-        setModels(body.data ?? [])
+        setModels(data)
         setStatus("ready")
       })
       .catch((err) => {

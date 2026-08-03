@@ -20,6 +20,16 @@ export const metadata: Metadata = {
   description:
     'Describe it, and ship it. An AI design engineer that turns prompts into production-ready interfaces.',
   generator: 'v0.app',
+  // Without this the browser falls back to requesting /favicon.ico, which does
+  // not exist and 404s on every page load. These files are already in public/.
+  icons: {
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/icon-light-32x32.png', media: '(prefers-color-scheme: light)' },
+      { url: '/icon-dark-32x32.png', media: '(prefers-color-scheme: dark)' },
+    ],
+    apple: '/apple-icon.png',
+  },
 }
 
 export const viewport: Viewport = {

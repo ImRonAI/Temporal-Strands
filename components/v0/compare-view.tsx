@@ -222,11 +222,16 @@ export function CompareView() {
           modelsToShow.length >= 4 && "md:grid-cols-2 xl:grid-cols-4"
         )}
       >
-        {modelsToShow.map((model) => {
+        {/* Keyed by position, not model id: the same model may legitimately
+            occupy two panes, and duplicate keys make React drop one of them.
+            The picker row above is keyed the same way. Panes are still looked
+            up by model id, so duplicates mirror each other's output — which is
+            what runCompare's de-duplicated request produces. */}
+        {modelsToShow.map((model, index) => {
           const pane = panes[model]
           return (
             <div
-              key={model}
+              key={index}
               className="flex min-h-[280px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02] backdrop-blur-sm"
             >
               <div className="flex items-center justify-between gap-2 border-b border-white/10 px-4 py-2.5">

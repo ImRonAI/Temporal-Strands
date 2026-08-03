@@ -1,10 +1,21 @@
 import {
   createUIMessageStream,
   createUIMessageStreamResponse,
+  isFileUIPart,
+  isTextUIPart,
+  jsonSchema,
+  parseJsonEventStream,
   type UIMessage,
 } from "ai"
 
 import { DEFAULT_MODEL } from "@/lib/perplexity"
+
+// The orchestrator's frames are a discriminated union validated structurally
+// by the handlers below, so this only satisfies parseJsonEventStream's schema
+// requirement and carries the TypeScript type through.
+const ORCHESTRATOR_EVENT_SCHEMA = jsonSchema<OrchestratorEvent>({
+  type: "object",
+})
 
 // The orchestrator's model-call activities can legitimately run for up to
 // MODEL_SCHEDULE_TO_CLOSE_TIMEOUT (30 min, see orchestrator/workflow.py) —
@@ -29,38 +40,14 @@ const IMAGE_FORMATS: Record<string, "png" | "jpeg" | "gif" | "webp"> = {
 
 type TurnImage = { format: "png" | "jpeg" | "gif" | "webp"; data: string }
 
-type GraphEnvelope = {
-  protocol_version: string
-  event_id?: string | null
-  sequence?: number | null
-  run_id: string
-  node_path: Array<{ id: string; kind: string }>
-  formation_kind: string
-  node_kind: string
-  event_type: string
-  provisional: boolean
-  payload: unknown
-}
-
-function isGraphEnvelope(data: unknown): data is GraphEnvelope {
-  if (!data || typeof data !== "object") return false
-  const value = data as Partial<GraphEnvelope>
-  return (
-    value.protocol_version === "1.0" &&
-    typeof value.run_id === "string" &&
-    typeof value.event_type === "string" &&
-    Array.isArray(value.node_path)
-  )
-}
-
 function lastUserMessage(messages: UIMessage[]): UIMessage | undefined {
-  return [...messages].reverse().find((m) => m.role === "user")
+  return messages.findLast((m) => m.role === "user")
 }
 
 function messageText(message: UIMessage | undefined): string {
   if (!message) return ""
   return message.parts
-    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .filter(isTextUIPart)
     .map((p) => p.text)
     .join("")
 }
@@ -69,7 +56,7 @@ function messageImages(message: UIMessage | undefined): TurnImage[] {
   if (!message) return []
   const images: TurnImage[] = []
   for (const part of message.parts) {
-    if (part.type !== "file") continue
+    if (!isFileUIPart(part)) continue
     const format = IMAGE_FORMATS[part.mediaType]
     // Only image formats the Agent API accepts are forwarded; anything else
     // would be silently dropped downstream, so the composer restricts the
@@ -91,8 +78,100 @@ function messageImages(message: UIMessage | undefined): TurnImage[] {
 // separate one — don't invent shapes here that the backend doesn't send.
 // "tool_results" carries each tool's output, sourced from the ToolResultEvents
 // Agent.stream_async yields (see ChatWorkflow._invoke).
+// Native server-side tool payloads, forwarded verbatim from the Agent API by
+// PerplexityModel (`{"perplexity": <SDK payload>}` on the events topic). Two
+// families, both discriminated by `type`:
+//
+//   response.reasoning.*  streaming activity: search_queries, search_results,
+//                         fetch_url_queries, fetch_url_results, started,
+//                         stopped, plus response.skill.loaded
+//   output items          terminal results: search_results, fetch_url_results,
+//                         people_search_results, finance_results,
+//                         sandbox_results, mcp_list_tools, mcp_call,
+//                         skill_loaded, share_file
+//
+// Field names are the Agent API's own (docs.perplexity.ai, POST /v1/agent).
+type PerplexitySearchResult = {
+  id: number
+  url: string
+  title: string
+  snippet: string
+  date?: string | null
+  last_updated?: string | null
+}
+
+type PerplexityUrlContent = { url: string; title: string; snippet: string }
+
+type PerplexityNative =
+  | { type: "response.reasoning.search_queries"; queries: string[] }
+  | { type: "response.reasoning.search_results"; results: PerplexitySearchResult[] }
+  | { type: "response.reasoning.fetch_url_queries"; urls: string[] }
+  | { type: "response.reasoning.fetch_url_results"; contents: PerplexityUrlContent[] }
+  | {
+      type: "response.reasoning.finance_search_queries"
+      tickers?: string[]
+      categories?: string[]
+    }
+  | {
+      type: "response.reasoning.finance_search_results"
+      results: Array<{ category: string; content: string; sources?: string[] }>
+    }
+  | { type: "response.reasoning.started" | "response.reasoning.stopped"; thought?: string | null }
+  | { type: "response.skill.loaded" | "skill_loaded"; name: string }
+  | { type: "search_results"; queries?: string[]; results: PerplexitySearchResult[] }
+  | { type: "people_search_results"; queries?: string[]; results: PerplexitySearchResult[] }
+  | {
+      type: "finance_results"
+      tickers?: string[]
+      categories?: string[]
+      results: Array<{ category: string; content: string; sources?: string[]; tickers?: string[] }>
+    }
+  | { type: "fetch_url_results"; contents: PerplexityUrlContent[] }
+  | {
+      type: "sandbox_results"
+      call_id: string
+      container_id?: string | null
+      language: "python" | "bash"
+      code: string
+      status: "completed" | "timed_out" | "failed" | "in_progress"
+      results: Array<{
+        stdout: string
+        stderr: string
+        exit_code: number
+        duration_ms: number
+        status: string
+      }>
+    }
+  | {
+      type: "mcp_list_tools"
+      id: string
+      server_label: string
+      tools: Array<{ name: string; description?: string | null }>
+      error?: string | null
+    }
+  | {
+      type: "mcp_call"
+      id: string
+      server_label: string
+      name: string
+      arguments: string
+      output?: string | null
+      error?: string | null
+    }
+  | {
+      type: "share_file"
+      call_id: string
+      file_id?: string | null
+      filename?: string | null
+      size_bytes?: number | null
+      url?: string | null
+      error?: string | null
+    }
+
 type OrchestratorEvent =
-  | ({ topic: "events" } & (
+  // Both agents publish identical StreamEvent shapes; the topic is what
+  // distinguishes the reasoning stage from the orchestrator.
+  | ({ topic: "events" | "thinking" } & (
       | { contentBlockStart: { start: { toolUse?: { name: string; toolUseId: string } } } }
       | {
           contentBlockDelta: {
@@ -106,6 +185,7 @@ type OrchestratorEvent =
       | { messageStart: { role: string } }
       | { messageStop: { stopReason: string } }
       | { metadata: unknown }
+      | { perplexity: PerplexityNative }
     ))
   // Text deltas from thinking_activity.py: `data` is a fragment, `cycle`/`total`
   // locate it. Non-string `data` is the tool's final ToolResult.
@@ -146,9 +226,17 @@ export async function POST(req: Request) {
       // Message Stream protocol violation the client renders as a duplicated
       // or permanently-pending block.
       const textId = "response"
-      const reasoningId = "reasoning"
       let textStarted = false
-      let reasoningStarted = false
+
+      // A NEW reasoning part per contiguous run of reasoning, not one part for
+      // the whole turn. Reusing a single id made every delta reconcile into
+      // one block pinned at its first position, so the reasoning stage's
+      // thinking rendered as a single lump after the tools it interleaved
+      // with. Each run gets its own id, and any tool activity closes the open
+      // run, so Chain of Thought shows thinking and tools in the true order
+      // they happened.
+      let reasoningSeq = 0
+      let openReasoningId: string | null = null
 
       const ensureText = () => {
         if (!textStarted) {
@@ -157,9 +245,19 @@ export async function POST(req: Request) {
         }
       }
       const ensureReasoning = () => {
-        if (!reasoningStarted) {
-          writer.write({ type: "reasoning-start", id: reasoningId })
-          reasoningStarted = true
+        if (openReasoningId === null) {
+          openReasoningId = `reasoning-${reasoningSeq++}`
+          writer.write({ type: "reasoning-start", id: openReasoningId })
+        }
+        return openReasoningId
+      }
+      // Called before any non-reasoning part is written, so the next reasoning
+      // delta opens a fresh block after it rather than appending to the one
+      // that came before.
+      const closeReasoning = () => {
+        if (openReasoningId !== null) {
+          writer.write({ type: "reasoning-end", id: openReasoningId })
+          openReasoningId = null
         }
       }
 
@@ -206,30 +304,59 @@ export async function POST(req: Request) {
         let openTool: { id: string; name: string } | undefined
         let gotAnyEvent = false
         let finalReply = ""
-        // Discrete, labeled steps (per AI Elements' own guidance: Chain of
-        // Thought is for exactly this, not the single-block Reasoning
-        // component) — one data-thinking-cycle part per cycle, each its
-        // own ChainOfThoughtStep on the client (components/v0/agent-activity.tsx).
-        // Accumulated text per cycle. Keyed by the activity's `cycle` number so
-        // one step renders per cycle, not per token.
-        const thinkingCycles = new Map<number, string>()
+        // Distinguishes successive native frames that carry no id of their own
+        // (the reasoning stream), so each renders as its own step.
+        let nativeSeq = 0
+        // parseJsonEventStream is the AI SDK's own SSE reader: it decodes,
+        // frames on the event-source protocol, drops [DONE], and safely
+        // parses each payload. Hand-rolling this missed \r\n framing.
+        const events = parseJsonEventStream({
+          stream: turnRes.body,
+          schema: ORCHESTRATOR_EVENT_SCHEMA,
+        })
 
-        const reader = turnRes.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ""
-
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buffer += decoder.decode(value, { stream: true })
-
-          const lines = buffer.split("\n")
-          buffer = lines.pop() ?? ""
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue
-            const event = JSON.parse(line.slice("data: ".length)) as OrchestratorEvent
+        for await (const parsed of events) {
+          if (!parsed.success) throw parsed.error
+          {
+            const event = parsed.value
             gotAnyEvent = true
+
+            // Native server-side tool activity, forwarded exactly as the Agent
+            // API sent it. Each payload becomes one reconciled data part keyed
+            // so repeats of the same call update in place rather than append —
+            // the sandbox emits several results against one call_id, and the
+            // reasoning stream repeats queries as it refines them.
+            if ("perplexity" in event) {
+              const native = event.perplexity
+              // mcp_list_tools is the MCP transport handshake -- the server
+              // announcing its catalog once per connection, identical every
+              // turn. It is not something either agent did.
+              if (native.type === "mcp_list_tools") continue
+              let id: string
+              switch (native.type) {
+                case "sandbox_results":
+                  id = `sandbox-${native.call_id}`
+                  break
+                case "mcp_call":
+                  id = `mcp-${native.id}`
+                  break
+                case "share_file":
+                  id = `file-${native.call_id}`
+                  break
+                default:
+                  id = `native-${native.type}-${nativeSeq++}`
+              }
+              // share_file carries a relative Agent API path the browser
+              // cannot call (it needs the API key). Point it at the
+              // orchestrator's proxy instead, which adds auth server-side.
+              const data =
+                native.type === "share_file" && native.url
+                  ? { ...native, url: `/api/orchestrator/file?path=${encodeURIComponent(native.url)}` }
+                  : native
+              closeReasoning()
+              writer.write({ type: "data-native-tool", id, data })
+              continue
+            }
 
             // Tool output — what completes a tool card that tool-input-start
             // / tool-input-available opened. Checked before the bare
@@ -249,6 +376,7 @@ export async function POST(req: Request) {
                   dynamic: true,
                 })
               } else {
+                closeReasoning()
                 writer.write({
                   type: "tool-output-available",
                   toolCallId: event.tool_use_id,
@@ -279,29 +407,10 @@ export async function POST(req: Request) {
               continue
             }
 
-            if ("topic" in event && event.topic === "thinking") {
-              // Text deltas carry a cycle number; append and rewrite that
-              // cycle's part. Non-string data is the tool's final ToolResult,
-              // already delivered as a tool result.
-              if (typeof event.data === "string") {
-                const cycle = typeof event.cycle === "number" ? event.cycle : 1
-                const text = (thinkingCycles.get(cycle) ?? "") + event.data
-                thinkingCycles.set(cycle, text)
-                writer.write({
-                  type: "data-thinking-cycle",
-                  id: `thinking-${cycle}`,
-                  data: { text },
-                })
-              } else if (isGraphEnvelope(event.data)) {
-                const nodeId = event.data.node_path.at(-1)?.id ?? event.data.formation_kind
-                writer.write({
-                  type: "data-graph-event",
-                  id: `graph-${event.data.run_id}-${nodeId}-${event.data.event_type}`,
-                  data: event.data,
-                })
-              }
-              continue
-            }
+            // The "thinking" topic carries the reasoning stage's own
+            // StreamEvents — native tool frames and reasoningContent deltas,
+            // identical in shape to the orchestrator's. They fall through to
+            // the same handlers below rather than needing a parallel path.
 
             if ("error" in event) {
               throw new Error(event.error)
@@ -316,6 +425,7 @@ export async function POST(req: Request) {
               const toolUse = event.contentBlockStart.start.toolUse
               if (toolUse) {
                 openTool = { id: toolUse.toolUseId, name: toolUse.name }
+                closeReasoning()
                 writer.write({
                   type: "tool-input-start",
                   toolCallId: toolUse.toolUseId,
@@ -328,14 +438,28 @@ export async function POST(req: Request) {
 
             if ("contentBlockDelta" in event) {
               const delta = event.contentBlockDelta.delta
+              const isThinking = "topic" in event && event.topic === "thinking"
               if ("text" in delta) {
-                ensureText()
-                writer.write({ type: "text-delta", id: textId, delta: delta.text })
+                // Same StreamEvent shape from both agents, so the topic is
+                // what separates them: the reasoning stage's text belongs in
+                // Chain of Thought as a thought block, the orchestrator's is
+                // the answer. Routing both to text-delta put the reasoning
+                // stage's private notes in the reply body.
+                if (isThinking) {
+                  writer.write({
+                    type: "reasoning-delta",
+                    id: ensureReasoning(),
+                    delta: delta.text,
+                  })
+                } else {
+                  closeReasoning()
+                  ensureText()
+                  writer.write({ type: "text-delta", id: textId, delta: delta.text })
+                }
               } else if ("reasoningContent" in delta) {
-                ensureReasoning()
                 writer.write({
                   type: "reasoning-delta",
-                  id: reasoningId,
+                  id: ensureReasoning(),
                   delta: delta.reasoningContent.text,
                 })
               } else if ("toolUse" in delta) {
@@ -375,11 +499,13 @@ export async function POST(req: Request) {
           throw new Error("Orchestrator stream closed with no events.")
         }
       } catch (error) {
-        ensureText()
+        // An `error` chunk, not assistant prose: this is what puts useChat
+        // into its error state so status stops being "ready" and
+        // PromptInputSubmit can surface it. Writing the message as text-delta
+        // made a transport failure look like something the model said.
         writer.write({
-          type: "text-delta",
-          id: textId,
-          delta:
+          type: "error",
+          errorText:
             error instanceof Error
               ? error.message
               : "The orchestrator request failed.",
@@ -387,9 +513,8 @@ export async function POST(req: Request) {
       } finally {
         // Close in one place, on both paths, so every block that was opened
         // is also ended exactly once.
-        if (reasoningStarted) {
-          writer.write({ type: "reasoning-end", id: reasoningId })
-        }
+        // closeReasoning is a no-op when nothing is open.
+        closeReasoning()
         if (textStarted) {
           writer.write({ type: "text-end", id: textId })
         }

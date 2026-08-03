@@ -12,6 +12,8 @@ from perplexity import AsyncPerplexity
 from pydantic import BaseModel
 from strands.models import Model
 from strands.types.content import Messages, SystemContentBlock
+from strands.models._openai_errors import classify_openai_error
+from strands.types.exceptions import ContextWindowOverflowException
 from strands.types.streaming import StreamEvent
 from strands.types.tools import ToolChoice, ToolSpec
 from temporalio.exceptions import ApplicationError
@@ -108,7 +110,6 @@ class PerplexityModel(Model):
     @classmethod
     def _message_items(cls, messages: Messages) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
-        signatures: dict[str, str] = {}
         for message in messages:
             role = message["role"]
             message_parts: list[dict[str, str]] = []
@@ -133,7 +134,6 @@ class PerplexityModel(Model):
                     signature = tool.get("reasoningSignature")
                     if signature:
                         call["thought_signature"] = signature
-                        signatures[tool["toolUseId"]] = signature
                     result.append(call)
                     continue
                 if "toolResult" in block:
@@ -202,6 +202,21 @@ class PerplexityModel(Model):
 
     @staticmethod
     def _raise_sdk_error(error: Exception) -> None:
+        # Throttling stays an ordinary retryable ApplicationError, retried by
+        # Temporal's activity retry_policy. TemporalAgent sets
+        # agent_kwargs["retry_strategy"] = None unconditionally
+        # (_temporal_agent.py:62) -- "TemporalAgent disables Strands' built-in
+        # ModelRetryStrategy so retries are handled exclusively by Temporal"
+        # (contrib/strands README) -- so raising ModelThrottledException would
+        # bypass the only retry mechanism that exists here.
+        #
+        # ContextWindowOverflowException IS raised: it is one of the four types
+        # in StrandsFailureConverter._TERMINAL_EXCEPTIONS
+        # (_failure_converter.py:28-33), which the converter marks
+        # non_retryable=True so the conversation manager can react to it.
+        if classify_openai_error(error) == "context_overflow":
+            raise ContextWindowOverflowException(str(error)) from error
+
         non_retryable = isinstance(
             error,
             (
@@ -214,6 +229,26 @@ class PerplexityModel(Model):
             ),
         )
         raise _application_error(str(error), non_retryable=non_retryable) from error
+
+    @staticmethod
+    def _native_event(event: Any) -> StreamEvent | None:
+        """Carry a native server-side tool event through unchanged.
+
+        The SDK event serializes itself in one call, so the whole payload goes
+        through as-is. StreamEvent is total=False, so it rides under
+        `perplexity` with nothing dropped.
+        """
+        event_type = _value(event, "type")
+        if not isinstance(event_type, str):
+            return None
+        if not (
+            event_type.startswith("response.reasoning.")
+            or event_type == "response.skill.loaded"
+        ):
+            return None
+        if not hasattr(event, "model_dump"):
+            return None
+        return {"perplexity": event.model_dump(mode="json")}
 
     @staticmethod
     def _raise_failed(error: Any) -> None:
@@ -358,9 +393,24 @@ class PerplexityModel(Model):
                     state["done"] = True
                 elif event_type in ("response.output_item.added", "response.output_item.done"):
                     item = _value(provider_event, "item")
-                    if _value(item, "type") != "function_call":
+                    item_type = _value(item, "type")
+                    if item_type != "function_call":
                         output_index = _value(provider_event, "output_index")
                         if event_type == "response.output_item.done" and isinstance(output_index, int):
+                            # Terminal payload for a native server-side tool
+                            # (search_results, fetch_url_results,
+                            # sandbox_results, mcp_call, ... -- the OutputItem
+                            # union in perplexity/types/output_item.py). The
+                            # block itself is a no-op in the text/tool
+                            # sequencing below, but the item is emitted intact
+                            # rather than thrown away. "message" is excluded:
+                            # its text already streamed as output_text deltas.
+                            if (
+                                item_type
+                                and item_type != "message"
+                                and hasattr(item, "model_dump")
+                            ):
+                                yield {"perplexity": item.model_dump(mode="json")}
                             output_blocks[output_index] = {"type": "skip", "done": True}
                             for stream_event in flush_ready():
                                 yield stream_event
@@ -407,6 +457,15 @@ class PerplexityModel(Model):
                         state["done"] = True
                 elif event_type == "response.failed":
                     self._raise_failed(_value(provider_event, "error"))
+                elif event_type is not None and (
+                    event_type.startswith("response.reasoning.")
+                    or event_type == "response.skill.loaded"
+                ):
+                    # Native server-side tool activity, passed through exactly
+                    # as the SDK delivered it. One API event, one stream event.
+                    native = self._native_event(provider_event)
+                    if native is not None:
+                        yield native
                 elif event_type == "response.completed":
                     response = _value(provider_event, "response")
                     if response is None or _value(response, "status") != "completed":

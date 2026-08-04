@@ -40,6 +40,7 @@ import {
   ChainOfThought,
   ChainOfThoughtContent,
   ChainOfThoughtHeader,
+  ChainOfThoughtImage,
   ChainOfThoughtSearchResult,
   ChainOfThoughtSearchResults,
   ChainOfThoughtStep,
@@ -347,13 +348,21 @@ function AgentChainCard({ chain }: { chain: AgentChain }) {
             mediaType: imgJson.content_type,
           })
           return (
-            <Image
+            // ChainOfThoughtImage is the SDK's own wrapper for imagery inside
+            // Chain of Thought: it supplies the framing and the caption slot
+            // (chain-of-thought.tsx:205-214). Image stays as the child --
+            // it is the primitive that actually renders the bytes.
+            <ChainOfThoughtImage
               key={part.toolCallId}
-              base64={file.base64}
-              uint8Array={file.uint8Array}
-              mediaType={file.mediaType}
-              alt="File produced by the sub-agent"
-            />
+              caption="File produced by the sub-agent"
+            >
+              <Image
+                base64={file.base64}
+                uint8Array={file.uint8Array}
+                mediaType={file.mediaType}
+                alt="File produced by the sub-agent"
+              />
+            </ChainOfThoughtImage>
           )
         })}
 
@@ -732,12 +741,14 @@ function NativeToolStep({ native }: { native: NativeTool }) {
           {native.error ? (
             <p className="text-destructive text-xs">{native.error}</p>
           ) : isImage && native.url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={native.url}
-              alt={name}
-              className="h-auto max-w-full overflow-hidden rounded-md"
-            />
+            // ChainOfThoughtImage (chain-of-thought.tsx:205-214) is the SDK's
+            // native wrapper for imagery in Chain of Thought; it carries the
+            // framing and caption this hand-rolled <img> was approximating
+            // with its own classes and an eslint suppression.
+            <ChainOfThoughtImage caption={name}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={native.url} alt={name} className="h-auto max-w-full" />
+            </ChainOfThoughtImage>
           ) : (
             <Artifact className="border-white/10 bg-white/[0.02] backdrop-blur-sm">
               <ArtifactHeader>

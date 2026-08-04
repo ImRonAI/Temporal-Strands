@@ -40,8 +40,6 @@ import httpx
 import perplexity
 from dotenv import load_dotenv
 from temporalio.client import Client
-from mcp.client.streamable_http import streamablehttp_client
-from strands.tools.mcp.mcp_client import MCPClient
 from temporalio.contrib.strands import StrandsPlugin
 from temporalio.worker import Worker
 
@@ -117,55 +115,108 @@ MODEL_PARAMS: dict[str, Any] = {
 }
 
 
-# MCP servers are registered on the PLUGIN, per guide R11 ("MCP has no manual
-# lifecycle. Register on StrandsPlugin(mcp_clients={...}); reference by name in
-# the workflow").
+# MCP reaches the model as the Agent API's OWN native remote-MCP tool: the
+# {"type": "mcp"} member of the documented Tool union (ToolMcpTool,
+# perplexity/types/response_create_params.py:242-270, and
+# docs.perplexity.ai/docs/agent-api/tools/mcp). The API "discovers the server's
+# tools when the request starts and calls them like native tools" -- server
+# side, exactly as it does web_search or sandbox. Results come back as
+# mcp_list_tools (the boot handshake, which route.ts drops as transport noise)
+# and mcp_call output items, which components/v0/agent-activity.tsx already
+# renders.
 #
-# They used to be passed as raw {"type": "mcp"} entries in the model's `tools`
-# param, which bypassed the integration entirely: the Agent API then re-listed
-# both catalogs on every single request and echoed the full manifest back in
-# the stream, so every tool description and JSON schema landed in the model
-# activity's return value and, through it, in workflow history. The plugin
-# instead "connects at worker startup, caches the tool manifest, and registers
-# {server}-call-tool / {server}-list-tools activities automatically".
+# This is deliberately NOT the Strands MCP path. Registering these servers on
+# StrandsPlugin(mcp_clients=...) and handing TemporalMCPClient handles to the
+# agent makes them CLIENT-side Strands tools, which _format_request converts
+# into {"type": "function"} specs. The model then answers with function_call
+# items, and a zero-argument call arrives as arguments == "" and kills the turn
+# at perplexity_model.py's json.loads -- "Malformed function arguments".
+#
+# Guide R11 ("MCP has no manual lifecycle. Register on
+# StrandsPlugin(mcp_clients={...})") constrains that Strands path only. It says
+# nothing about the provider's own native tool and does not forbid it.
+#
+# ``allowed_tools`` is the Agent API's own documented allowlist field
+# ("Allowlist of tool names to expose to the model. Omit or leave empty to
+# expose all discovered tools." -- docs.perplexity.ai/docs/agent-api/tools/mcp,
+# Parameters). It is used here to exclude one specific broken tool, not as a
+# policy preference:
+#
+# Data Commons' get_multi_entity_observations declares its `entities` parameter
+# as a bare {"type": "object"} with no "properties" key. That is the exact node
+# the API rejects -- perplexity_model.py's load-bearing detail #1 and
+# _ensure_object_properties(:40-48) exist for precisely this shape, but they
+# only normalize tool specs THIS client sends. An MCP server's manifest is
+# discovered server-side and passed through unmodified ("input_schema: The
+# server's JSON Schema for the tool's input, passed through unmodified"), so
+# nothing on our side can repair it.
+#
+# Because tool discovery runs before the model ("Because discovery runs before
+# the model, the whole request fails with external_connector_error and returns
+# no output array"), that one malformed schema failed EVERY turn -- verified by
+# bisection: native+pophive OK, native+datacommons FAILED, and
+# allowed_tools=<the other five> OK while allowed_tools=[that one tool] FAILED.
+#
+# Listing the five working tools is therefore the minimum change that keeps
+# Data Commons usable. Drop the entry from this list once the server fixes its
+# schema.
 MCP_SERVERS: dict[str, dict[str, Any]] = {
-    "datacommons": {"url_env": "DATACOMMONS_MCP_URL", "key_env": "DC_API_KEY"},
+    "datacommons": {
+        "url_env": "DATACOMMONS_MCP_URL",
+        "key_env": "DC_API_KEY",
+        "allowed_tools": [
+            "search_indicators",
+            "search_child_indicators",
+            "get_variable_metadata",
+            "get_observations",
+            "get_child_observations",
+        ],
+    },
     "pophive": {"url_env": "POPHIVE_MCP_URL"},
 }
 
 
-def mcp_clients() -> dict[str, Callable[[], MCPClient]]:
-    """One MCPClient factory per configured server, keyed by registered name.
+def mcp_tools() -> list[dict[str, Any]]:
+    """A native {"type": "mcp"} entry per configured remote server.
+
+    ``server_label`` must be unique per request and match
+    ^[a-zA-Z0-9_-]{1,64}$; both registered names already do. ``server_url``
+    must be a Streamable HTTP endpoint -- the legacy SSE transport is not
+    supported -- which both of these are.
 
     Data Commons rejects unauthenticated initialize with 401 UNAUTHENTICATED
-    unless DC_API_KEY is sent as X-API-Key; PopHIVE needs no auth. Verified by
-    probing both endpoints directly.
+    unless DC_API_KEY is sent as X-API-Key; PopHIVE needs no auth. The key goes
+    in ``headers`` rather than ``authorization`` because it is an API-key
+    header, not a bearer token. A server whose URL env var is unset is left out
+    entirely rather than sent half-configured.
     """
-    clients: dict[str, Callable[[], MCPClient]] = {}
+    tools: list[dict[str, Any]] = []
     for name, spec in MCP_SERVERS.items():
         url = os.environ.get(spec["url_env"])
         if not url:
             continue
-        headers: dict[str, str] = {}
+        tool: dict[str, Any] = {
+            "type": "mcp",
+            "server_label": name,
+            "server_url": url,
+        }
         key_env = spec.get("key_env")
         api_key = os.environ.get(key_env) if key_env else None
         if api_key:
-            headers["X-API-Key"] = api_key
-        # Bound in the default args or every factory closes over the last loop
-        # value and all servers resolve to the same URL.
-        clients[name] = lambda url=url, headers=headers: MCPClient(
-            lambda: streamablehttp_client(url=url, headers=headers or None)
-        )
-    return clients
+            tool["headers"] = {"X-API-Key": api_key}
+        # Omitted entirely when absent, which the API reads as "expose all
+        # discovered tools" -- an empty list would mean the same thing but
+        # sends a field with no purpose.
+        allowed = spec.get("allowed_tools")
+        if allowed:
+            tool["allowed_tools"] = list(allowed)
+        tools.append(tool)
+    return tools
 
 
 def native_tools() -> list[dict[str, Any]]:
-    """The Agent API's own server-side tools.
-
-    MCP is absent by design: it is registered on StrandsPlugin(mcp_clients=...)
-    and reaches the agent as TemporalMCPClient handles, not as request params.
-    """
-    return [dict(tool) for tool in NATIVE_TOOLS]
+    """The Agent API's own server-side tools, remote MCP included."""
+    return [dict(tool) for tool in NATIVE_TOOLS] + mcp_tools()
 
 
 def model_params(model_id: str, tools: list[dict[str, Any]]) -> dict[str, Any]:
@@ -288,7 +339,7 @@ async def main() -> None:
     client = await Client.connect(
         os.environ.get("TEMPORAL_ADDRESS", "localhost:7233"),
         plugins=[
-            StrandsPlugin(models=model_factories, mcp_clients=mcp_clients()),
+            StrandsPlugin(models=model_factories),
             *telemetry_plugins(),
         ],
     )

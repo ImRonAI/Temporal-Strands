@@ -24,9 +24,12 @@ protected route ``app/api/orchestrator/route.ts``:
                      interrupt is pending and again with ``None`` once answered.
 - ``tool_results`` -- ``{"tool_use_id", "status", "content"}``, published from an
   ``AfterToolCallEvent`` hook.
-- ``thinking``    -- ``{"data": str, "cycle": int}``, published from the think
-  activity as each cycle completes. The route renders these into the Chain of
-  Thought component; the cycle number only keys the UI part and is never shown.
+- ``thinking``    -- raw Strands ``StreamEvent`` dicts published by the reasoning
+  agent's own model activity. The reasoning agent is registered on the
+  orchestrator as the ``think`` tool via ``Agent.as_tool()``
+  (``strands/agent/agent.py:958-990``), so the orchestrator calls it when it
+  chooses. ``route.ts`` turns this topic's text deltas into Chain of Thought
+  thought blocks and its native tool frames into tool components nested there.
 """
 
 from __future__ import annotations
@@ -37,13 +40,14 @@ from datetime import timedelta
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import BaseModel, Field
 from strands.hooks import HookProvider, HookRegistry
 from strands.hooks.events import AfterToolCallEvent, BeforeToolCallEvent
 from strands.types.content import Messages
 from strands.types.interrupt import InterruptResponseContent
 from temporalio import workflow
 from temporalio.exceptions import ApplicationError
-from temporalio.contrib.strands import TemporalAgent, TemporalMCPClient
+from temporalio.contrib.strands import TemporalAgent
 from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamState
 
 from config import (
@@ -56,9 +60,6 @@ from config import (
 # Topic names shared with server.py's subscriber and, through it, the SSE frames
 # the protected Next.js route parses. Changing one of these without changing the
 # route breaks the UI silently.
-# The MCP servers registered on StrandsPlugin(mcp_clients=...) in run_worker.
-# Referenced by name only: TemporalMCPClient is a pure handle (guide R11).
-MCP_SERVERS = ("datacommons", "pophive")
 
 EVENTS_TOPIC = "events"
 THINKING_TOPIC = "thinking"
@@ -70,7 +71,18 @@ THINK_SYSTEM_PROMPT = (
     "address the user: your output is private preparation that the assistant "
     "reads before it answers. Work out what the user actually needs, look up "
     "anything that would make the final answer more accurate, and state your "
-    "findings and plan plainly as working notes."
+    "findings and plan plainly as working notes. "
+    # The stage keeps its research tools, so it must report what it found in
+    # text: only its final message crosses back as the tool result
+    # (_agent_as_tool.py:229-235), and native provider tool payloads never
+    # reach that message (perplexity_model.py:413 emits {"perplexity": ...},
+    # which matches no branch in strands/event_loop/streaming.py:462-479).
+    # Anything it looks up but does not write down is invisible downstream and
+    # gets searched a second time.
+    "Write the substance of what you find into your notes -- the specific "
+    "figures, names, sources, and code you retrieved, not just that you "
+    "looked. The assistant sees only these notes, never your tool output, so "
+    "an unrecorded finding is a finding it has to look up again."
 )
 APPROVAL_TOPIC = "approval"
 TOOL_RESULTS_TOPIC = "tool_results"
@@ -81,6 +93,63 @@ TOOL_RESULTS_TOPIC = "tool_results"
 # a workflow rewrite -- and, because the set is empty, no turn can currently
 # block waiting for an approval that the UI would have to answer.
 APPROVAL_REQUIRED_TOOLS: frozenset[str] = frozenset()
+
+
+class ThinkResult(BaseModel):
+    """What the reasoning stage hands back, as structured output.
+
+    This exists because ``str(AgentResult)`` is lossy. It reads only ``text``
+    and ``citationsContent`` blocks (``strands/agent/agent_result.py:78-89``),
+    so everything the stage researched was dropped on the way to the
+    orchestrator: this provider emits native tool activity and reasoning as
+    ``{"perplexity": ...}`` frames (``perplexity_model.py:234-251``), which
+    match no branch in ``process_stream``
+    (``strands/event_loop/streaming.py:462-479``) and so never reach
+    ``AgentResult.message`` at all. The orchestrator saw a bare summary, had no
+    record of what had been searched, and searched again.
+
+    With ``structured_output_model=`` set, ``_AgentAsTool`` takes its other
+    branch and returns ``{"json": result.structured_output.model_dump()}``
+    instead of ``{"text": str(result)}``
+    (``strands/agent/_agent_as_tool.py:220-227``), so these fields cross into
+    the orchestrator's message contract intact. The guide's Pattern 7 caveat
+    (guide:256-258) applies to ``structured_output_async`` only;
+    ``structured_output_model=`` drives the normal ``stream()`` path, and this
+    repo's provider implements ``structured_output`` anyway
+    (``perplexity_model.py:512-524``).
+    """
+
+    findings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Everything you learned, one item per finding, stated in full. "
+            "Include the actual figures, names, quotes, and code you "
+            "retrieved -- not a description of having looked. The assistant "
+            "sees only this list, never your tool output."
+        ),
+    )
+    sources: list[str] = Field(
+        default_factory=list,
+        description="URLs or identifiers backing the findings above.",
+    )
+    searched: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The exact queries you already ran. The assistant uses this to "
+            "avoid repeating them."
+        ),
+    )
+    gaps: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Questions your research did NOT answer. These are the only "
+            "things the assistant should search for itself."
+        ),
+    )
+    plan: str = Field(
+        default="",
+        description="How the assistant should answer, given the findings.",
+    )
 
 
 @dataclass
@@ -220,25 +289,6 @@ class ChatWorkflow:
         state = self._stream.get_state()
         return state.base_offset + len(state.log)
 
-    def _mcp_tools(self) -> list[TemporalMCPClient]:
-        """Handles for the plugin-registered MCP servers.
-
-        The plugin caches each manifest at worker startup, so the tool
-        definitions never ride along in a model request or its stream.
-        """
-        return [
-            TemporalMCPClient(
-                server=name,
-                # Defaults to False, which re-lists every tool on every turn
-                # and writes the whole manifest into history each time. The
-                # Temporal AI cookbook's Strands recipe sets it True.
-                cache_tools=True,
-                start_to_close_timeout=MODEL_START_TO_CLOSE,
-                retry_policy=MODEL_RETRY_POLICY,
-            )
-            for name in MCP_SERVERS
-        ]
-
     def _build_agent(self, messages: Messages) -> TemporalAgent:
         return TemporalAgent(
             # A registered factory NAME from run_worker.py's models= mapping,
@@ -260,7 +310,45 @@ class ChatWorkflow:
             streaming_topic=EVENTS_TOPIC,
             system_prompt=self._system_prompt,
             messages=list(messages),
-            tools=self._mcp_tools(),
+            # The reasoning stage, registered as the ``think`` tool via
+            # Agent.as_tool (strands/agent/agent.py:958-990). The orchestrator
+            # calls it when it chooses, which is what makes the two read as one
+            # agent -- and, because _AgentAsTool returns the stage's reply as a
+            # real toolResult block (strands/agent/_agent_as_tool.py:229-235),
+            # the findings land in the orchestrator's own message contract
+            # instead of being dropped. The name must stay "think": the UI keys
+            # its Chain of Thought suppression off it exactly
+            # (components/v0/agent-activity.tsx:887).
+            #
+            # Not an activity_as_tool: the wrapped agent is a TemporalAgent, so
+            # its model call already runs as a Temporal activity through
+            # TemporalModel.stream (_temporal_model.py:118-119), which requires
+            # workflow context. _AgentAsTool's threading.Lock (:87) is sandbox-
+            # safe because StrandsPlugin passes "strands" through the sandbox
+            # (_plugin.py:101-102), and passthrough matches child modules by
+            # prefix (_importer.py:294).
+            # An explicit description is required, not cosmetic: without one
+            # _AgentAsTool falls back to "Use the think agent as a tool by
+            # providing a natural language input" (_agent_as_tool.py:75-77),
+            # which gives the model no reason to call it and no signal that its
+            # findings are authoritative -- leaving the duplicate research in
+            # place. This is the contract that stops the orchestrator
+            # re-running searches the stage already performed.
+            tools=[
+                self._build_thinker().as_tool(
+                    name="think",
+                    description=(
+                        "Your own reasoning stage. Call it FIRST, before any "
+                        "other tool, whenever the request needs analysis, "
+                        "planning, or research. It researches with the same "
+                        "tools you have and returns findings plus a plan. "
+                        "Treat what it returns as work you already did: answer "
+                        "from those findings and do NOT repeat searches it "
+                        "already performed. Search again only for a specific "
+                        "gap its findings do not cover."
+                    ),
+                )
+            ],
             hooks=[
                 _ApprovalHook(APPROVAL_REQUIRED_TOOLS),
                 _ToolResultHook(self._tool_results.publish),
@@ -285,7 +373,15 @@ class ChatWorkflow:
             streaming_batch_interval=timedelta(milliseconds=200),
             streaming_topic=THINKING_TOPIC,
             system_prompt=THINK_SYSTEM_PROMPT,
-            tools=self._mcp_tools(),
+            # Makes _AgentAsTool return {"json": model_dump()} rather than
+            # {"text": str(result)} (strands/agent/_agent_as_tool.py:220-227),
+            # which is the only way the stage's research survives the handoff.
+            # See ThinkResult for why str() cannot carry it. This drives the
+            # normal stream() path via StructuredOutputTool
+            # (strands/tools/structured_output/_structured_output_context.py:
+            # 44-46), not the provider's structured_output method, so the
+            # guide's Pattern 7 caveat does not apply.
+            structured_output_model=ThinkResult,
         )
 
     def _content_blocks(self, turn: TurnInput) -> list[dict[str, Any]]:
@@ -339,18 +435,19 @@ class ChatWorkflow:
 
             blocks = self._content_blocks(turn)
 
-            # Sequential reasoning stage: it researches and plans, finishes,
-            # and its analysis is prepended to the turn as the assistant's own
-            # prior reasoning. The orchestrator then answers from that plan
-            # plus the user's prompt. Its own activity streams live on
-            # THINKING_TOPIC while it works.
-            analysis = str(await self._build_thinker().invoke_async(blocks)).strip()
-            if analysis:
-                blocks = [
-                    {"text": f"My prior analysis:\n{analysis}"},
-                    *blocks,
-                ]
-
+            # The reasoning stage is a TOOL on the orchestrator (registered in
+            # _build_agent via Agent.as_tool), not a separate pre-invocation.
+            # Invoking it here and prepending str(result) dropped everything it
+            # researched: native Perplexity tool payloads are emitted as
+            # {"perplexity": ...} chunks (perplexity_model.py:413) that match no
+            # branch in Strands' process_stream (strands/event_loop/streaming.py:
+            # 462-479), so they never reach AgentResult.message and str() cannot
+            # see them (strands/agent/agent_result.py:78-91). The orchestrator
+            # therefore had no record of the research and repeated every search.
+            # As a tool, the stage's reply comes back as a real toolResult block
+            # (strands/agent/_agent_as_tool.py:229-235), which IS in the
+            # orchestrator's message contract, so it answers from those findings
+            # instead of re-running them.
             result = await agent.invoke_async(blocks)
 
             # HITL resume loop. The agent never self-resumes: every interrupt

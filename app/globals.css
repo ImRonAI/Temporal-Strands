@@ -2,6 +2,10 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 
+/* Required by MessageResponse (ai-sdk.dev/elements/components/message):
+   Tailwind must scan Streamdown's dist for the classes its markdown emits. */
+@source "../node_modules/streamdown/dist/*.js";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -221,6 +225,29 @@
 @media (prefers-reduced-motion: reduce) {
   .animate-blurple-drift,
   .animate-blurple-drift-alt {
+    animation: none;
+  }
+}
+
+/* Soft pulse for live status dots (beta badge, thinking indicator) */
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 8px 2px oklch(0.7 0.2 285 / 0.7);
+  }
+  50% {
+    opacity: 0.55;
+    box-shadow: 0 0 3px 1px oklch(0.7 0.2 285 / 0.35);
+  }
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-soft {
     animation: none;
   }
 }

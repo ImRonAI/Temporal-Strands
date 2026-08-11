@@ -55,6 +55,28 @@ async def collect(model, messages=None, **kwargs):
 
 
 @pytest.mark.asyncio
+async def test_message_start_has_no_attempt_outside_activity_context() -> None:
+    """Outside a Temporal activity the frame stays byte-identical to before."""
+    events = await collect(
+        PerplexityModel(model_id="sonar/test", client=FakeClient([completed()]))
+    )
+    assert events[0] == {"messageStart": {"role": "assistant"}}
+
+
+@pytest.mark.asyncio
+async def test_message_start_carries_attempt_inside_activity_context(monkeypatch) -> None:
+    """Inside an activity, messageStart carries activity.info().attempt (GWEN-6)."""
+    monkeypatch.setattr(perplexity_model.activity, "in_activity", lambda: True)
+    monkeypatch.setattr(
+        perplexity_model.activity, "info", lambda: SimpleNamespace(attempt=3)
+    )
+    events = await collect(
+        PerplexityModel(model_id="sonar/test", client=FakeClient([completed()]))
+    )
+    assert events[0] == {"messageStart": {"role": "assistant", "attempt": 3}}
+
+
+@pytest.mark.asyncio
 async def test_request_maps_messages_images_tools_and_exact_params_without_mutation() -> None:
     native_tools = [{"type": "web_search", "filters": {"recency": "week"}}]
     params = {"temperature": 0.2, "tools": native_tools, "reasoning": {"effort": "high"}}

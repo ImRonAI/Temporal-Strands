@@ -82,8 +82,15 @@ export function Composer({
       accept={ACCEPTED_FILE_TYPES}
       globalDrop
       multiple
-      className="overflow-hidden rounded-3xl border border-white/10 bg-card/70 shadow-[0_8px_40px_-12px_oklch(0.4_0.2_277/0.5)] backdrop-blur-xl"
+      className="group/composer overflow-hidden rounded-3xl border border-white/10 bg-card/70 shadow-[0_8px_40px_-12px_oklch(0.4_0.2_277/0.5)] backdrop-blur-xl transition-[border-color,box-shadow] duration-500 focus-within:border-blurple/40 focus-within:shadow-[0_12px_56px_-12px_oklch(0.55_0.22_277/0.65)]"
     >
+      {/* Focus hairline: a single thread of blurple light along the top edge.
+          Lives inside InputGroup (which is `relative`); the named group on the
+          form above lets it respond to focus anywhere in the composer. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-10 top-0 z-10 h-px bg-gradient-to-r from-transparent via-blurple-bright/70 to-transparent opacity-0 transition-opacity duration-700 group-focus-within/composer:opacity-100"
+      />
       <PromptInputHeader className="border-0">
         <AttachmentsDisplay />
       </PromptInputHeader>
@@ -115,7 +122,7 @@ export function Composer({
           disabled={!text.trim() && status !== "streaming"}
           status={status}
           onStop={onStop}
-          className="rounded-full"
+          className="rounded-full transition-all duration-300 enabled:hover:shadow-[0_0_20px_-2px_oklch(0.62_0.205_277/0.7)] active:scale-90"
         />
       </PromptInputFooter>
     </PromptInput>

@@ -8,9 +8,10 @@ verified against temporalio 1.31.0 / strands-agents 1.50.2:
   gets its reply from the same call, and the agent is rebuilt inside ``run`` from
   carried messages. This is the one documented exception to "build the agent in
   ``__init__``" (guide R7).
-- Pattern 3 (HITL, hook style): ``BeforeToolCallEvent.interrupt(name, reason=...)``
-  pauses before a gated tool; ``approve`` signals the answer back. Every interrupt
-  in ``result.interrupts`` is answered and the full list handed back (guide R9).
+- Pattern 3 (HITL): the turn loop answers ``result.stop_reason == "interrupt"``;
+  ``approve`` signals the answer back. Every interrupt in ``result.interrupts``
+  is answered and the full list handed back (guide R9). No tool is gated today,
+  so the loop only engages if a tool itself raises an interrupt.
 - Pattern 8 (streaming): ``WorkflowStream`` hosts the topic named by
   ``TemporalAgent(streaming_topic=...)``; ``server.py`` subscribes to the same
   name. The names must match exactly (guide R10).
@@ -20,7 +21,7 @@ protected route ``app/api/orchestrator/route.ts``:
 
 - ``events``      -- raw Strands ``StreamEvent`` dicts published by the model
                      activity itself (``_model_activity.invoke_model_streaming``).
-- ``approval``    -- ``{"reason": str | None}``, published here when a hook
+- ``approval``    -- ``{"reason": str | None}``, published here when an
                      interrupt is pending and again with ``None`` once answered.
 - ``tool_results`` -- ``{"tool_use_id", "status", "content"}``, published from an
   ``AfterToolCallEvent`` hook.
@@ -40,14 +41,14 @@ from datetime import timedelta
 from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic import BaseModel, Field
 from strands.hooks import HookProvider, HookRegistry
-from strands.hooks.events import AfterToolCallEvent, BeforeToolCallEvent
+from strands.hooks.events import AfterToolCallEvent
 from strands.types.content import Messages
 from strands.types.interrupt import InterruptResponseContent
 from temporalio import workflow
 from temporalio.exceptions import ApplicationError
 from temporalio.contrib.strands import TemporalAgent
+from temporalio.contrib.strands.workflow import activity_as_tool
 from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamState
 
 from config import (
@@ -55,7 +56,15 @@ from config import (
     MODEL_RETRY_POLICY,
     MODEL_SCHEDULE_TO_CLOSE,
     MODEL_START_TO_CLOSE,
+    ROLLOVER_TOOL_RESULT_MAX_CHARS,
 )
+
+# The activity callable is only inspected here (activity_as_tool reads its
+# @activity.defn name and signature); its body runs on the worker. Imported
+# with passthrough so the workflow sandbox does not re-import its
+# dependencies (guide: sandbox passthrough for activity modules).
+with workflow.unsafe.imports_passed_through():
+    from think_activity import think
 
 # Topic names shared with server.py's subscriber and, through it, the SSE frames
 # the protected Next.js route parses. Changing one of these without changing the
@@ -64,92 +73,40 @@ from config import (
 EVENTS_TOPIC = "events"
 THINKING_TOPIC = "thinking"
 
-# The reasoning stage never addresses the user: its output is preparation the
-# orchestrator reads, so the two read as one assistant.
-THINK_SYSTEM_PROMPT = (
-    "You are the reasoning stage of a single engineering assistant. You never "
-    "address the user: your output is private preparation that the assistant "
-    "reads before it answers. Work out what the user actually needs, look up "
-    "anything that would make the final answer more accurate, and state your "
-    "findings and plan plainly as working notes. "
-    # The stage keeps its research tools, so it must report what it found in
-    # text: only its final message crosses back as the tool result
-    # (_agent_as_tool.py:229-235), and native provider tool payloads never
-    # reach that message (perplexity_model.py:413 emits {"perplexity": ...},
-    # which matches no branch in strands/event_loop/streaming.py:462-479).
-    # Anything it looks up but does not write down is invisible downstream and
-    # gets searched a second time.
-    "Write the substance of what you find into your notes -- the specific "
-    "figures, names, sources, and code you retrieved, not just that you "
-    "looked. The assistant sees only these notes, never your tool output, so "
-    "an unrecorded finding is a finding it has to look up again."
-)
 APPROVAL_TOPIC = "approval"
-TOOL_RESULTS_TOPIC = "tool_results"
-
-# Tools whose calls pause for human approval. Empty today: no tool this agent
-# registers has side effects worth gating. The hook and the whole resume loop
-# stay wired so adding a destructive tool is a one-line change here rather than
-# a workflow rewrite -- and, because the set is empty, no turn can currently
-# block waiting for an approval that the UI would have to answer.
-APPROVAL_REQUIRED_TOOLS: frozenset[str] = frozenset()
 
 
-class ThinkResult(BaseModel):
-    """What the reasoning stage hands back, as structured output.
+def _clamp_tool_results(messages: Messages) -> Messages:
+    """Clamp oversized toolResult text before continue-as-new.
 
-    This exists because ``str(AgentResult)`` is lossy. It reads only ``text``
-    and ``citationsContent`` blocks (``strands/agent/agent_result.py:78-89``),
-    so everything the stage researched was dropped on the way to the
-    orchestrator: this provider emits native tool activity and reasoning as
-    ``{"perplexity": ...}`` frames (``perplexity_model.py:234-251``), which
-    match no branch in ``process_stream``
-    (``strands/event_loop/streaming.py:462-479``) and so never reach
-    ``AgentResult.message`` at all. The orchestrator saw a bare summary, had no
-    record of what had been searched, and searched again.
-
-    With ``structured_output_model=`` set, ``_AgentAsTool`` takes its other
-    branch and returns ``{"json": result.structured_output.model_dump()}``
-    instead of ``{"text": str(result)}``
-    (``strands/agent/_agent_as_tool.py:220-227``), so these fields cross into
-    the orchestrator's message contract intact. The guide's Pattern 7 caveat
-    (guide:256-258) applies to ``structured_output_async`` only;
-    ``structured_output_model=`` drives the normal ``stream()`` path, and this
-    repo's provider implements ``structured_output`` anyway
-    (``perplexity_model.py:512-524``).
+    Temporal rejects any single payload over 2MB (TMPRL1103), and the
+    continue-as-new input carries the whole message history. A think
+    transcript or sandbox stdout in the megabytes wedged a live session:
+    the rollover failed, retried with the same input, and looped forever.
     """
-
-    findings: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Everything you learned, one item per finding, stated in full. "
-            "Include the actual figures, names, quotes, and code you "
-            "retrieved -- not a description of having looked. The assistant "
-            "sees only this list, never your tool output."
-        ),
-    )
-    sources: list[str] = Field(
-        default_factory=list,
-        description="URLs or identifiers backing the findings above.",
-    )
-    searched: list[str] = Field(
-        default_factory=list,
-        description=(
-            "The exact queries you already ran. The assistant uses this to "
-            "avoid repeating them."
-        ),
-    )
-    gaps: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Questions your research did NOT answer. These are the only "
-            "things the assistant should search for itself."
-        ),
-    )
-    plan: str = Field(
-        default="",
-        description="How the assistant should answer, given the findings.",
-    )
+    clamped: Messages = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            clamped.append(message)
+            continue
+        new_content = []
+        for block in content:
+            result = block.get("toolResult") if isinstance(block, dict) else None
+            if result and isinstance(result.get("content"), list):
+                new_result_content = []
+                for item in result["content"]:
+                    text = item.get("text") if isinstance(item, dict) else None
+                    if text and len(text) > ROLLOVER_TOOL_RESULT_MAX_CHARS:
+                        marker = "\n…[truncated for rollover]"
+                        keep = ROLLOVER_TOOL_RESULT_MAX_CHARS - len(marker)
+                        item = {**item, "text": text[:keep] + marker}
+                    new_result_content.append(item)
+                block = {**block, "toolResult": {**result, "content": new_result_content}}
+            new_content.append(block)
+        clamped.append({**message, "content": new_content})
+    return clamped
+TOOL_RESULTS_TOPIC = "tool_results"
 
 
 @dataclass
@@ -187,6 +144,11 @@ class ChatInput:
     session_id: str = ""
     messages: Messages = field(default_factory=list)
     stream_state: WorkflowStreamState | None = None
+    # Test-only rollover threshold (canonical plan, Task 8 Step 5): after this
+    # many completed turns the run hands off via continue-as-new even though
+    # real history is nowhere near is_continue_as_new_suggested(). None in
+    # production, where the SDK's own suggestion is the only trigger.
+    rollover_turns: int | None = None
 
 
 # Image formats the Perplexity Agent API accepts, mirroring the IMAGE_FORMATS
@@ -194,28 +156,6 @@ class ChatInput:
 # sent, because PerplexityModel._image_part would resolve it to
 # application/octet-stream and the API would reject the whole request.
 _SUPPORTED_IMAGE_FORMATS = frozenset({"png", "jpeg", "gif", "webp"})
-
-
-class _ApprovalHook(HookProvider):
-    """Pauses before a gated tool call and reports the reason to the workflow.
-
-    Guide Pattern 3: the callback runs in workflow context, so it must stay
-    deterministic -- pure state reads and ``event.interrupt``, no I/O.
-    """
-
-    def __init__(self, gated: frozenset[str]) -> None:
-        self._gated = gated
-
-    def register_hooks(self, registry: HookRegistry, **kwargs: object) -> None:
-        registry.add_callback(BeforeToolCallEvent, self._gate)
-
-    def _gate(self, event: BeforeToolCallEvent) -> None:
-        name = event.tool_use["name"]
-        if name not in self._gated:
-            return
-        approval = event.interrupt("approval", reason=f"Approve {name}?")
-        if approval != "approve":
-            event.cancel_tool = "denied"
 
 
 class _ToolResultHook(HookProvider):
@@ -259,6 +199,8 @@ class ChatWorkflow:
         self._model_id = input.model_id
         self._system_prompt = input.system_prompt
         self._session_id = input.session_id
+        self._rollover_turns = input.rollover_turns
+        self._completed_turns = 0
 
         # Serializes concurrent turn updates. Two browser tabs posting at once
         # must not interleave inside a single agent invocation.
@@ -310,78 +252,29 @@ class ChatWorkflow:
             streaming_topic=EVENTS_TOPIC,
             system_prompt=self._system_prompt,
             messages=list(messages),
-            # The reasoning stage, registered as the ``think`` tool via
-            # Agent.as_tool (strands/agent/agent.py:958-990). The orchestrator
-            # calls it when it chooses, which is what makes the two read as one
-            # agent -- and, because _AgentAsTool returns the stage's reply as a
-            # real toolResult block (strands/agent/_agent_as_tool.py:229-235),
-            # the findings land in the orchestrator's own message contract
-            # instead of being dropped. The name must stay "think": the UI keys
+            # The reasoning stage: strands_tools' think, reworked to async
+            # streaming and registered as an activity_as_tool per the
+            # strands-temporal guide (think_activity.py). The tool name comes
+            # from the @activity.defn name and must stay "think": the UI keys
             # its Chain of Thought suppression off it exactly
-            # (components/v0/agent-activity.tsx:887).
-            #
-            # Not an activity_as_tool: the wrapped agent is a TemporalAgent, so
-            # its model call already runs as a Temporal activity through
-            # TemporalModel.stream (_temporal_model.py:118-119), which requires
-            # workflow context. _AgentAsTool's threading.Lock (:87) is sandbox-
-            # safe because StrandsPlugin passes "strands" through the sandbox
-            # (_plugin.py:101-102), and passthrough matches child modules by
-            # prefix (_importer.py:294).
-            # An explicit description is required, not cosmetic: without one
-            # _AgentAsTool falls back to "Use the think agent as a tool by
-            # providing a natural language input" (_agent_as_tool.py:75-77),
-            # which gives the model no reason to call it and no signal that its
-            # findings are authoritative -- leaving the duplicate research in
-            # place. This is the contract that stops the orchestrator
-            # re-running searches the stage already performed.
+            # (components/v0/agent-activity.tsx:887). The tool description --
+            # the contract that stops the orchestrator re-running searches the
+            # stage already performed -- lives in the activity's docstring,
+            # which activity_as_tool extracts as the ToolSpec
+            # (_temporal_activity_tool.py:28-31). The activity streams every
+            # model chunk onto THINKING_TOPIC itself, so nothing here
+            # republishes frames.
             tools=[
-                self._build_thinker().as_tool(
-                    name="think",
-                    description=(
-                        "Your own reasoning stage. Call it FIRST, before any "
-                        "other tool, whenever the request needs analysis, "
-                        "planning, or research. It researches with the same "
-                        "tools you have and returns findings plus a plan. "
-                        "Treat what it returns as work you already did: answer "
-                        "from those findings and do NOT repeat searches it "
-                        "already performed. Search again only for a specific "
-                        "gap its findings do not cover."
-                    ),
+                activity_as_tool(
+                    think,
+                    start_to_close_timeout=MODEL_START_TO_CLOSE,
+                    schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,
+                    retry_policy=MODEL_RETRY_POLICY,
                 )
             ],
             hooks=[
-                _ApprovalHook(APPROVAL_REQUIRED_TOOLS),
                 _ToolResultHook(self._tool_results.publish),
             ],
-        )
-
-    def _build_thinker(self) -> TemporalAgent:
-        """The reasoning stage: same model, its own stream topic.
-
-        streaming_topic makes the SDK publish every StreamEvent it produces --
-        native tool frames, reasoning, text -- from inside the model activity,
-        exactly as it does for the orchestrator. Nothing is republished by hand.
-        """
-        return TemporalAgent(
-            model=self._model_id,
-            start_to_close_timeout=MODEL_START_TO_CLOSE,
-            schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,
-            heartbeat_timeout=MODEL_HEARTBEAT,
-            retry_policy=MODEL_RETRY_POLICY,
-            # Temporal's documented value for LLM streaming; see the note on
-            # the orchestrator agent above.
-            streaming_batch_interval=timedelta(milliseconds=200),
-            streaming_topic=THINKING_TOPIC,
-            system_prompt=THINK_SYSTEM_PROMPT,
-            # Makes _AgentAsTool return {"json": model_dump()} rather than
-            # {"text": str(result)} (strands/agent/_agent_as_tool.py:220-227),
-            # which is the only way the stage's research survives the handoff.
-            # See ThinkResult for why str() cannot carry it. This drives the
-            # normal stream() path via StructuredOutputTool
-            # (strands/tools/structured_output/_structured_output_context.py:
-            # 44-46), not the provider's structured_output method, so the
-            # guide's Pattern 7 caveat does not apply.
-            structured_output_model=ThinkResult,
         )
 
     def _content_blocks(self, turn: TurnInput) -> list[dict[str, Any]]:
@@ -486,6 +379,9 @@ class ChatWorkflow:
             self._stream.truncate(turn_start_offset)
             self._turn_start_offset = None
 
+            # Counted only when the reply is ready: the rollover trigger in
+            # run() must never hand off mid-turn.
+            self._completed_turns += 1
             return str(result).strip()
 
     @turn.validator
@@ -504,6 +400,16 @@ class ChatWorkflow:
 
     @workflow.signal
     def approve(self, response: str) -> None:
+        """Answer the approval the turn loop is currently waiting on.
+
+        Ignored when nothing is pending: an approval banked while no gate is
+        open would silently pre-approve the NEXT gated tool call, which the
+        human was never shown. Signals cannot be rejected (they have no
+        validator and no reply channel), so dropping the stale answer is the
+        whole guard.
+        """
+        if self._pending_reason is None:
+            return
         self._approval = response
 
     @workflow.signal
@@ -524,6 +430,10 @@ class ChatWorkflow:
         return self._model_id
 
     @workflow.query
+    def session_id(self) -> str:
+        return self._session_id
+
+    @workflow.query
     def turn_start_offset(self) -> int | None:
         """Stream offset where the in-flight turn began, or None if idle."""
         return self._turn_start_offset
@@ -534,9 +444,18 @@ class ChatWorkflow:
         # messages the previous run carried over (guide Pattern 9).
         self._agent = self._build_agent(input.messages)
 
-        await workflow.wait_condition(
-            lambda: self._done or workflow.info().is_continue_as_new_suggested()
-        )
+        # The test-only threshold ORs with the SDK's own suggestion, never
+        # replaces it: production leaves rollover_turns at None and rolls over
+        # exactly when Temporal says history is getting large.
+        def should_rollover() -> bool:
+            if workflow.info().is_continue_as_new_suggested():
+                return True
+            return (
+                self._rollover_turns is not None
+                and self._completed_turns >= self._rollover_turns
+            )
+
+        await workflow.wait_condition(lambda: self._done or should_rollover())
 
         # Closed to new turns from here on. all_handlers_finished waits for
         # the turn currently running, but does nothing to stop a fresh update
@@ -560,7 +479,9 @@ class ChatWorkflow:
             return
 
         agent = self._agent
-        messages: Messages = list(agent.messages) if agent else []
+        messages: Messages = _clamp_tool_results(
+            list(agent.messages) if agent else []
+        )
         # This helper detaches pollers, drains handlers, captures stream state,
         # and calls workflow.continue_as_new. It raises internally: nothing
         # after it runs.
@@ -572,6 +493,11 @@ class ChatWorkflow:
                     session_id=self._session_id,
                     messages=messages,
                     stream_state=state,
+                    # The test threshold is session state: a rollover must not
+                    # silently disable the threshold that triggered it. The
+                    # successor's turn counter starts at zero, so a threshold
+                    # of N means N turns per run, not N turns per session.
+                    rollover_turns=self._rollover_turns,
                 )
             ]
         )

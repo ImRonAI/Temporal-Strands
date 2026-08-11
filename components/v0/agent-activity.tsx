@@ -7,17 +7,14 @@ import {
   type DynamicToolUIPart,
   type UIMessage,
 } from "ai"
-import { type ReactNode, useState } from "react"
+import { type ReactNode, useEffect, useState } from "react"
+import type { BundledLanguage } from "shiki"
 import {
   BrainIcon,
   FileIcon,
-  LinkIcon,
   PlugIcon,
-  SearchIcon,
   SparklesIcon,
   TerminalIcon,
-  TrendingUpIcon,
-  UsersIcon,
   WrenchIcon,
 } from "lucide-react"
 
@@ -46,8 +43,32 @@ import {
   ChainOfThoughtStep,
 } from "@/components/ai-elements/chain-of-thought"
 import { CodeBlock } from "@/components/ai-elements/code-block"
+import {
+  FileTree,
+  FileTreeFile,
+} from "@/components/ai-elements/file-tree"
 import { Image } from "@/components/ai-elements/image"
+import {
+  JSXPreview,
+  JSXPreviewContent,
+  JSXPreviewError,
+} from "@/components/ai-elements/jsx-preview"
 import { MessageResponse } from "@/components/ai-elements/message"
+import {
+  Terminal,
+  TerminalActions,
+  TerminalContent,
+  TerminalCopyButton,
+  TerminalHeader,
+  TerminalStatus,
+  TerminalTitle,
+} from "@/components/ai-elements/terminal"
+import {
+  WebPreview,
+  WebPreviewBody,
+  WebPreviewNavigation,
+  WebPreviewUrl,
+} from "@/components/ai-elements/web-preview"
 import {
   Sandbox,
   SandboxContent,
@@ -297,11 +318,9 @@ function AgentChainCard({ chain }: { chain: AgentChain }) {
         <AgentInstructions>{input?.instructions ?? input?.task ?? "…"}</AgentInstructions>
 
         {reasoningSummary && (
-          <ChainOfThoughtStep
-            icon={BrainIcon}
-            label="Sub-agent reasoning"
-            description={<MessageResponse>{reasoningSummary}</MessageResponse>}
-          />
+          <ChainOfThoughtStep icon={BrainIcon} label="Sub-agent reasoning">
+            <MessageResponse>{reasoningSummary}</MessageResponse>
+          </ChainOfThoughtStep>
         )}
 
         {searchResults.length > 0 && (
@@ -447,8 +466,9 @@ function ResultBadges({ items }: { items: Array<{ title: string; url?: string }>
   )
 }
 
-// A tool call in flight — the queries or URLs the model asked for, before any
-// results come back.
+// A search call in flight — the queries or URLs the model asked for, before
+// any results come back. Task streams the high-level "what's being searched";
+// TaskTrigger's built-in SearchIcon is the visual cue.
 function CallTask({ title, items }: { title: string; items: string[] }) {
   return (
     <Task className="border-white/10 bg-white/[0.02]">
@@ -462,24 +482,39 @@ function CallTask({ title, items }: { title: string; items: string[] }) {
   )
 }
 
-// `status` reports whether the CONTAINER ran, not whether the code worked: a
-// script that raises still comes back "completed" with a non-zero exit_code.
-// Both are needed, or the header claims success above a stack trace.
-/**
- * URLs the model surfaced from inside the sandbox.
- *
- * The sandbox container ships a preinstalled Perplexity SDK, so the model
- * reaches web/people/fetch through generated code rather than the native
- * tools, and the results come back as printed stdout. However it printed them
- * -- JSON, a CLI payload, Python dict reprs -- the useful part is the same:
- * urls with titles. Pull those out and render them as search results, because
- * that is what they are. If there are no urls it was real code execution and
- * the raw sandbox view is correct.
- */
+// Search results — every search-shaped native renders as the Chain of Thought
+// search subcomponents nested inside a Task, and nothing else: no Tool cards,
+// no Sandbox, no step chrome around them.
+function SearchResultsTask({
+  title,
+  items,
+  children,
+}: {
+  title: string
+  items: Array<{ title: string; url?: string }>
+  children?: ReactNode
+}) {
+  return (
+    <Task className="border-white/10 bg-white/[0.02]">
+      <TaskTrigger title={title} />
+      <TaskContent>
+        <ResultBadges items={items} />
+        {children}
+      </TaskContent>
+    </Task>
+  )
+}
+
+// pplx CLI search invocations inside sandbox bash: `pplx search web "query"`,
+// also people/finance/url. These are web searches, not shell work.
+const PPLX_SEARCH = /pplx\s+search\s+(\w+)?\s*["']([^"']+)["']/
+
+// urls-with-titles printed to stdout (JSON, jq output, dict reprs) — the
+// links a sandboxed search surfaced.
 const URL_WITH_TITLE =
   /["']?url["']?\s*[:=]\s*["']([^"']+)["'][^}\n]*?["']?title["']?\s*[:=]\s*["']([^"']+)["']/g
 
-function sandboxLinks(stdout: string): Array<{ title: string; url: string }> {
+function extractLinks(stdout: string): Array<{ title: string; url: string }> {
   const seen = new Set<string>()
   const links: Array<{ title: string; url: string }> = []
   URL_WITH_TITLE.lastIndex = 0
@@ -492,6 +527,9 @@ function sandboxLinks(stdout: string): Array<{ title: string; url: string }> {
   return links
 }
 
+// `status` reports whether the CONTAINER ran, not whether the code worked: a
+// script that raises still comes back "completed" with a non-zero exit_code.
+// Both are needed, or the header claims success above a stack trace.
 function sandboxStateFromStatus(
   status: string,
   failed: boolean
@@ -540,20 +578,119 @@ function SandboxPanel({
   )
 }
 
+// Values are shiki BundledLanguage ids — CodeBlock's language prop is typed
+// against that union, so this map narrows instead of widening to string.
+const CODE_EXTENSIONS: Record<string, BundledLanguage> = {
+  css: "css",
+  html: "html",
+  js: "javascript",
+  json: "json",
+  jsx: "jsx",
+  md: "markdown",
+  py: "python",
+  sh: "bash",
+  ts: "typescript",
+  tsx: "tsx",
+}
+
+// Office documents and HTML pages the browser can render inline.
+const PREVIEWABLE = /\.(html?|pdf)$/i
+
+/**
+ * Non-image files shared out of the sandbox.
+ *
+ * Coding projects get the Artifact IDE: a FileTree naming the file, the
+ * fetched source streaming into a CodeBlock, and — for html — a live
+ * WebPreview of the page itself. Office docs (pdf/html) render through
+ * WebPreview inside the Artifact. Anything else keeps the download card.
+ */
+function ShareFileArtifact({ name, url }: { name: string; url: string | null }) {
+  const ext = name.split(".").pop()?.toLowerCase() ?? ""
+  const codeLanguage = CODE_EXTENSIONS[ext]
+  const [source, setSource] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!url || !codeLanguage) return
+    let cancelled = false
+    fetch(url)
+      .then((res) => (res.ok ? res.text() : null))
+      .then((text) => {
+        if (!cancelled && text !== null) setSource(text)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [url, codeLanguage])
+
+  const preview = url && PREVIEWABLE.test(name)
+
+  return (
+    <Artifact className="border-white/10 bg-white/[0.02] backdrop-blur-sm">
+      <ArtifactHeader>
+        <div className="flex items-center gap-2">
+          <FileIcon className="size-4 text-muted-foreground" />
+          <ArtifactTitle>{name}</ArtifactTitle>
+        </div>
+      </ArtifactHeader>
+      <ArtifactContent className="space-y-3">
+        {codeLanguage && (
+          <>
+            <FileTree
+              className="border-white/10 bg-white/[0.02]"
+              selectedPath={name}
+            >
+              <FileTreeFile name={name} path={name} />
+            </FileTree>
+            {source !== null && (
+              <CodeBlock code={source} language={codeLanguage} />
+            )}
+          </>
+        )}
+        {preview && (
+          // Documented composition (ai-sdk.dev/elements/components/web-preview):
+          // WebPreview defaultUrl + Navigation>Url + Body src.
+          <WebPreview defaultUrl={url} className="h-80 border-white/10 bg-white/[0.02]">
+            <WebPreviewNavigation>
+              <WebPreviewUrl />
+            </WebPreviewNavigation>
+            <WebPreviewBody src={url} />
+          </WebPreview>
+        )}
+        <ArtifactDescription>
+          {url ? (
+            <a href={url} className="underline" target="_blank" rel="noreferrer">
+              Download
+            </a>
+          ) : (
+            "Produced in the sandbox"
+          )}
+        </ArtifactDescription>
+      </ArtifactContent>
+    </Artifact>
+  )
+}
+
 function NativeToolStep({ native }: { native: NativeTool }) {
   switch (native.type) {
+    // Searches (web / url / people / finance) render ONLY as the Chain of
+    // Thought search subcomponents nested inside a Task: the Task title
+    // streams the high-level "what's being searched", the results render as
+    // ChainOfThoughtSearchResults. No Tool cards, no Sandbox, no step chrome.
     case "response.reasoning.search_queries":
       return (
-        <ChainOfThoughtStep icon={SearchIcon} label="Searching the web">
-          <CallTask title={`${native.queries.length} quer${native.queries.length === 1 ? "y" : "ies"}`} items={native.queries} />
-        </ChainOfThoughtStep>
+        <CallTask
+          title={`Searching the web · ${native.queries.length} quer${native.queries.length === 1 ? "y" : "ies"}`}
+          items={native.queries}
+        />
       )
 
     case "response.reasoning.fetch_url_queries":
       return (
-        <ChainOfThoughtStep icon={LinkIcon} label="Fetching pages">
-          <CallTask title={`${native.urls.length} URL${native.urls.length === 1 ? "" : "s"}`} items={native.urls} />
-        </ChainOfThoughtStep>
+        <CallTask
+          title={`Fetching pages · ${native.urls.length} URL${native.urls.length === 1 ? "" : "s"}`}
+          items={native.urls}
+        />
       )
 
     // finance_search streams its own reasoning events before the terminal
@@ -561,70 +698,64 @@ function NativeToolStep({ native }: { native: NativeTool }) {
     // results array on the response.
     case "response.reasoning.finance_search_queries":
       return (
-        <ChainOfThoughtStep
-          icon={TrendingUpIcon}
-          label="Looking up markets"
-          status="active"
-        >
-          <CallTask
-            title={(native.categories ?? ["quote"]).join(", ")}
-            items={native.tickers ?? []}
-          />
-        </ChainOfThoughtStep>
+        <CallTask
+          title={`Looking up markets · ${(native.categories ?? ["quote"]).join(", ")}`}
+          items={native.tickers ?? []}
+        />
       )
 
     case "response.reasoning.finance_search_results":
       return (
-        <ChainOfThoughtStep icon={TrendingUpIcon} label="Market data">
-          <ResultBadges
-            items={native.results.flatMap((r) =>
-              (r.sources ?? []).map((url) => ({ title: r.category, url }))
-            )}
-          />
+        <SearchResultsTask
+          title="Market data"
+          items={native.results.flatMap((r) =>
+            (r.sources ?? []).map((url) => ({ title: r.category, url }))
+          )}
+        >
           {native.results.map((r, i) => (
             <MessageResponse key={i}>{r.content}</MessageResponse>
           ))}
-        </ChainOfThoughtStep>
+        </SearchResultsTask>
       )
 
     case "response.reasoning.search_results":
     case "search_results":
       return (
-        <ChainOfThoughtStep icon={SearchIcon} label="Web results">
-          <ResultBadges items={native.results.map((r) => ({ title: r.title || r.url, url: r.url }))} />
-        </ChainOfThoughtStep>
+        <SearchResultsTask
+          title="Web results"
+          items={native.results.map((r) => ({ title: r.title || r.url, url: r.url }))}
+        />
       )
 
     case "people_search_results":
       return (
-        <ChainOfThoughtStep icon={UsersIcon} label="People">
-          <ResultBadges items={native.results.map((r) => ({ title: r.title || r.url, url: r.url }))} />
-        </ChainOfThoughtStep>
+        <SearchResultsTask
+          title="People"
+          items={native.results.map((r) => ({ title: r.title || r.url, url: r.url }))}
+        />
       )
 
     case "finance_results":
       return (
-        <ChainOfThoughtStep
-          icon={TrendingUpIcon}
-          label={native.tickers?.length ? `Finance · ${native.tickers.join(", ")}` : "Finance"}
+        <SearchResultsTask
+          title={native.tickers?.length ? `Finance · ${native.tickers.join(", ")}` : "Finance"}
+          items={native.results.flatMap((r) =>
+            (r.sources ?? []).map((url) => ({ title: r.category, url }))
+          )}
         >
-          <ResultBadges
-            items={native.results.flatMap((r) =>
-              (r.sources ?? []).map((url) => ({ title: r.category, url }))
-            )}
-          />
           {native.results.map((r, i) => (
             <MessageResponse key={i}>{r.content}</MessageResponse>
           ))}
-        </ChainOfThoughtStep>
+        </SearchResultsTask>
       )
 
     case "response.reasoning.fetch_url_results":
     case "fetch_url_results":
       return (
-        <ChainOfThoughtStep icon={LinkIcon} label="Fetched pages">
-          <ResultBadges items={native.contents.map((c) => ({ title: c.title || c.url, url: c.url }))} />
-        </ChainOfThoughtStep>
+        <SearchResultsTask
+          title="Fetched pages"
+          items={native.contents.map((c) => ({ title: c.title || c.url, url: c.url }))}
+        />
       )
 
     case "mcp_list_tools":
@@ -664,7 +795,6 @@ function NativeToolStep({ native }: { native: NativeTool }) {
         </ChainOfThoughtStep>
       )
 
-    // Sandbox gets the real Sandbox component, nested inside a step.
     case "sandbox_results": {
       const output = native.results
         .map((r) => [r.stdout, r.stderr].filter(Boolean).join("\n"))
@@ -675,19 +805,61 @@ function NativeToolStep({ native }: { native: NativeTool }) {
         native.status === "timed_out" ||
         native.results.some((r) => r.exit_code !== 0)
 
-      // Sandbox output that is a list of urls is a search result, not a code
-      // execution. Render it as one.
-      const links = failed
-        ? []
-        : sandboxLinks(native.results.map((r) => r.stdout).join("\n"))
-      if (links.length > 0) {
+      // The sandbox ships the pplx CLI, so the model searches through bash.
+      // A `pplx search` IS a web search: it leads with Task and renders
+      // ChainOfThoughtSearchResults, never the Terminal.
+      if (native.language === "bash") {
+        const search = native.code.match(PPLX_SEARCH)
+        if (search) {
+          const [, kind, query] = search
+          const links = extractLinks(native.results.map((r) => r.stdout).join("\n"))
+          return (
+            <Task className="border-white/10 bg-white/[0.02]">
+              <TaskTrigger title={`Searching the ${kind || "web"} · ${query}`} />
+              <TaskContent>
+                {links.length > 0 ? (
+                  <ResultBadges items={links} />
+                ) : (
+                  <TaskItem>{query}</TaskItem>
+                )}
+              </TaskContent>
+            </Task>
+          )
+        }
+        // ANSI framing per the upstream terminal example: cyan $ prompt,
+        // red error tail on a failed exit.
+        const exitCode = native.results.find((r) => r.exit_code !== 0)?.exit_code
+        const ansi =
+          `\u001B[36m$\u001B[0m ${native.code}\n${output}` +
+          (failed ? `\n\u001B[31m✗\u001B[0m exit ${exitCode ?? 1}` : "")
         return (
-          <ChainOfThoughtStep icon={SearchIcon} label="Web results">
-            <ResultBadges items={links} />
+          <ChainOfThoughtStep
+            icon={TerminalIcon}
+            label="Running commands"
+            status={native.status === "in_progress" ? "active" : "complete"}
+          >
+            <Terminal
+              autoScroll
+              className="border-white/10"
+              output={ansi}
+              isStreaming={native.status === "in_progress"}
+            >
+              <TerminalHeader>
+                <TerminalTitle>bash</TerminalTitle>
+                <div className="flex items-center gap-1">
+                  <TerminalStatus>Running…</TerminalStatus>
+                  <TerminalActions>
+                    <TerminalCopyButton />
+                  </TerminalActions>
+                </div>
+              </TerminalHeader>
+              <TerminalContent />
+            </Terminal>
           </ChainOfThoughtStep>
         )
       }
 
+      // Python code execution is the one thing Sandbox is for.
       return (
         <ChainOfThoughtStep
           icon={TerminalIcon}
@@ -703,7 +875,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
             className="border-white/10 bg-white/[0.03]"
           >
             <SandboxHeader
-              title={`Sandbox · ${native.language}`}
+              title="Sandbox · python"
               state={sandboxStateFromStatus(native.status, failed)}
             />
             <SandboxContent>
@@ -719,7 +891,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
                   </SandboxTabsList>
                 </SandboxTabsBar>
                 <SandboxTabContent value="code">
-                  <CodeBlock code={native.code} language={native.language} />
+                  <CodeBlock code={native.code} language="python" />
                 </SandboxTabContent>
                 <SandboxTabContent value="output">
                   <CodeBlock code={output || "(no output)"} language="log" />
@@ -731,44 +903,28 @@ function NativeToolStep({ native }: { native: NativeTool }) {
       )
     }
 
-    // Files the sandbox produced. Images render inline through the Image
-    // component; anything else is an artifact card with a download link.
+    // Files the sandbox produced. Images render immediately through
+    // ChainOfThoughtImage; code files get the Artifact IDE (FileTree +
+    // CodeBlock + WebPreview for html); office docs and everything else are
+    // an Artifact card, with a WebPreview when the browser can render it.
     case "share_file": {
       const name = native.filename ?? "file"
       const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(name)
+      if (!native.error && isImage && native.url) {
+        // Any image produced by an execution renders immediately, no card.
+        return (
+          <ChainOfThoughtImage caption={name}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={native.url} alt={name} className="h-auto max-w-full" />
+          </ChainOfThoughtImage>
+        )
+      }
       return (
         <ChainOfThoughtStep icon={FileIcon} label={name}>
           {native.error ? (
             <p className="text-destructive text-xs">{native.error}</p>
-          ) : isImage && native.url ? (
-            // ChainOfThoughtImage (chain-of-thought.tsx:205-214) is the SDK's
-            // native wrapper for imagery in Chain of Thought; it carries the
-            // framing and caption this hand-rolled <img> was approximating
-            // with its own classes and an eslint suppression.
-            <ChainOfThoughtImage caption={name}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={native.url} alt={name} className="h-auto max-w-full" />
-            </ChainOfThoughtImage>
           ) : (
-            <Artifact className="border-white/10 bg-white/[0.02] backdrop-blur-sm">
-              <ArtifactHeader>
-                <div className="flex items-center gap-2">
-                  <FileIcon className="size-4 text-muted-foreground" />
-                  <ArtifactTitle>{name}</ArtifactTitle>
-                </div>
-              </ArtifactHeader>
-              <ArtifactContent>
-                <ArtifactDescription>
-                  {native.url ? (
-                    <a href={native.url} className="underline" target="_blank" rel="noreferrer">
-                      Download
-                    </a>
-                  ) : (
-                    "Produced in the sandbox"
-                  )}
-                </ArtifactDescription>
-              </ArtifactContent>
-            </Artifact>
+            <ShareFileArtifact name={name} url={native.url ?? null} />
           )}
         </ChainOfThoughtStep>
       )
@@ -783,28 +939,48 @@ function NativeToolStep({ native }: { native: NativeTool }) {
       const thought = "thought" in native ? native.thought : null
       if (!thought) return null
       return (
-        <ChainOfThoughtStep
-          icon={BrainIcon}
-          label="Thinking"
-          description={<MessageResponse>{thought}</MessageResponse>}
-        />
+        <ChainOfThoughtStep icon={BrainIcon} label="Thinking">
+          <MessageResponse>{thought}</MessageResponse>
+        </ChainOfThoughtStep>
       )
     }
   }
 }
 
+// GenUI: a tool whose string output IS a JSX fragment renders live through
+// JSXPreview instead of as escaped text. Deliberately strict — a leading tag
+// and a closing angle bracket — so prose or JSON never trips it.
+function jsxOutput(part: DynamicToolUIPart): string | null {
+  if (part.state !== "output-available") return null
+  const out = "output" in part ? part.output : undefined
+  if (typeof out !== "string") return null
+  const trimmed = out.trim()
+  return /^<[A-Za-z][^>]*>/.test(trimmed) && trimmed.endsWith(">") ? trimmed : null
+}
+
 function GenericTool({ part, className }: { part: DynamicToolUIPart; className?: string }) {
   const input = partInput(part)
+  const jsx = jsxOutput(part)
   return (
     <Tool className={cn("border-white/10 backdrop-blur-sm", className ?? "bg-white/[0.02]")}>
       <ToolHeader state={part.state} type="dynamic-tool" toolName={part.toolName} />
       <ToolContent>
         {input !== undefined && <ToolInput input={input} />}
-        {(part.state === "output-available" || part.state === "output-error") && (
-          <ToolOutput
-            errorText={part.state === "output-error" ? part.errorText : undefined}
-            output={"output" in part ? part.output : undefined}
-          />
+        {jsx ? (
+          // Documented usage (ai-sdk.dev/elements/components/jsx-preview):
+          // JSXPreview wraps JSXPreviewContent + JSXPreviewError; the parser
+          // renders the string, the error child surfaces parse failures.
+          <JSXPreview jsx={jsx} className="p-4">
+            <JSXPreviewContent />
+            <JSXPreviewError />
+          </JSXPreview>
+        ) : (
+          (part.state === "output-available" || part.state === "output-error") && (
+            <ToolOutput
+              errorText={part.state === "output-error" ? part.errorText : undefined}
+              output={"output" in part ? part.output : undefined}
+            />
+          )
         )}
         {part.toolName === "list_agent_response_files" && <ListFilesArtifacts part={part} />}
       </ToolContent>
@@ -820,13 +996,14 @@ export function AgentActivity({
   isThinking: boolean
 }) {
   const reasoningParts = parts.filter(isReasoningUIPart)
-  // The think tool gets its own step rather than a generic tool card: its
-  // cycles already stream as data-thinking-cycle parts below, so a full
-  // ToolOutput would repeat every cycle verbatim. It is NOT hidden, though —
-  // it used to be filtered out entirely, which meant a think call that failed
-  // (a real, live case: KeyError 'model_id') showed the user nothing at all.
-  // isDynamicToolUIPart is the SDK's own guard; the arrow keeps the narrowed
-  // DynamicToolUIPart type through the additional toolName test.
+  // The think tool never renders as a generic tool card: the reasoning
+  // stage's notes stream as reasoning parts (thought blocks above), so a
+  // ToolOutput of its final message would repeat what already streamed.
+  // Its part still matters twice below: a failed call renders its error (a
+  // real, live case: KeyError 'model_id'), and its presence alone keeps the
+  // Chain of Thought block mounted. isDynamicToolUIPart is the SDK's own
+  // guard; the arrow keeps the narrowed DynamicToolUIPart type through the
+  // additional toolName test.
   const dynamicTools = parts.filter(isDynamicToolUIPart)
   const thinkParts = dynamicTools.filter((p) => p.toolName === "think")
   const toolParts = dynamicTools.filter((p) => p.toolName !== "think")
@@ -851,10 +1028,12 @@ export function AgentActivity({
 
   return (
     <ChainOfThought
-      // Open while the turn is still running so reasoning, searches, and
-      // sandbox output are visible as they stream. Collapsed by default once
-      // finished, since the answer is what matters after the fact.
-      defaultOpen={isThinking}
+      // The component's own uncontrolled mode (useControllableState with
+      // defaultOpen, chain-of-thought.tsx:50-54): open by default so finished
+      // reasoning stays visible, user toggles freely after that. An earlier
+      // controlled `open={userOpen ?? isThinking}` auto-collapsed the block
+      // at turn end and hid the entire chain of thought behind a 70px stub.
+      defaultOpen
       className="rounded-xl border border-white/10 bg-white/[0.02] p-4 backdrop-blur-md"
     >
       <ChainOfThoughtHeader>{isThinking ? "Thinking…" : "Chain of Thought"}</ChainOfThoughtHeader>
@@ -867,6 +1046,21 @@ export function AgentActivity({
             all tools, then all reasoning -- regrouped the timeline and made
             the handoff visible. */}
         {parts.map((part, i) => {
+          // GWEN-6: route.ts emits one reconciled data-retry part (stable id
+          // "retry") when the workflow's model retry policy re-runs a turn.
+          // The attempt counter updates in place as retries accumulate.
+          if (part.type === "data-retry") {
+            const attempt = (part as { data?: { attempt?: number } }).data?.attempt
+            return (
+              <ChainOfThoughtStep
+                key="retry"
+                icon={WrenchIcon}
+                label={`Retrying${typeof attempt === "number" ? ` · attempt ${attempt}` : ""}`}
+                status={isThinking ? "active" : "complete"}
+              />
+            )
+          }
+
           if (part.type === "data-native-tool") {
             const native = (part as NativeToolPart).data
             return (
@@ -884,29 +1078,39 @@ export function AgentActivity({
                 key={`reasoning-${i}`}
                 icon={BrainIcon}
                 label="Thinking"
-                description={<MessageResponse>{part.text}</MessageResponse>}
                 status={
                   isThinking && i === parts.length - 1 ? "active" : "complete"
                 }
-              />
+              >
+                <MessageResponse>{part.text}</MessageResponse>
+              </ChainOfThoughtStep>
             )
           }
 
           if (isDynamicToolUIPart(part)) {
-            // The reasoning stage is not a tool card: it is the thought blocks
-            // above. Only a failure is worth a step of its own.
+            // The reasoning stage streams its notes as text deltas on the
+            // "thinking" topic, which route.ts turns into reasoning parts —
+            // the thought blocks rendered above, interleaved with its tool
+            // activity in true order across every event-loop cycle. The
+            // think tool's own output is the stage's final message, whose
+            // text already streamed as those same deltas, so rendering it
+            // here would print the handoff twice. Only a failure has no
+            // other surface (a real, live case: KeyError 'model_id'), so
+            // only the error state renders.
             if (part.toolName === "think") {
-              if (part.state !== "output-error") return null
-              return (
-                <ChainOfThoughtStep
-                  key={part.toolCallId}
-                  icon={BrainIcon}
-                  label="Thinking"
-                  status="complete"
-                >
-                  <p className="text-destructive text-xs">{part.errorText}</p>
-                </ChainOfThoughtStep>
-              )
+              if (part.state === "output-error") {
+                return (
+                  <ChainOfThoughtStep
+                    key={part.toolCallId}
+                    icon={BrainIcon}
+                    label="Thinking"
+                    status="complete"
+                  >
+                    <p className="text-destructive text-xs">{part.errorText}</p>
+                  </ChainOfThoughtStep>
+                )
+              }
+              return null
             }
 
             const chain = chainByCreateId.get(part.toolCallId)

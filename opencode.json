@@ -1,24 +1,19 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "default_agent": "plan-controller",
+  "default_agent": "code",
   "instructions": [
-    "AGENTS.md",
-    ".opencode/context/README.md",
-    ".opencode/context/plan.md",
-    ".opencode/state/ledger.json"
+    "AGENTS.md"
   ],
-  "snapshot": false,
-  "share": "disabled",
+  "snapshot": true,
+  "share": "auto",
   "subagent_depth": 1,
   "permission": {
-    "edit": "deny",
-    "bash": "deny",
-    "task": {
-      "*": "deny",
-      "task-implementer": "allow",
-      "spec-reviewer": "allow",
-      "quality-reviewer": "allow"
-    }
+    "edit": "allow",
+    "bash": "allow",
+    "webfetch": "allow",
+    "task": "allow",
+    "doom_loop": "allow",
+    "external_directory": "allow"
   },
   "compaction": {
     "auto": true,

@@ -16,6 +16,7 @@ from strands.models._openai_errors import classify_openai_error
 from strands.types.exceptions import ContextWindowOverflowException
 from strands.types.streaming import StreamEvent
 from strands.types.tools import ToolChoice, ToolSpec
+from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 
@@ -296,7 +297,16 @@ class PerplexityModel(Model):
         except perplexity.APIError as error:
             self._raise_sdk_error(error)
 
-        yield {"messageStart": {"role": "assistant"}}
+        # GWEN-6: a Temporal retry of this activity republishes every frame
+        # from the start while the failed attempt's partial frames are already
+        # in the stream log. Carrying the attempt number lets downstream
+        # consumers distinguish attempts. Guarded so streaming outside an
+        # activity context (unit tests, direct use) stays byte-identical —
+        # optional infra degrades gracefully, never raises (see telemetry.py).
+        message_start: dict[str, Any] = {"role": "assistant"}
+        if activity.in_activity():
+            message_start["attempt"] = activity.info().attempt
+        yield cast(StreamEvent, {"messageStart": message_start})
         next_index = 0
         next_output_index = 0
         output_blocks: dict[int, dict[str, Any]] = {}

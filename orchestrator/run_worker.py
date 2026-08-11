@@ -43,6 +43,7 @@ from temporalio.client import Client
 from temporalio.contrib.strands import StrandsPlugin
 from temporalio.worker import Worker
 
+import think_activity
 from compare_workflow import CompareWorkflow
 from config import TASK_QUEUE
 from perplexity_model import PerplexityModel
@@ -344,12 +345,18 @@ async def main() -> None:
         ],
     )
 
+    # The think activity resolves the session's model from the same factory
+    # mapping StrandsPlugin holds; the api key stays inside the closures.
+    think_activity.configure(model_factories)
+
     worker = Worker(
         client,
         task_queue=TASK_QUEUE,
         workflows=[ChatWorkflow, CompareWorkflow],
-        # No activities= : every activity here is registered by StrandsPlugin
-        # itself (the model and MCP activities).
+        # StrandsPlugin registers the model and MCP activities itself; think
+        # is ours (strands_tools' think as an activity_as_tool -- see
+        # think_activity.py).
+        activities=[think_activity.think],
     )
 
     # Only after discovery, identity validation, and worker assembly all

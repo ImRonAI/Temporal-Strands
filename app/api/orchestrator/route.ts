@@ -225,7 +225,10 @@ export async function POST(req: Request) {
       // that is already open, or leaving reasoning-start unmatched, is a UI
       // Message Stream protocol violation the client renders as a duplicated
       // or permanently-pending block.
-      const textId = "response"
+      // Mutable: an activity retry (see the messageStart handler) ends the
+      // aborted attempt's text block and rotates to a fresh id — a text-end'd
+      // id must never receive further deltas.
+      let textId = "response"
       let textStarted = false
 
       // A NEW reasoning part per contiguous run of reasoning, not one part for
@@ -307,6 +310,14 @@ export async function POST(req: Request) {
         // Distinguishes successive native frames that carry no id of their own
         // (the reasoning stream), so each renders as its own step.
         let nativeSeq = 0
+        // GWEN-6: which topics currently have an open model message. A
+        // Temporal retry of the model activity republishes the whole message
+        // from the start, and messageStop is yielded only on terminal success
+        // (orchestrator/perplexity_model.py:499) — so a messageStart arriving
+        // while this set already holds its topic is unambiguously a retry of
+        // an attempt whose partial frames were already streamed.
+        const openMessages = new Set<string>()
+        let retryAttempt = 1
         // parseJsonEventStream is the AI SDK's own SSE reader: it decodes,
         // frames on the event-source protocol, drops [DONE], and safely
         // parses each payload. Hand-rolling this missed \r\n framing.
@@ -418,6 +429,48 @@ export async function POST(req: Request) {
 
             if ("done" in event) {
               finalReply = event.reply
+              continue
+            }
+
+            // GWEN-6: messageStart/messageStop bracket one model-activity
+            // attempt per topic. A messageStart while that topic's message is
+            // still open means the previous attempt failed mid-stream and
+            // Temporal is retrying — the retry republishes every frame from
+            // the start, so the aborted attempt's partial output must be
+            // reconciled away rather than left to duplicate.
+            if ("messageStart" in event && "topic" in event) {
+              const topic = event.topic
+              if (openMessages.has(topic)) {
+                retryAttempt++
+                // Close the aborted attempt's open blocks so the retry's
+                // frames open fresh ones instead of appending to them.
+                closeReasoning()
+                openTool = undefined
+                if (textStarted) {
+                  writer.write({ type: "text-end", id: textId })
+                  textStarted = false
+                  textId = `response-retry-${retryAttempt}`
+                }
+                // The retry re-emits the same native frames; resetting the
+                // sequence makes their data-part ids collide with the failed
+                // attempt's, so the client reconciles them in place instead
+                // of appending a second copy of every step.
+                nativeSeq = 0
+                // A single reconciled part (stable id, like data-session /
+                // data-approval) the UI can render as a retrying state
+                // during the backoff window.
+                writer.write({
+                  type: "data-retry",
+                  id: "retry",
+                  data: { attempt: retryAttempt },
+                })
+              }
+              openMessages.add(topic)
+              continue
+            }
+
+            if ("messageStop" in event && "topic" in event) {
+              openMessages.delete(event.topic)
               continue
             }
 

@@ -1,18 +1,40 @@
 "use client"
 
 import Link from "next/link"
+import { motion } from "motion/react"
+import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 
 const NAV = ["Community", "Pricing", "Enterprise", "Docs"]
 
 export function SiteHeader() {
+  const [scrolled, setScrolled] = useState(false)
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 16)
+    onScroll()
+    window.addEventListener("scroll", onScroll, { passive: true })
+    return () => window.removeEventListener("scroll", onScroll)
+  }, [])
+
   return (
-    <header className="relative z-20 flex items-center justify-between gap-4 px-5 py-5 sm:px-8">
+    <motion.header
+      initial={{ opacity: 0, y: -12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+      className={cn(
+        "sticky top-0 z-30 flex items-center justify-between gap-4 border-b px-5 py-4 transition-[background-color,border-color] duration-500 sm:px-8",
+        scrolled
+          ? "border-white/[0.06] bg-background/60 backdrop-blur-xl"
+          : "border-transparent bg-transparent"
+      )}
+    >
       <div className="flex items-center gap-2.5">
         <span
           aria-hidden="true"
-          className="grid size-7 place-items-center rounded-md border border-white/10 bg-white/[0.04] backdrop-blur-sm"
+          className="grid size-7 place-items-center rounded-md border border-white/10 bg-white/[0.04] backdrop-blur-sm transition-shadow duration-500 hover:shadow-[0_0_16px_-2px_oklch(0.62_0.205_277/0.6)]"
         >
           <svg
             className="size-4 text-foreground"
@@ -63,11 +85,11 @@ export function SiteHeader() {
         </Button>
         <Button
           size="sm"
-          className="rounded-full bg-foreground px-4 text-background hover:bg-foreground/90"
+          className="rounded-full bg-foreground px-4 text-background transition-transform duration-300 hover:scale-[1.03] hover:bg-foreground/90 active:scale-95"
         >
           Start building
         </Button>
       </div>
-    </header>
+    </motion.header>
   )
 }

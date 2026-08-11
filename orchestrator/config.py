@@ -12,6 +12,14 @@ MODEL_RETRY_POLICY = RetryPolicy(
     maximum_interval=timedelta(seconds=30),
     maximum_attempts=6,
 )
+# The think activity streams every model chunk to the thinking topic; same
+# batching Temporal documents for LLM streaming (see workflow.py's
+# streaming_batch_interval note -- this is a history-pressure dial).
+THINK_STREAM_BATCH_INTERVAL = timedelta(milliseconds=200)
+# Temporal's hard per-payload limit is 2MB; the continue-as-new input carries
+# agent.messages, so oversized toolResult text (think transcripts, sandbox
+# stdout) must be clamped before rollover or the workflow wedges (TMPRL1103).
+ROLLOVER_TOOL_RESULT_MAX_CHARS = 20_000
 EMBEDDING_GENERATIONS = {
     "memory-v1": {
         "model": "pplx-embed-context-v1-0.6b",

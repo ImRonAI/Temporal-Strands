@@ -1,5 +1,8 @@
-strands-agents==1.50.2
-strands-agents-tools==0.8.5
+strands-agents[gemini]==1.50.2
+strands-agents-tools[local_chromium_browser]==0.8.5
+strands-heterogeneous-graph-tool @ file:../../strands-tools
+strands-shell==0.3.3
+google-genai==2.19.0
 temporalio[strands-agents,pydantic]==1.31.0
 perplexityai==0.42.0
 lancedb==0.36.0

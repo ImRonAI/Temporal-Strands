@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "shell": {
+      "command": ".venv/bin/strands-shell",
+      "args": ["--mcp"]
+    },
+    "datacommons": {
+      "url": "${DATACOMMONS_MCP_URL}",
+      "headers": {
+        "X-API-Key": "${DC_API_KEY}"
+      },
+      "continue_on_error": true
+    },
+    "pophive": {
+      "url": "${POPHIVE_MCP_URL}",
+      "continue_on_error": true
+    }
+  }
+}

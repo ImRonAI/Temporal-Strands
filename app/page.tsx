@@ -26,7 +26,12 @@ import { DEFAULT_MODEL } from "@/lib/perplexity"
 import { cn } from "@/lib/utils"
 import { AgentActivity } from "@/components/v0/agent-activity"
 import { BlurpleBackground } from "@/components/v0/blurple-background"
+import { GraphActivity } from "@/components/v0/graph-activity"
+import { computerUsePreview } from "@/components/v0/computer-use"
+import { ComputerUsePreviewPanel } from "@/components/v0/computer-use-preview"
 import { Composer } from "@/components/v0/composer"
+import { projectIdePreview } from "@/components/v0/project-ide"
+import { ProjectIdePanel } from "@/components/v0/project-ide-panel"
 import { SiteHeader } from "@/components/v0/site-header"
 
 const LINK_SAFETY = { enabled: false } as const
@@ -133,7 +138,7 @@ export default function Page() {
   // orchestrator session (see orchestrator/workflow.py) instead of starting
   // a fresh one every message.
 
-  const { messages, setMessages, status, sendMessage, stop } = useChat({
+  const { messages, setMessages, status, sendMessage, stop, error } = useChat({
     transport: new DefaultChatTransport({ api: "/api/orchestrator" }),
     // Without this every token re-renders the whole conversation: the two
     // full messages x parts scans below, plus AgentActivity's filter passes
@@ -222,6 +227,46 @@ export default function Page() {
   }
 
   const hasConversation = messages.length > 0
+  const lastMessage = messages.at(-1)
+  const awaitingAssistant =
+    status === "submitted" && lastMessage?.role === "user"
+  const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant")
+  const browserPreview = computerUsePreview(
+    lastAssistant?.parts,
+    status === "streaming"
+  )
+  const projectIde = projectIdePreview(
+    lastAssistant?.parts,
+    status === "streaming"
+  )
+  const [dismissedPreview, setDismissedPreview] = useState("")
+  const [dismissedIde, setDismissedIde] = useState("")
+  const [previewRequested, setPreviewRequested] = useState(false)
+  useEffect(() => {
+    setDismissedPreview("")
+  }, [browserPreview.sessionId])
+  useEffect(() => {
+    setDismissedIde("")
+  }, [projectIde.sessionId])
+  useEffect(() => {
+    if (projectIde.isDevServer || projectIde.previewUrl) {
+      setPreviewRequested(true)
+    }
+  }, [projectIde.isDevServer, projectIde.previewUrl, projectIde.sessionId])
+  const showBrowserPreview =
+    browserPreview.open && dismissedPreview !== browserPreview.sessionId
+  const sessionKey = projectIde.sessionId || "manual"
+  const showProjectIde =
+    !showBrowserPreview &&
+    dismissedIde !== sessionKey &&
+    (previewRequested || projectIde.open)
+  const splitPreview = showBrowserPreview || showProjectIde
+
+  function giveControl(message: PromptInputMessage) {
+    const text = message.text?.trim()
+    if (!text) return
+    sendMessage({ text }, { body: { model, sessionId } })
+  }
 
   function submit(message: PromptInputMessage) {
     const hasText = Boolean(message.text?.trim())
@@ -241,7 +286,7 @@ export default function Page() {
   }
 
   return (
-    <main className="relative flex min-h-screen flex-col">
+    <main className="relative flex h-dvh flex-col overflow-hidden">
       <BlurpleBackground settled={hasConversation} />
       <SiteHeader />
 
@@ -252,13 +297,32 @@ export default function Page() {
         {hasConversation ? (
           <motion.section
             key="chat"
-            className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 pb-6"
+            className={cn(
+              "flex min-h-0 w-full flex-1 overflow-hidden",
+              splitPreview
+                ? "flex-col lg:flex-row"
+                : "mx-auto max-w-3xl flex-col px-4 pb-6"
+            )}
             initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.4, ease: EASE }}
           >
-            <Conversation className="flex-1">
+            <div
+              className={cn(
+                "flex min-h-0 flex-col",
+                splitPreview
+                  ? "order-2 min-h-[40vh] w-full border-t border-white/10 lg:order-1 lg:min-h-0 lg:max-w-md lg:flex-none lg:border-r lg:border-t-0"
+                  : "min-h-0 flex-1"
+              )}
+            >
+            <div
+              className={cn(
+                "flex min-h-0 flex-1 flex-col",
+                splitPreview ? "mx-auto w-full px-4 pb-4 pt-3 lg:pb-6" : "min-h-0"
+              )}
+            >
+            <Conversation className="min-h-0 flex-1">
               <ConversationContent className="gap-8 py-8">
                 {messages.map((message, messageIndex) => (
                   <MessageShell key={message.id} reduce={reduce}>
@@ -268,10 +332,15 @@ export default function Page() {
                           <AgentActivity
                             parts={message.parts}
                             isThinking={
-                              status === "streaming" &&
+                              (status === "streaming" || status === "submitted") &&
                               messageIndex === messages.length - 1
                             }
                           />
+                        )}
+                        {/* Formation graph canvas: renders only for messages
+                            carrying data-graph-event parts (GWEN-29). */}
+                        {message.role === "assistant" && (
+                          <GraphActivity parts={message.parts} />
                         )}
                         {message.parts.map((part, i) => {
                           if (isTextUIPart(part)) {
@@ -321,12 +390,42 @@ export default function Page() {
                     </Message>
                   </MessageShell>
                 ))}
+                {awaitingAssistant && (
+                  <MessageShell key="awaiting-assistant" reduce={reduce}>
+                    <Message from="assistant">
+                      <MessageContent>
+                        <AgentActivity parts={[]} isThinking />
+                      </MessageContent>
+                    </Message>
+                  </MessageShell>
+                )}
               </ConversationContent>
               <ConversationScrollButton />
             </Conversation>
 
             <AnimatePresence>
-              {pendingApproval ? (
+              {error ? (
+                <motion.div
+                  key="chat-error"
+                  className="mb-2"
+                  initial={
+                    reduce ? false : { opacity: 0, y: 16, scale: 0.98 }
+                  }
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 8, scale: 0.99 }}
+                  transition={{ duration: 0.35, ease: EASE }}
+                >
+                  <Alert
+                    variant="destructive"
+                    className="border-destructive/25 bg-card/80 backdrop-blur-xl"
+                    data-testid="chat-error"
+                  >
+                    <AlertTitle>Request failed</AlertTitle>
+                    <AlertDescription>{error.message}</AlertDescription>
+                  </Alert>
+                </motion.div>
+              ) : null}
+              {pendingApproval && !showBrowserPreview ? (
                 <motion.div
                   key="approval"
                   className="mb-2"
@@ -379,9 +478,59 @@ export default function Page() {
                   status={status}
                   onStop={stop}
                   placeholder="Ask for a change, or start something new…"
+                  previewActive={showProjectIde}
+                  onPreview={() => {
+                    setDismissedIde("")
+                    setPreviewRequested(true)
+                  }}
                 />
               </motion.div>
             </div>
+            </div>
+            </div>
+
+            <AnimatePresence>
+              {showBrowserPreview ? (
+                <motion.div
+                  key={browserPreview.sessionId}
+                  className="order-1 flex min-h-0 min-w-0 flex-1 flex-col lg:order-2 lg:min-h-0"
+                  initial={reduce ? false : { opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 12 }}
+                  transition={{ duration: 0.45, ease: EASE }}
+                >
+                  <ComputerUsePreviewPanel
+                    preview={browserPreview}
+                    isStreaming={status === "streaming"}
+                    status={status}
+                    pendingApproval={pendingApproval}
+                    onApprove={() => answerApproval("approve")}
+                    onDeny={() => answerApproval("deny")}
+                    onClose={() => setDismissedPreview(browserPreview.sessionId)}
+                    onStop={stop}
+                    onGiveControl={giveControl}
+                  />
+                </motion.div>
+              ) : showProjectIde ? (
+                <motion.div
+                  key={sessionKey}
+                  className="order-1 flex min-h-0 min-w-0 flex-1 flex-col lg:order-2 lg:min-h-0"
+                  initial={reduce ? false : { opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 12 }}
+                  transition={{ duration: 0.45, ease: EASE }}
+                >
+                  <ProjectIdePanel
+                    ide={projectIde}
+                    previewForced={previewRequested}
+                    onClose={() => {
+                      setDismissedIde(sessionKey)
+                      setPreviewRequested(false)
+                    }}
+                  />
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
           </motion.section>
         ) : (
           <motion.section

@@ -1,12 +1,12 @@
 # Repository Guidelines
 
-v0-style chat product: Next.js UI streams durable agent turns from a Python Temporal/Strands orchestrator backed by Perplexity’s Agent API.
+v0-style chat product: Next.js UI streams durable agent turns from a Python Temporal/Strands orchestrator backed by Google Gemini (`gemini-3.8-flash`).
 
 > **Read this first.** The architecture below is the *target* design. The frontend and the orchestrator's core runtime exist; several supporting modules are still planned. See [Current state](#current-state) for the exact split. Treat planned modules as binding design intent — they are the contract the remaining work builds against — but do not assume you can import or run them.
 
 ## Project Structure & Module Organization
 
-Request path: `app/page.tsx` (`useChat` → `/api/orchestrator`) converts FastAPI SSE into AI SDK UI-message parts; the bridge is `orchestrator/server.py` (`POST /sessions`, `/turns/stream`, `/end`, `/compare/stream`, `/approve`, `GET /health`) talking to Temporal workflow `ChatWorkflow` in `workflow.py`. Workers (`run_worker.py`) register one `PerplexityModel` factory per live `GET /v1/models` id on task queue `perplexity-orchestrator`.
+Request path: `app/page.tsx` (`useChat` → `/api/orchestrator`) converts FastAPI SSE into AI SDK UI-message parts; the bridge is `orchestrator/server.py` (`POST /sessions`, `/turns/stream`, `/end`, `/compare/stream`, `/approve`, `GET /health`) talking to Temporal workflow `ChatWorkflow` in `workflow.py`. Workers (`run_worker.py`) register `GeminiModel` factories (`gemini-3.8-flash` and dynamic alias `gemini-flash-latest`) on task queue `perplexity-orchestrator`.
 
 - `components/ai-elements/` — vendored AI Elements primitives; treat as library code.
 - `components/v0/` — app UI that **composes** those primitives (`composer`, `agent-activity`, `model-picker`, `compare-view`).
@@ -29,9 +29,9 @@ Verified against the working tree. Anything not listed as present is planned.
 | `orchestrator/config.py` | `TASK_QUEUE = "perplexity-orchestrator"`, activity timeouts, `MODEL_RETRY_POLICY`, `EMBEDDING_GENERATIONS` |
 | `orchestrator/telemetry.py` | `telemetry_plugins()` — opt-in Temporal OTel wiring, a no-op unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set |
 | `orchestrator/perplexity_model.py` | the `PerplexityModel` implementation |
-| `orchestrator/workflow.py` | `ChatWorkflow`: durable session, `turn` update, HITL approval, streaming topics, continue-as-new; reasoning stage registered as the `think` tool via `Agent.as_tool` — the UI keys Chain-of-Thought suppression off that exact tool name (`components/v0/agent-activity.tsx:887`), so never rename it |
+| `orchestrator/workflow.py` | `ChatWorkflow`: durable session, `turn` update, HITL approval, streaming topics, continue-as-new. The `think` community tool is discontinued. Native Gemini thought text (`part.thought`) streams as Strands `reasoningContent` on topic `events` and the SSE bridge maps it to AI SDK `reasoning-delta` / Chain of Thought. `AgentActivity` still suppresses a tool card named `think` if one ever appears. |
 | `orchestrator/compare_workflow.py` | `CompareWorkflow`: independent per-model comparison |
-| `orchestrator/run_worker.py` | worker: live model catalog → named factories, native Agent API tools + remote MCP, readiness file |
+| `orchestrator/run_worker.py` | worker: Gemini model factory (`gemini-3.8-flash`) + Strands `MCPClient` from `mcp.json`, readiness file |
 | `orchestrator/server.py` | FastAPI SSE bridge (`POST /sessions`, `/turns/stream`, `/end`, `/compare/stream`, `/approve`, `GET /health`) |
 | `orchestrator/agent.json` | agent identity: `name` + system `prompt` |
 | `orchestrator/requirements.txt` | pinned deps (`strands-agents`, `temporalio[strands-agents,pydantic]`, `perplexityai`, `lancedb`, `fastapi`, `mcp`, `pytest`, …) |

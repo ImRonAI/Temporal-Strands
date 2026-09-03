@@ -1,23 +1,19 @@
 "use client"
 
 import {
-  DefaultGeneratedFile,
   isDynamicToolUIPart,
   isReasoningUIPart,
   type DynamicToolUIPart,
   type UIMessage,
 } from "ai"
-import { type ReactNode, useEffect, useState } from "react"
+import { type ReactNode, createElement, useEffect, useState } from "react"
 import type { BundledLanguage } from "shiki"
 import {
-  BrainIcon,
   FileIcon,
-  PlugIcon,
-  SparklesIcon,
-  TerminalIcon,
-  WrenchIcon,
 } from "lucide-react"
 
+import { Image } from "@/components/ai-elements/image"
+import { MessageResponse } from "@/components/ai-elements/message"
 import { cn } from "@/lib/utils"
 
 import {
@@ -47,21 +43,27 @@ import {
   FileTree,
   FileTreeFile,
 } from "@/components/ai-elements/file-tree"
-import { Image } from "@/components/ai-elements/image"
 import {
   JSXPreview,
   JSXPreviewContent,
   JSXPreviewError,
 } from "@/components/ai-elements/jsx-preview"
-import { MessageResponse } from "@/components/ai-elements/message"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card"
 import {
   Terminal,
-  TerminalActions,
   TerminalContent,
-  TerminalCopyButton,
-  TerminalHeader,
-  TerminalStatus,
-  TerminalTitle,
 } from "@/components/ai-elements/terminal"
 import {
   WebPreview,
@@ -93,58 +95,25 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool"
 
-function parseJson(value: unknown): Record<string, unknown> | null {
-  // Tool output is already an object whenever the Strands content block
-  // carried `json` -- app/api/orchestrator/route.ts writes `c.json` straight
-  // through. Only string-testing it returned null for exactly those cases, so
-  // groupToolParts never saw a response id and every sub-agent card stayed
-  // stuck on "queued" with no results.
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, unknown>
-  }
-  if (typeof value !== "string" || !value) return null
-  try {
-    const parsed = JSON.parse(value)
-    return typeof parsed === "object" && parsed !== null ? parsed : null
-  } catch {
-    return null
-  }
-}
-
-// "input" is present on every DynamicToolUIPart state except
-// "input-streaming" (confirmed against the type directly, including
-// "output-error" — a real bug found live: this component used to only
-// look at "input-available" / "output-available", so every failed call
-// (real ones — the model guessing invalid model ids for the create call)
-// fell back to a blank placeholder instead of showing what it actually
-// tried and why it failed).
-function partInput(part: DynamicToolUIPart): Record<string, unknown> | undefined {
-  return "input" in part ? (part.input as Record<string, unknown>) : undefined
-}
-
-function partOutputJson(part: DynamicToolUIPart): Record<string, unknown> | null {
-  if (part.state !== "output-available") return null
-  return parseJson(part.output)
-}
-
-// "results" means something entirely different depending on item type —
-// SearchResult[] on search_results, SandboxResultsOutputItemResult[] on
-// sandbox_results (verified against the installed perplexity SDK's
-// output_item.py) — so this has to discriminate on `type`, not treat
-// "has a results array" as one shape everywhere.
-type SearchResultsItem = {
-  type: "search_results"
-  results?: { title?: string; url?: string }[]
-}
-type SandboxResultsItem = {
-  type: "sandbox_results"
-  code?: string
-  // Real constraint per SandboxResultsOutputItem.language: Literal["python", "bash"]
-  language?: "python" | "bash"
-  status?: string
-  results?: { stdout?: string; stderr?: string; exit_code?: number; status?: string }[]
-}
-type OutputItem = SearchResultsItem | SandboxResultsItem | { type?: string; filename?: string }
+// Pure grouping/binding/projection helpers live in agent-run.ts so the
+// scoped Vitest suite covers them without a DOM test stack.
+import {
+  type AgentChain,
+  type AgentRunSnapshot,
+  type DownloadFileMeta,
+  bindRunsToChains,
+  downloadFileMeta,
+  groupToolParts,
+  isTerminalRunStatus,
+  parseJson,
+  partInput,
+  partOutputJson,
+  projectRunTimeline,
+} from "./agent-run"
+import {
+  COMPUTER_USE_TOOL_NAMES,
+  computerUseFields,
+} from "./computer-use"
 
 // Native Agent API tool payloads, forwarded verbatim by the orchestrator and
 // emitted as `data-native-tool` parts by app/api/orchestrator/route.ts. Field
@@ -191,6 +160,47 @@ type NativeTool =
       status: "completed" | "timed_out" | "failed" | "in_progress"
       results: Array<{ stdout: string; stderr: string; exit_code: number; duration_ms: number }>
     }
+  // Sandbox file-operation items (SDK output_item.py): per-invocation results
+  // of the glob/grep/read/write/edit/apply_patch tools inside the sandbox.
+  | {
+      type: "sandbox_glob" | "sandbox_grep"
+      call_id: string
+      count?: number | null
+      files?: string[] | null
+      truncated?: boolean | null
+      error?: string | null
+    }
+  | {
+      type: "sandbox_read_file"
+      call_id: string
+      file_path: string
+      content?: string | null
+      start_line?: number | null
+      total_lines?: number | null
+      error?: string | null
+    }
+  | {
+      type: "sandbox_write_file"
+      call_id: string
+      file_path: string
+      size_bytes?: number | null
+      error?: string | null
+    }
+  | {
+      type: "sandbox_edit_file"
+      call_id: string
+      file_path?: string | null
+      message?: string | null
+      error?: string | null
+    }
+  | {
+      type: "sandbox_apply_patch"
+      call_id: string
+      added?: string[] | null
+      deleted?: string[] | null
+      modified?: string[] | null
+      error?: string | null
+    }
   | {
       type: "mcp_list_tools"
       server_label: string
@@ -205,15 +215,34 @@ type NativeTool =
       output?: string | null
       error?: string | null
     }
-  | {
+    | {
       type: "share_file"
       filename?: string | null
       file_id?: string | null
       url?: string | null
       error?: string | null
     }
+  | {
+      type: "google_maps"
+      google_maps_widget_context_token?: string | null
+      places?: Array<{ title?: string; uri?: string; placeId?: string }>
+    }
+  | {
+      type: "google_search"
+      queries?: string[]
+      results?: Array<{ title?: string; uri?: string }>
+      images?: Array<{ title?: string; image_uri: string; source_uri?: string }>
+    }
 
 type NativeToolPart = { type: "data-native-tool"; id?: string; data: NativeTool }
+
+// Official Place Contextual element only. JSX Preview is the map widget;
+// place photos and sources use Chain of Thought, not this parser.
+// https://developers.google.com/maps/documentation/javascript/reference/places-widget#PlaceContextualElement
+const GMP_MAP = {
+  "gmp-place-contextual": (props: Record<string, unknown>) =>
+    createElement("gmp-place-contextual", props),
+}
 
 // SandboxResultsOutputItem.status is its own real enum ("in_progress" |
 // "completed" | "failed" | "timed_out" — verified against the installed
@@ -221,187 +250,213 @@ type NativeToolPart = { type: "data-native-tool"; id?: string; data: NativeTool 
 // (which SandboxHeader actually requires). Mapping rather than hardcoding
 // one state regardless of what really happened.
 
-// One create_agent_response call plus every retrieve/list/download call
-// that shares its response id — grouped so the UI shows ONE live-updating
-// sub-agent card instead of a flat list of same-looking "Sub-task" steps
-// with no visible relationship between the spawn and its polls.
-interface AgentChain {
-  key: string
-  create: DynamicToolUIPart
-  polls: DynamicToolUIPart[]
-  downloads: DynamicToolUIPart[]
+// One reconciled data-agent-run part per nested preset run, emitted by
+// app/api/orchestrator/route.ts from the backend's agent_runs topic.
+type AgentRunPart = { type: "data-agent-run"; id?: string; data: AgentRunSnapshot }
+
+// The nested run's live status while its tool result hasn't landed yet.
+function chainStatus(chain: AgentChain, run: AgentRunSnapshot | undefined): string {
+  const json = partOutputJson(chain.create)
+  const terminalStatus = json?.status
+  if (typeof terminalStatus === "string") return terminalStatus
+  if (chain.create.state === "output-error") return "failed"
+  if (run) return run.status
+  return "queued"
 }
 
-function groupToolParts(toolParts: DynamicToolUIPart[]) {
-  const chains: AgentChain[] = []
-  const chainByResponseId = new Map<string, AgentChain>()
-  const standalone: DynamicToolUIPart[] = []
-
-  for (const part of toolParts) {
-    if (part.toolName === "create_agent_response") {
-      const chain: AgentChain = { key: part.toolCallId, create: part, polls: [], downloads: [] }
-      chains.push(chain)
-      const json = partOutputJson(part)
-      const responseId = json?.id
-      if (typeof responseId === "string") chainByResponseId.set(responseId, chain)
-      continue
-    }
-
-    const responseId = partInput(part)?.response_id
-    const chain = typeof responseId === "string" ? chainByResponseId.get(responseId) : undefined
-    if (!chain) {
-      standalone.push(part)
-      continue
-    }
-    if (part.toolName === "download_agent_response_file") {
-      chain.downloads.push(part)
-    } else {
-      chain.polls.push(part)
-    }
-  }
-
-  // Keyed by the create call's own id, plus the ids this grouping absorbed,
-  // so a single ordered walk over parts can render each chain at the position
-  // of its create call and skip the polls it already contains.
-  const chainByCreateId = new Map(chains.map((c) => [c.create.toolCallId, c]))
-  const absorbedIds = new Set(
-    chains.flatMap((c) =>
-      [...c.polls, ...c.downloads].map((p) => p.toolCallId)
-    )
-  )
-
-  return { chains, standalone, chainByCreateId, absorbedIds }
-}
-
-function latestJson(chain: AgentChain): Record<string, unknown> | null {
-  for (let i = chain.polls.length - 1; i >= 0; i--) {
-    const json = partOutputJson(chain.polls[i])
-    if (json) return json
-  }
-  return partOutputJson(chain.create)
-}
-
-function AgentChainCard({ chain }: { chain: AgentChain }) {
+/**
+ * One preset sub-agent run: the create tool call, its live agent_runs
+ * snapshot, and the retrieve/list/download calls bound to it by response id.
+ *
+ * Composition is the native AI Elements chain the plan requires: the caller
+ * renders this inside an outer ChainOfThoughtStep; here it is
+ * Agent > AgentHeader + AgentContent, a Task for the run, and a nested
+ * ChainOfThought inside TaskContent built from the same ChainOfThought*
+ * subcomponents (and NativeToolStep renderers) the outer chain uses.
+ */
+function AgentChainCard({
+  chain,
+  run,
+}: {
+  chain: AgentChain
+  run: AgentRunSnapshot | undefined
+}) {
   const input = partInput(chain.create) as
-    | { instructions?: string; task?: string; preset?: string; model?: string; models?: string[] }
+    | {
+        instructions?: string
+        input?: string
+        task?: string
+        model?: string
+        models?: string[]
+      }
     | undefined
-  const json = latestJson(chain)
-  const status = (json?.status as string | undefined) ?? (chain.create.state === "output-error" ? "failed" : "queued")
-  const outputItems = (json?.output as OutputItem[] | undefined) ?? []
-  const searchResults = outputItems
-    .filter((item): item is SearchResultsItem => item.type === "search_results")
-    .flatMap((item) => item.results ?? [])
-  const sandboxItems = outputItems.filter(
-    (item): item is SandboxResultsItem => item.type === "sandbox_results"
-  )
-  const modelLabel = input?.model || input?.models?.[0] || input?.preset || "preset default"
-  // Real field on the response object (json.reasoning.summary) — null
-  // unless reasoning_effort is set high enough for Perplexity to populate
-  // it. Not streamed like the outer turn's reasoning (this is a one-shot
-  // activity call, not a live SSE connection), so this is the only
-  // sub-agent "reasoning trace" available at all right now.
-  const reasoningSummary = (json?.reasoning as { summary?: string } | undefined)?.summary
+  const json = partOutputJson(chain.create)
+  const status = chainStatus(chain, run)
+  const running = !isTerminalRunStatus(status) && chain.create.state !== "output-error"
+  // The actually-selected model from the run/response wins over the
+  // requested override; the preset default is the last resort.
+  const modelLabel =
+    run?.model ||
+    (typeof json?.model === "string" ? json.model : undefined) ||
+    input?.model ||
+    input?.models?.[0] ||
+    run?.preset ||
+    "preset default"
+  // Streamed final markdown: the live snapshot while streaming, the terminal
+  // tool result's output text once it lands. Rendered ONCE here (the caller's
+  // own answer keeps its existing MessageResponse; this never feeds it).
+  const finalText =
+    run?.text ||
+    (typeof json?.output_text === "string" ? json.output_text : "")
+  const errorText =
+    chain.create.state === "output-error"
+      ? chain.create.errorText
+      : (run?.error ??
+        (typeof (json?.error as { message?: string } | null | undefined)
+          ?.message === "string"
+          ? (json?.error as { message: string }).message
+          : undefined))
 
-  const images = chain.downloads
-    .map((d) => ({ part: d, json: partOutputJson(d) }))
+  // Files delivered by download_agent_response_file: bounded metadata plus a
+  // browser-safe /api/orchestrator/file proxy URL — never base64 bytes.
+  const downloads = chain.downloads
+    .map((d) => ({ part: d, meta: downloadFileMeta(partOutputJson(d)) }))
     .filter(
-      (d): d is { part: DynamicToolUIPart; json: { binary_content_base64: string; content_type: string } } =>
-        typeof d.json?.binary_content_base64 === "string" &&
-        typeof d.json?.content_type === "string" &&
-        (d.json.content_type as string).startsWith("image/")
+      (d): d is { part: DynamicToolUIPart; meta: DownloadFileMeta } =>
+        d.meta !== null
     )
+
+  const runLabel = run?.preset ? `Sub-agent · ${run.preset}` : "Sub-agent"
 
   return (
     <Agent className="border-white/10 bg-white/[0.02] backdrop-blur-sm">
-      <AgentHeader model={modelLabel} name={`Sub-agent · ${status}`} />
-      <AgentContent>
-        <AgentInstructions>{input?.instructions ?? input?.task ?? "…"}</AgentInstructions>
+      <AgentHeader model={modelLabel} name={`${runLabel} · ${status}`} />
+      {/* Bounded: the nested timeline/output scrolls inside the card; page
+          scrolling stays with the outer native Conversation. */}
+      <AgentContent className="max-h-[28rem] overflow-y-auto">
+        <AgentInstructions>
+          {input?.instructions ?? input?.input ?? input?.task ?? "…"}
+        </AgentInstructions>
 
-        {reasoningSummary && (
-          <ChainOfThoughtStep icon={BrainIcon} label="Sub-agent reasoning">
-            <MessageResponse>{reasoningSummary}</MessageResponse>
-          </ChainOfThoughtStep>
-        )}
+        {run && <RunTask run={run} running={running} />}
 
-        {searchResults.length > 0 && (
-          <ChainOfThoughtSearchResults>
-            {searchResults.slice(0, 8).map((r, i) => (
-              <ChainOfThoughtSearchResult key={`${r.url}-${i}`}>
-                {r.title ?? r.url}
-              </ChainOfThoughtSearchResult>
-            ))}
-          </ChainOfThoughtSearchResults>
-        )}
+        {/* The run's accumulated final output, streaming while live. It also
+            reaches the caller as this preset tool's toolResult; it is never
+            injected into the outer answer stream. */}
+        {finalText && <MessageResponse>{finalText}</MessageResponse>}
 
-        {sandboxItems.map((item, i) => {
-          const output = (item.results ?? [])
-            .map((r) => [r.stdout, r.stderr].filter(Boolean).join("\n"))
-            .filter(Boolean)
-            .join("\n---\n")
-          return (
-            <Sandbox key={i} className="border-white/10 bg-white/[0.03]">
-              <SandboxHeader title="Sandbox execution" state={sandboxStateFromStatus(item.status ?? "", false)} />
-              <SandboxContent>
-                <SandboxTabs defaultValue="code">
-                  <SandboxTabsBar>
-                    <SandboxTabsList>
-                      <SandboxTabsTrigger value="code">Code</SandboxTabsTrigger>
-                      <SandboxTabsTrigger value="output">Output</SandboxTabsTrigger>
-                    </SandboxTabsList>
-                  </SandboxTabsBar>
-                  <SandboxTabContent value="code">
-                    <CodeBlock code={item.code ?? ""} language={item.language ?? "python"} />
-                  </SandboxTabContent>
-                  <SandboxTabContent value="output">
-                    <CodeBlock code={output} language="log" />
-                  </SandboxTabContent>
-                </SandboxTabs>
-              </SandboxContent>
-            </Sandbox>
-          )
-        })}
-
-        {images.map(({ part, json: imgJson }) => {
-          const file = new DefaultGeneratedFile({
-            data: imgJson.binary_content_base64,
-            mediaType: imgJson.content_type,
-          })
-          return (
-            // ChainOfThoughtImage is the SDK's own wrapper for imagery inside
-            // Chain of Thought: it supplies the framing and the caption slot
-            // (chain-of-thought.tsx:205-214). Image stays as the child --
-            // it is the primitive that actually renders the bytes.
-            <ChainOfThoughtImage
-              key={part.toolCallId}
-              caption="File produced by the sub-agent"
-            >
-              <Image
-                base64={file.base64}
-                uint8Array={file.uint8Array}
-                mediaType={file.mediaType}
-                alt="File produced by the sub-agent"
+        {downloads.map(({ part, meta }) =>
+          meta.url && meta.contentType?.startsWith("image/") ? (
+            <ChainOfThoughtImage key={part.toolCallId} caption={meta.filename}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={meta.url}
+                alt={meta.filename}
+                className="h-auto max-w-full"
               />
             </ChainOfThoughtImage>
+          ) : (
+            <ShareFileArtifact
+              key={part.toolCallId}
+              name={meta.filename}
+              url={meta.url}
+            />
           )
-        })}
-
-        {chain.create.state === "output-error" && (
-          <p className="text-destructive text-xs">{chain.create.errorText}</p>
         )}
+
+        {errorText && <p className="text-destructive text-xs">{errorText}</p>}
         {chain.polls.some((p) => p.state === "output-error") && (
           <p className="text-destructive text-xs">
             {chain.polls.find((p) => p.state === "output-error")?.errorText}
           </p>
         )}
 
-        <Task className="border-white/10 bg-white/[0.02]">
-          <TaskTrigger title={`${1 + chain.polls.length + chain.downloads.length} call(s)`} />
-          <TaskContent>
-            {[chain.create, ...chain.polls, ...chain.downloads].map((part) => (
-              <GenericTool key={part.toolCallId} part={part} className="bg-white/[0.03]" />
-            ))}
-          </TaskContent>
-        </Task>
+        {(chain.polls.length > 0 || chain.downloads.length > 0) && (
+          <Task className="border-white/10 bg-white/[0.02]" defaultOpen={false}>
+            <TaskTrigger
+              title={`${chain.polls.length + chain.downloads.length} lifecycle call(s)`}
+            />
+            <TaskContent>
+              {[...chain.polls, ...chain.downloads].map((part) => (
+                <GenericTool
+                  key={part.toolCallId}
+                  part={part}
+                  className="bg-white/[0.03]"
+                />
+              ))}
+            </TaskContent>
+          </Task>
+        )}
+      </AgentContent>
+    </Agent>
+  )
+}
+
+// The run's live timeline: a Task whose TaskContent holds a nested
+// ChainOfThought built from the same native ChainOfThought* subcomponents and
+// NativeToolStep renderers the outer chain uses — reasoning text, native tool
+// calls/results, skill-loaded steps, sandbox/MCP/search/fetch/finance/people
+// outputs, and share-file artifacts, in the API's sequence order.
+function RunTask({ run, running }: { run: AgentRunSnapshot; running: boolean }) {
+  const timeline = projectRunTimeline(run.events)
+  return (
+    <Task className="border-white/10 bg-white/[0.02]" defaultOpen>
+      <TaskTrigger
+        title={`Run ${run.responseId ?? run.activityId} · ${run.events.length} event(s)`}
+      />
+      <TaskContent>
+        <ChainOfThought defaultOpen>
+          <ChainOfThoughtHeader>
+            {running ? "Working…" : "Sub-agent activity"}
+          </ChainOfThoughtHeader>
+          <ChainOfThoughtContent>
+            {run.attempt > 1 && (
+              <ChainOfThoughtStep
+                label={`Reconnected · attempt ${run.attempt}`}
+                status="complete"
+              />
+            )}
+            {timeline.map((entry) => {
+              if (entry.kind === "reasoning") {
+                return (
+                  <ChainOfThoughtStep
+                    key={entry.key}
+                    label="Thinking"
+                    status={running ? "active" : "complete"}
+                  >
+                    <MessageResponse isAnimating={running}>{entry.text}</MessageResponse>
+                  </ChainOfThoughtStep>
+                )
+              }
+              return (
+                <NativeToolStep
+                  key={entry.key}
+                  native={entry.native as NativeTool}
+                />
+              )
+            })}
+          </ChainOfThoughtContent>
+        </ChainOfThought>
+      </TaskContent>
+    </Task>
+  )
+}
+
+// A run whose create tool part hasn't arrived or bound yet: same Agent >
+// AgentContent > Task composition, rendered from the snapshot alone so the
+// stream is visible from the very first frame.
+function UnboundRunCard({ run }: { run: AgentRunSnapshot }) {
+  const running = !isTerminalRunStatus(run.status)
+  return (
+    <Agent className="border-white/10 bg-white/[0.02] backdrop-blur-sm">
+      <AgentHeader
+        model={run.model ?? run.preset}
+        name={`Sub-agent · ${run.preset} · ${run.status}`}
+      />
+      <AgentContent className="max-h-[28rem] overflow-y-auto">
+        <RunTask run={run} running={running} />
+        {run.text && <MessageResponse>{run.text}</MessageResponse>}
+        {run.error && <p className="text-destructive text-xs">{run.error}</p>}
       </AgentContent>
     </Agent>
   )
@@ -469,17 +524,136 @@ function ResultBadges({ items }: { items: Array<{ title: string; url?: string }>
 // A search call in flight — the queries or URLs the model asked for, before
 // any results come back. Task streams the high-level "what's being searched";
 // TaskTrigger's built-in SearchIcon is the visual cue.
-function CallTask({ title, items }: { title: string; items: string[] }) {
+function CallTask({
+  title,
+  items = [],
+  children,
+}: {
+  title: string
+  items?: string[]
+  children?: ReactNode
+}) {
+  const hasBody = items.length > 0 || children != null
   return (
     <Task className="border-white/10 bg-white/[0.02]">
       <TaskTrigger title={title} />
+      {hasBody ? (
+        <TaskContent>
+          {items.map((item, i) => (
+            <TaskItem key={`${item}-${i}`}>{item}</TaskItem>
+          ))}
+          {children}
+        </TaskContent>
+      ) : null}
+    </Task>
+  )
+}
+
+function dynamicToolStatus(
+  part: DynamicToolUIPart,
+  isThinking: boolean
+): "complete" | "active" | "pending" {
+  if (part.state === "output-error") return "pending"
+  if (
+    isThinking &&
+    (part.state === "input-available" ||
+      part.state === "input-streaming" ||
+      part.state === "approval-requested")
+  ) {
+    return "active"
+  }
+  return "complete"
+}
+
+function computerUseStepLabel(part: DynamicToolUIPart): string {
+  const { intent, action } = computerUseFields(part)
+  return intent || action || part.toolName
+}
+
+/** One Task per computer-use run; steps are TaskItems (native task.tsx pattern). */
+function ComputerUseTask({
+  parts,
+  isThinking,
+}: {
+  parts: DynamicToolUIPart[]
+  isThinking: boolean
+}) {
+  const running = isThinking && parts.some((p) => dynamicToolStatus(p, true) === "active")
+  const active = running || isThinking
+  const [open, setOpen] = useState(active)
+  const [seenActive, setSeenActive] = useState(active)
+  if (active !== seenActive) {
+    setSeenActive(active)
+    if (active) setOpen(true)
+  }
+  return (
+    <Task
+      className="border-white/10 bg-white/[0.02]"
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <TaskTrigger title="Computer use" />
       <TaskContent>
-        {items.map((item, i) => (
-          <TaskItem key={`${item}-${i}`}>{item}</TaskItem>
-        ))}
+        {parts.map((part) => {
+          const { screenshot } = computerUseFields(part)
+          const label = computerUseStepLabel(part)
+          return (
+            <div key={part.toolCallId} className="space-y-2">
+              <TaskItem>{label}</TaskItem>
+              {part.toolName === "take_screenshot" && screenshot ? (
+                <ChainOfThoughtImage caption={label}>
+                  <Image
+                    alt={label}
+                    base64={screenshot.base64}
+                    mediaType={screenshot.mediaType}
+                    uint8Array={new Uint8Array()}
+                  />
+                </ChainOfThoughtImage>
+              ) : null}
+              {part.state === "output-error" ? (
+                <p className="text-destructive text-xs">{part.errorText}</p>
+              ) : null}
+            </div>
+          )
+        })}
       </TaskContent>
     </Task>
   )
+}
+
+type ActivitySegment =
+  | { kind: "single"; part: UIMessage["parts"][number]; index: number }
+  | { kind: "computer-use"; parts: DynamicToolUIPart[] }
+
+function buildActivitySegments(parts: UIMessage["parts"]): ActivitySegment[] {
+  const segments: ActivitySegment[] = []
+  let i = 0
+  while (i < parts.length) {
+    const part = parts[i]
+    if (
+      isDynamicToolUIPart(part) &&
+      part.toolName !== "think" &&
+      COMPUTER_USE_TOOL_NAMES.has(part.toolName)
+    ) {
+      const group: DynamicToolUIPart[] = []
+      while (i < parts.length) {
+        const current = parts[i]
+        if (
+          !isDynamicToolUIPart(current) ||
+          !COMPUTER_USE_TOOL_NAMES.has(current.toolName)
+        ) {
+          break
+        }
+        group.push(current)
+        i++
+      }
+      segments.push({ kind: "computer-use", parts: group })
+      continue
+    }
+    segments.push({ kind: "single", part, index: i })
+    i++
+  }
+  return segments
 }
 
 // Search results — every search-shaped native renders as the Chain of Thought
@@ -671,8 +845,346 @@ function ShareFileArtifact({ name, url }: { name: string; url: string | null }) 
   )
 }
 
+function GroundingImages({
+  images,
+}: {
+  images: Array<{ title?: string; image_uri: string; source_uri?: string }>
+}) {
+  if (images.length === 0) return null
+  return (
+    <div className="grid w-full grid-cols-2 gap-2 min-[28rem]:grid-cols-3">
+      {images.map((image, i) => (
+        <SourcePhotoTile
+          key={`${image.image_uri}-${i}`}
+          src={image.image_uri}
+          title={image.title || "Search image"}
+          url={image.source_uri}
+        />
+      ))}
+    </div>
+  )
+}
+
+function SourcePhotoTile({
+  src,
+  title,
+  url,
+  website,
+  address,
+  rating,
+  reviews,
+  credit,
+}: {
+  src: string
+  title: string
+  url?: string
+  website?: string
+  address?: string
+  rating?: number
+  reviews?: number
+  credit?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const meta = [
+    address,
+    typeof rating === "number"
+      ? `${rating.toFixed(1)}${typeof reviews === "number" ? ` · ${reviews.toLocaleString()} reviews` : ""}`
+      : undefined,
+    credit ? `Photo: ${credit}` : undefined,
+  ].filter(Boolean) as string[]
+
+  return (
+    <>
+      <HoverCard open={open ? false : undefined}>
+        <HoverCardTrigger
+          render={
+            <button
+              type="button"
+              className="group relative aspect-[4/3] w-full overflow-hidden rounded-xl bg-muted ring-1 ring-white/10"
+              onClick={() => setOpen(true)}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={src}
+                alt={title}
+                className="size-full object-cover transition duration-300 ease-out group-hover:scale-[1.08] group-hover:brightness-110"
+              />
+              <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent opacity-80 transition duration-300 group-hover:opacity-100" />
+              <span className="pointer-events-none absolute inset-x-0 bottom-0 p-2.5 text-left font-medium text-white text-xs leading-snug drop-shadow-sm">
+                {title}
+              </span>
+            </button>
+          }
+        />
+        <HoverCardContent className="w-80 overflow-hidden p-0" side="top">
+          <Card className="gap-0 py-0 ring-0" size="sm">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={src} alt={title} className="aspect-video w-full object-cover" />
+            <CardHeader className="px-3 pt-3">
+              <CardTitle className="text-sm">{title}</CardTitle>
+              {meta.length > 0 ? (
+                <CardDescription className="space-y-0.5">
+                  {meta.map((line) => (
+                    <span key={line} className="block">
+                      {line}
+                    </span>
+                  ))}
+                </CardDescription>
+              ) : null}
+            </CardHeader>
+            {url || website ? (
+              <CardContent className="space-y-1 px-3 pb-3">
+                {url ? (
+                  <a
+                    href={url}
+                    rel="noreferrer"
+                    target="_blank"
+                    className="block truncate text-xs underline"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {url.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+                  </a>
+                ) : null}
+                {website && website !== url ? (
+                  <a
+                    href={website}
+                    rel="noreferrer"
+                    target="_blank"
+                    className="block truncate text-xs underline"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {website.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+                  </a>
+                ) : null}
+              </CardContent>
+            ) : null}
+          </Card>
+        </HoverCardContent>
+      </HoverCard>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[92vh] w-[min(96vw,72rem)] max-w-none overflow-hidden p-0 sm:max-w-none">
+          <DialogHeader className="sr-only">
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>{address || title}</DialogDescription>
+          </DialogHeader>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={src}
+            alt={title}
+            className="max-h-[80vh] w-full bg-black object-contain"
+          />
+          <div className="flex flex-wrap items-end justify-between gap-2 px-4 py-3">
+            <div className="min-w-0">
+              <p className="font-medium text-sm">{title}</p>
+              {meta.map((line) => (
+                <p key={line} className="text-muted-foreground text-xs">
+                  {line}
+                </p>
+              ))}
+            </div>
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              {url ? (
+                <a href={url} rel="noreferrer" target="_blank" className="text-xs underline">
+                  Open in Maps
+                </a>
+              ) : null}
+              {website && website !== url ? (
+                <a href={website} rel="noreferrer" target="_blank" className="text-xs underline">
+                  Website
+                </a>
+              ) : null}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
+function placeText(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value
+  if (
+    value &&
+    typeof value === "object" &&
+    "text" in value &&
+    typeof (value as { text: unknown }).text === "string"
+  ) {
+    return (value as { text: string }).text
+  }
+  return undefined
+}
+
+// Maps JS Place Photos for grounding placeIds. The model never sees this;
+// placeId is already on grounding_chunks[].maps.
+// https://developers.google.com/maps/documentation/javascript/place-photos
+type MapsPlaceCtor = new (opts: { id: string }) => {
+  fetchFields: (opts: { fields: string[] }) => Promise<void>
+  displayName?: unknown
+  formattedAddress?: string
+  googleMapsURI?: string
+  websiteURI?: string
+  rating?: number
+  userRatingCount?: number
+  photos?: Array<{
+    getURI: (opts?: { maxHeight?: number; maxWidth?: number }) => string
+    authorAttributions?: Array<{ displayName?: string }>
+  }>
+}
+
+async function mapsPlaceLibrary(): Promise<{ Place: MapsPlaceCtor } | null> {
+  const deadline = Date.now() + 8000
+  while (Date.now() < deadline) {
+    const importLibrary = (
+      window as unknown as {
+        google?: { maps?: { importLibrary?: (name: string) => Promise<unknown> } }
+      }
+    ).google?.maps?.importLibrary
+    if (importLibrary) {
+      return (await importLibrary("places")) as { Place: MapsPlaceCtor }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  return null
+}
+
+function MapsPlaceImage({
+  placeId,
+  title,
+  url,
+}: {
+  placeId: string
+  title?: string
+  url?: string
+}) {
+  const [photo, setPhoto] = useState<{
+    src: string
+    title: string
+    url?: string
+    website?: string
+    address?: string
+    rating?: number
+    reviews?: number
+    credit?: string
+  } | null>(null)
+  useEffect(() => {
+    const id = placeId.replace(/^places\//, "")
+    if (!id) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const lib = await mapsPlaceLibrary()
+        if (!lib || cancelled) return
+        const place = new lib.Place({ id })
+        await place.fetchFields({
+          fields: [
+            "photos",
+            "displayName",
+            "formattedAddress",
+            "googleMapsURI",
+            "websiteURI",
+            "rating",
+            "userRatingCount",
+          ],
+        })
+        const shot = place.photos?.[0]
+        if (!shot || cancelled) return
+        setPhoto({
+          src: shot.getURI({ maxHeight: 1600 }),
+          title: placeText(place.displayName) || title || "Place",
+          url: place.googleMapsURI || url,
+          website: place.websiteURI,
+          address: place.formattedAddress,
+          rating: place.rating,
+          reviews: place.userRatingCount,
+          credit: shot.authorAttributions?.[0]?.displayName,
+        })
+      } catch {
+        // Maps JS missing or Places photo request failed; leave the badge.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [placeId, title, url])
+  if (!photo) {
+    return (
+      <div className="aspect-[4/3] animate-pulse rounded-xl bg-white/5 ring-1 ring-white/10" />
+    )
+  }
+  return <SourcePhotoTile {...photo} />
+}
+
+function MapsPlaceImages({
+  places,
+}: {
+  places: Array<{ title?: string; uri?: string; placeId?: string }>
+}) {
+  const seen = new Set<string>()
+  const unique = places.filter((place) => {
+    if (!place.placeId || seen.has(place.placeId)) return false
+    seen.add(place.placeId)
+    return true
+  })
+  if (unique.length === 0) return null
+  return (
+    <div className="grid w-full grid-cols-2 gap-2 min-[28rem]:grid-cols-3">
+      {unique.map((place) => (
+        <MapsPlaceImage
+          key={place.placeId}
+          placeId={place.placeId!}
+          title={place.title}
+          url={place.uri}
+        />
+      ))}
+    </div>
+  )
+}
+
 function NativeToolStep({ native }: { native: NativeTool }) {
   switch (native.type) {
+    case "google_maps": {
+      const token = native.google_maps_widget_context_token
+      const items = (native.places ?? []).map((place) => ({
+        title: place.title || place.uri || "Place",
+        url: place.uri,
+      }))
+      return (
+        <SearchResultsTask title="Google Maps" items={items}>
+          {token ? (
+            <JSXPreview
+              className="min-h-80 overflow-hidden p-4"
+              components={GMP_MAP}
+              jsx={`<gmp-place-contextual context-token=${JSON.stringify(token)}></gmp-place-contextual>`}
+            >
+              <JSXPreviewContent />
+              <JSXPreviewError />
+            </JSXPreview>
+          ) : null}
+          <MapsPlaceImages places={native.places ?? []} />
+        </SearchResultsTask>
+      )
+    }
+
+    case "google_search": {
+      const queries = native.queries ?? []
+      const results = (native.results ?? []).map((result) => ({
+        title: result.title || result.uri || "",
+        url: result.uri,
+      }))
+      return (
+        <SearchResultsTask
+          title={
+            queries.length === 1
+              ? `Google Search · ${queries[0]}`
+              : "Google Search"
+          }
+          items={results}
+        >
+          <GroundingImages images={native.images ?? []} />
+        </SearchResultsTask>
+      )
+    }
+
     // Searches (web / url / people / finance) render ONLY as the Chain of
     // Thought search subcomponents nested inside a Task: the Task title
     // streams the high-level "what's being searched", the results render as
@@ -760,39 +1272,24 @@ function NativeToolStep({ native }: { native: NativeTool }) {
 
     case "mcp_list_tools":
       return (
-        <ChainOfThoughtStep
-          icon={PlugIcon}
-          label={native.server_label}
-        >
+        <CallTask title={native.server_label}>
           {native.error ? (
             <p className="text-destructive text-xs">{native.error}</p>
           ) : (
             <ResultBadges items={native.tools.map((t) => ({ title: t.name }))} />
           )}
-        </ChainOfThoughtStep>
+        </CallTask>
       )
 
     case "mcp_call":
       return (
-        <ChainOfThoughtStep
-          icon={PlugIcon}
-          label={`${native.server_label} · ${native.name}`}
-        >
-          <Tool className="border-white/10 bg-white/[0.02] backdrop-blur-sm">
-            <ToolHeader
-              state={native.error ? "output-error" : "output-available"}
-              type="dynamic-tool"
-              toolName={native.name}
-            />
-            <ToolContent>
-              <ToolInput input={parseJson(native.arguments) ?? native.arguments} />
-              <ToolOutput
-                errorText={native.error ?? undefined}
-                output={native.output ?? undefined}
-              />
-            </ToolContent>
-          </Tool>
-        </ChainOfThoughtStep>
+        <CallTask title={`${native.server_label} · ${native.name}`}>
+          {native.error ? (
+            <p className="text-destructive text-xs">{native.error}</p>
+          ) : (
+            <TaskItem>{native.output ?? native.arguments}</TaskItem>
+          )}
+        </CallTask>
       )
 
     case "sandbox_results": {
@@ -833,43 +1330,21 @@ function NativeToolStep({ native }: { native: NativeTool }) {
           `\u001B[36m$\u001B[0m ${native.code}\n${output}` +
           (failed ? `\n\u001B[31m✗\u001B[0m exit ${exitCode ?? 1}` : "")
         return (
-          <ChainOfThoughtStep
-            icon={TerminalIcon}
-            label="Running commands"
-            status={native.status === "in_progress" ? "active" : "complete"}
-          >
+          <CallTask title="Running commands">
             <Terminal
-              autoScroll
-              className="border-white/10"
+              className="h-64 rounded-none border-0"
               output={ansi}
               isStreaming={native.status === "in_progress"}
             >
-              <TerminalHeader>
-                <TerminalTitle>bash</TerminalTitle>
-                <div className="flex items-center gap-1">
-                  <TerminalStatus>Running…</TerminalStatus>
-                  <TerminalActions>
-                    <TerminalCopyButton />
-                  </TerminalActions>
-                </div>
-              </TerminalHeader>
-              <TerminalContent />
+              <TerminalContent className="max-h-full" />
             </Terminal>
-          </ChainOfThoughtStep>
+          </CallTask>
         )
       }
 
       // Python code execution is the one thing Sandbox is for.
       return (
-        <ChainOfThoughtStep
-          icon={TerminalIcon}
-          label="Ran code"
-          status={native.status === "in_progress" ? "active" : "complete"}
-        >
-          {/* A failed run is nearly always the model's own retry loop — it
-              writes code, hits an error, and corrects itself. Showing that
-              expanded puts a raw traceback in front of the user as if it were
-              the result. Collapsed by default; still one click away. */}
+        <CallTask title="Ran code">
           <SandboxPanel
             failed={failed}
             className="border-white/10 bg-white/[0.03]"
@@ -879,10 +1354,6 @@ function NativeToolStep({ native }: { native: NativeTool }) {
               state={sandboxStateFromStatus(native.status, failed)}
             />
             <SandboxContent>
-              {/* Always opens on Code. Switching to Output only when a run
-                  failed made two adjacent sandbox blocks disagree about which
-                  tab was showing, which reads as broken. The code is the
-                  stable thing to lead with; Output is one click away. */}
               <SandboxTabs defaultValue="code">
                 <SandboxTabsBar>
                   <SandboxTabsList>
@@ -899,7 +1370,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
               </SandboxTabs>
             </SandboxContent>
           </SandboxPanel>
-        </ChainOfThoughtStep>
+        </CallTask>
       )
     }
 
@@ -911,35 +1382,93 @@ function NativeToolStep({ native }: { native: NativeTool }) {
       const name = native.filename ?? "file"
       const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(name)
       if (!native.error && isImage && native.url) {
-        // Any image produced by an execution renders immediately, no card.
         return (
-          <ChainOfThoughtImage caption={name}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={native.url} alt={name} className="h-auto max-w-full" />
-          </ChainOfThoughtImage>
+          <CallTask title={name}>
+            <ChainOfThoughtImage caption={name}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={native.url} alt={name} className="h-auto max-w-full" />
+            </ChainOfThoughtImage>
+          </CallTask>
         )
       }
       return (
-        <ChainOfThoughtStep icon={FileIcon} label={name}>
+        <CallTask title={name}>
           {native.error ? (
             <p className="text-destructive text-xs">{native.error}</p>
           ) : (
             <ShareFileArtifact name={name} url={native.url ?? null} />
           )}
-        </ChainOfThoughtStep>
+        </CallTask>
+      )
+    }
+
+    case "sandbox_glob":
+    case "sandbox_grep": {
+      const kind = native.type === "sandbox_glob" ? "Finding files" : "Searching files"
+      const files = native.files ?? []
+      return (
+        <CallTask title={`${kind} · ${native.count ?? files.length} match${(native.count ?? files.length) === 1 ? "" : "es"}`}>
+          {native.error ? (
+            <p className="text-destructive text-xs">{native.error}</p>
+          ) : files.length > 0 ? (
+            <ResultBadges items={files.map((f) => ({ title: f }))} />
+          ) : null}
+        </CallTask>
+      )
+    }
+
+    case "sandbox_read_file":
+      return (
+        <CallTask title={`Read ${native.file_path}`}>
+          {native.error && <p className="text-destructive text-xs">{native.error}</p>}
+        </CallTask>
+      )
+
+    case "sandbox_write_file":
+      return (
+        <CallTask title={`Wrote ${native.file_path}`}>
+          {native.error && <p className="text-destructive text-xs">{native.error}</p>}
+        </CallTask>
+      )
+
+    case "sandbox_edit_file":
+      return (
+        <CallTask title={`Edited ${native.file_path ?? "file"}`}>
+          {native.error ? (
+            <p className="text-destructive text-xs">{native.error}</p>
+          ) : native.message ? (
+            <p className="text-muted-foreground text-xs">{native.message}</p>
+          ) : null}
+        </CallTask>
+      )
+
+    case "sandbox_apply_patch": {
+      const touched = [
+        ...(native.added ?? []),
+        ...(native.modified ?? []),
+        ...(native.deleted ?? []),
+      ]
+      return (
+        <CallTask title={`Applied patch · ${touched.length} file${touched.length === 1 ? "" : "s"}`}>
+          {native.error ? (
+            <p className="text-destructive text-xs">{native.error}</p>
+          ) : touched.length > 0 ? (
+            <ResultBadges items={touched.map((f) => ({ title: f }))} />
+          ) : null}
+        </CallTask>
       )
     }
 
     case "response.skill.loaded":
     case "skill_loaded":
-      return <ChainOfThoughtStep icon={SparklesIcon} label={`Loaded ${native.name}`} />
+      return <CallTask title={`Loaded ${native.name}`} />
 
-    // reasoning.started / reasoning.stopped carry an optional thought only.
-    default: {
-      const thought = "thought" in native ? native.thought : null
+    case "response.reasoning.started":
+    case "response.reasoning.stopped": {
+      const thought = native.thought?.trim()
       if (!thought) return null
       return (
-        <ChainOfThoughtStep icon={BrainIcon} label="Thinking">
+        <ChainOfThoughtStep label="Thinking" status="complete">
           <MessageResponse>{thought}</MessageResponse>
         </ChainOfThoughtStep>
       )
@@ -961,6 +1490,7 @@ function jsxOutput(part: DynamicToolUIPart): string | null {
 function GenericTool({ part, className }: { part: DynamicToolUIPart; className?: string }) {
   const input = partInput(part)
   const jsx = jsxOutput(part)
+  const output = "output" in part ? part.output : undefined
   return (
     <Tool className={cn("border-white/10 backdrop-blur-sm", className ?? "bg-white/[0.02]")}>
       <ToolHeader state={part.state} type="dynamic-tool" toolName={part.toolName} />
@@ -970,7 +1500,11 @@ function GenericTool({ part, className }: { part: DynamicToolUIPart; className?:
           // Documented usage (ai-sdk.dev/elements/components/jsx-preview):
           // JSXPreview wraps JSXPreviewContent + JSXPreviewError; the parser
           // renders the string, the error child surfaces parse failures.
-          <JSXPreview jsx={jsx} className="p-4">
+          <JSXPreview
+            className="min-h-80 p-4"
+            components={GMP_MAP}
+            jsx={jsx}
+          >
             <JSXPreviewContent />
             <JSXPreviewError />
           </JSXPreview>
@@ -978,7 +1512,7 @@ function GenericTool({ part, className }: { part: DynamicToolUIPart; className?:
           (part.state === "output-available" || part.state === "output-error") && (
             <ToolOutput
               errorText={part.state === "output-error" ? part.errorText : undefined}
-              output={"output" in part ? part.output : undefined}
+              output={output}
             />
           )
         )}
@@ -1013,18 +1547,56 @@ export function AgentActivity({
   const nativeTools = parts.filter(
     (p): p is NativeToolPart => p.type === "data-native-tool"
   )
-
+  // Nested preset sub-agent runs: one reconciled snapshot per run. The last
+  // occurrence of each part id is the current snapshot (the AI SDK reconciles
+  // data parts by id, so in practice there is one per id already).
+  const agentRuns: AgentRunSnapshot[] = []
+  {
+    const runIndexById = new Map<string, number>()
+    for (const part of parts) {
+      if (part.type !== "data-agent-run") continue
+      const runPart = part as AgentRunPart
+      const key = runPart.id ?? runPart.data.activityId
+      const existing = runIndexById.get(key)
+      if (existing === undefined) {
+        runIndexById.set(key, agentRuns.length)
+        agentRuns.push(runPart.data)
+      } else {
+        agentRuns[existing] = runPart.data
+      }
+    }
+  }
 
   if (
     !reasoningText &&
     toolParts.length === 0 &&
     thinkParts.length === 0 &&
-    nativeTools.length === 0
+    nativeTools.length === 0 &&
+    agentRuns.length === 0
   ) {
-    return null
+    if (!isThinking) return null
+    return (
+      <ChainOfThought
+        defaultOpen
+        className="rounded-xl border border-white/10 bg-white/[0.02] p-4 backdrop-blur-md"
+      >
+        <ChainOfThoughtHeader>Thinking…</ChainOfThoughtHeader>
+        <ChainOfThoughtContent>
+          <ChainOfThoughtStep label="Working" status="active" />
+        </ChainOfThoughtContent>
+      </ChainOfThought>
+    )
   }
 
-  const { chainByCreateId, absorbedIds } = groupToolParts(toolParts)
+  const { chains, chainByCreateId, absorbedIds } = groupToolParts(toolParts)
+  const runByChainKey = bindRunsToChains(chains, agentRuns)
+  // Runs already rendered inside a chain's card; their standalone
+  // data-agent-run parts render nothing.
+  const boundRuns = new Set(
+    [...runByChainKey.values()].map((run) => run.activityId)
+  )
+
+  const segments = buildActivitySegments(parts)
 
   return (
     <ChainOfThought
@@ -1038,25 +1610,29 @@ export function AgentActivity({
     >
       <ChainOfThoughtHeader>{isThinking ? "Thinking…" : "Chain of Thought"}</ChainOfThoughtHeader>
       <ChainOfThoughtContent>
-        {/* One pass over parts in arrival order. ChainOfThoughtContent is a
-            plain space-y-3 stack that renders children as given, and
-            message.parts is already ordered by the AI SDK, so walking it once
-            is what makes the reasoning stage and the orchestrator read as a
-            single agent working through a problem. Rendering by category --
-            all tools, then all reasoning -- regrouped the timeline and made
-            the handoff visible. */}
-        {parts.map((part, i) => {
+        {segments.map((segment, segmentIndex) => {
+          if (segment.kind === "computer-use") {
+            return (
+              <ComputerUseTask
+                key={`computer-use-${segment.parts[0]?.toolCallId ?? segmentIndex}`}
+                parts={segment.parts}
+                isThinking={isThinking}
+              />
+            )
+          }
+
+          const part = segment.part
+          const i = segment.index
+
           // GWEN-6: route.ts emits one reconciled data-retry part (stable id
           // "retry") when the workflow's model retry policy re-runs a turn.
-          // The attempt counter updates in place as retries accumulate.
           if (part.type === "data-retry") {
             const attempt = (part as { data?: { attempt?: number } }).data?.attempt
             return (
               <ChainOfThoughtStep
                 key="retry"
-                icon={WrenchIcon}
                 label={`Retrying${typeof attempt === "number" ? ` · attempt ${attempt}` : ""}`}
-                status={isThinking ? "active" : "complete"}
+                status="complete"
               />
             )
           }
@@ -1071,41 +1647,37 @@ export function AgentActivity({
             )
           }
 
+          if (part.type === "data-agent-run") {
+            const run = (part as AgentRunPart).data
+            if (boundRuns.has(run.activityId)) return null
+            return (
+              <ChainOfThoughtStep key={`agent-run-${run.activityId}`} label={run.activity}>
+                <UnboundRunCard run={run} />
+              </ChainOfThoughtStep>
+            )
+          }
+
           if (isReasoningUIPart(part)) {
             if (!part.text) return null
+            const streaming = part.state === "streaming"
             return (
               <ChainOfThoughtStep
                 key={`reasoning-${i}`}
-                icon={BrainIcon}
                 label="Thinking"
-                status={
-                  isThinking && i === parts.length - 1 ? "active" : "complete"
-                }
+                status={streaming && isThinking ? "active" : "complete"}
               >
-                <MessageResponse>{part.text}</MessageResponse>
+                <MessageResponse isAnimating={streaming && isThinking}>
+                  {part.text}
+                </MessageResponse>
               </ChainOfThoughtStep>
             )
           }
 
           if (isDynamicToolUIPart(part)) {
-            // The reasoning stage streams its notes as text deltas on the
-            // "thinking" topic, which route.ts turns into reasoning parts —
-            // the thought blocks rendered above, interleaved with its tool
-            // activity in true order across every event-loop cycle. The
-            // think tool's own output is the stage's final message, whose
-            // text already streamed as those same deltas, so rendering it
-            // here would print the handoff twice. Only a failure has no
-            // other surface (a real, live case: KeyError 'model_id'), so
-            // only the error state renders.
             if (part.toolName === "think") {
               if (part.state === "output-error") {
                 return (
-                  <ChainOfThoughtStep
-                    key={part.toolCallId}
-                    icon={BrainIcon}
-                    label="Thinking"
-                    status="complete"
-                  >
+                  <ChainOfThoughtStep key={part.toolCallId} label="Thinking" status="pending">
                     <p className="text-destructive text-xs">{part.errorText}</p>
                   </ChainOfThoughtStep>
                 )
@@ -1115,35 +1687,24 @@ export function AgentActivity({
 
             const chain = chainByCreateId.get(part.toolCallId)
             if (chain) {
-              const latestState = chain.polls.at(-1)?.state ?? chain.create.state
-              const done =
-                latestState === "output-error" ||
-                latestJson(chain)?.status === "completed"
+              const run = runByChainKey.get(chain.key)
               return (
                 <ChainOfThoughtStep
                   key={chain.key}
-                  icon={WrenchIcon}
-                  label="create_agent_response"
-                  status={done ? "complete" : "active"}
+                  label={chain.toolName}
+                  status={dynamicToolStatus(part, isThinking)}
                 >
-                  <AgentChainCard chain={chain} />
+                  <AgentChainCard chain={chain} run={run} />
                 </ChainOfThoughtStep>
               )
             }
-            // Polls belong to the card their create call already rendered.
             if (absorbedIds.has(part.toolCallId)) return null
 
             return (
               <ChainOfThoughtStep
                 key={part.toolCallId}
-                icon={WrenchIcon}
                 label={part.toolName}
-                status={
-                  part.state === "output-available" ||
-                  part.state === "output-error"
-                    ? "complete"
-                    : "active"
-                }
+                status={dynamicToolStatus(part, isThinking)}
               >
                 <GenericTool part={part} />
               </ChainOfThoughtStep>

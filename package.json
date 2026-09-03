@@ -12,7 +12,10 @@
     "dev:worker": "wait-on -t 60000 tcp:127.0.0.1:7233 && cd orchestrator && .venv/bin/python -u run_worker.py",
     "dev:api": "wait-on -t 60000 tcp:127.0.0.1:7233 && cd orchestrator && .venv/bin/python -u -m uvicorn server:app --port 8787",
     "dev:web": "wait-on -t 120000 http-get://127.0.0.1:8787/health && next dev",
-    "dev:clean": "bash scripts/free-ports.sh"
+    "dev:clean": "bash scripts/free-ports.sh",
+    "skills:list": "npx skills list",
+    "skills:find": "npx skills find",
+    "skills:add": "npx skills add --copy -y -g"
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.44",

@@ -1,7 +1,9 @@
 "use client"
 
 import type { ChatStatus } from "ai"
-import { PaperclipIcon } from "lucide-react"
+import { AppWindowIcon, PaperclipIcon } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
 
 import {
   Attachment,
@@ -58,13 +60,35 @@ type ComposerProps = {
   status?: ChatStatus
   onStop?: () => void
   placeholder?: string
+  onPreview?: () => void
+  previewActive?: boolean
 }
 
-// The Agent API carries attachments as `input_image` content parts and
-// accepts nothing else (perplexity SDK, input_item_param.py), so the picker
-// offers exactly the formats app/api/orchestrator/route.ts can forward.
-// Accepting PDFs or documents here would mean silently discarding them.
-const ACCEPTED_FILE_TYPES = "image/png,image/jpeg,image/gif,image/webp"
+// Gemini multimodal inputs: image, document, and video formats that
+// app/api/orchestrator/route.ts forwards as Strands content blocks.
+const ACCEPTED_FILE_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "application/pdf",
+  "text/plain",
+  "text/html",
+  "text/csv",
+  "text/markdown",
+  "application/json",
+  "video/mp4",
+  "video/mpeg",
+  "video/quicktime",
+  "video/webm",
+  "video/x-msvideo",
+  "video/x-ms-wmv",
+  "video/x-flv",
+  "video/3gpp",
+  ".md",
+  ".mov",
+  ".avi",
+].join(",")
 
 export function Composer({
   text,
@@ -75,6 +99,8 @@ export function Composer({
   status,
   onStop,
   placeholder,
+  onPreview,
+  previewActive,
 }: ComposerProps) {
   return (
     <PromptInput
@@ -113,6 +139,20 @@ export function Composer({
             </PromptInputActionMenuContent>
           </PromptInputActionMenu>
           <ModelPicker value={model} onValueChange={onModelChange} />
+          {onPreview ? (
+            <Button
+              aria-pressed={previewActive}
+              data-testid="composer-web-preview"
+              onClick={onPreview}
+              size="icon-xs"
+              title="Web preview"
+              type="button"
+              variant={previewActive ? "secondary" : "ghost"}
+            >
+              <AppWindowIcon />
+              <span className="sr-only">Web preview</span>
+            </Button>
+          ) : null}
         </PromptInputTools>
         {/* PromptInputSubmit swaps its own icon off `status` — send arrow
             when idle, spinner on submitted, stop square while streaming (which

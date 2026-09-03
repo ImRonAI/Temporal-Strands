@@ -78,7 +78,7 @@ export const WebPreview = ({
     <WebPreviewContext.Provider value={contextValue}>
       <div
         className={cn(
-          "flex size-full flex-col rounded-lg border bg-card",
+          "flex min-h-0 flex-1 flex-col rounded-lg border bg-card",
           className
         )}
         {...props}
@@ -97,7 +97,7 @@ export const WebPreviewNavigation = ({
   ...props
 }: WebPreviewNavigationProps) => (
   <div
-    className={cn("flex items-center gap-1 border-b p-2", className)}
+    className={cn("flex h-14 shrink-0 items-center gap-1 border-b p-2", className)}
     {...props}
   >
     {children}
@@ -184,13 +184,15 @@ export const WebPreviewBody = ({
   const { url } = useWebPreview();
 
   return (
-    <div className="flex-1">
+    <div className="flex min-h-0 flex-1 flex-col">
       <iframe
-        className={cn("size-full", className)}
-        // oxlint-disable-next-line eslint-plugin-react(iframe-missing-sandbox)
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
+        className={cn("size-full min-h-0 flex-1", className)}
         src={(src ?? url) || undefined}
         title="Preview"
+        // allow-scripts + allow-same-origin together negates sandboxing (browser
+        // warning). Same-origin is only needed for previews that must read
+        // parent state; pass it explicitly via props when required.
+        sandbox="allow-scripts allow-forms allow-popups allow-presentation"
         {...props}
       />
       {loading}

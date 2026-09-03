@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Computer Use</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0a0a0a;
+        overflow: hidden;
+      }
+      img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        background: #0a0a0a;
+      }
+      .status {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #a3a3a3;
+        font: 13px/1.4 system-ui, sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <img id="frame" alt="" hidden />
+    <div id="status" class="status">Connecting to browser…</div>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const wsParam = params.get("ws");
+      const frame = document.getElementById("frame");
+      const status = document.getElementById("status");
+
+      if (!wsParam) {
+        status.textContent = "Missing CDP WebSocket URL.";
+      } else {
+        const wsUrl = wsParam.startsWith("ws://") || wsParam.startsWith("wss://")
+          ? wsParam
+          : "ws://" + wsParam;
+        let seq = 1;
+        const socket = new WebSocket(wsUrl);
+
+        const send = (method, params = {}) => {
+          socket.send(JSON.stringify({ id: seq++, method, params }));
+        };
+
+        socket.addEventListener("open", () => {
+          send("Page.enable");
+          send("Page.startScreencast", { format: "jpeg", quality: 80, everyNthFrame: 1 });
+        });
+
+        socket.addEventListener("message", (event) => {
+          let msg;
+          try {
+            msg = JSON.parse(event.data);
+          } catch {
+            return;
+          }
+          if (msg.method === "Page.screencastFrame") {
+            frame.src = "data:image/jpeg;base64," + msg.params.data;
+            frame.hidden = false;
+            status.hidden = true;
+            send("Page.screencastFrameAck", { sessionId: msg.params.sessionId });
+          }
+        });
+
+        socket.addEventListener("error", () => {
+          status.textContent = "Could not connect to the browser session.";
+          status.hidden = false;
+        });
+
+        socket.addEventListener("close", () => {
+          if (!frame.src) {
+            status.textContent = "Browser session closed.";
+            status.hidden = false;
+          }
+        });
+      }
+    </script>
+  </body>
+</html>

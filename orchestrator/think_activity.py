@@ -28,10 +28,10 @@ no live Agent exists, so parent-tool/model inheritance is resolved differently:
 up by querying the parent workflow's ``model_id`` query through
 ``activity.client()`` and resolved against the worker's registered model
 factories (installed via :func:`configure` at worker startup, the same mapping
-StrandsPlugin gets). The session models carry the Agent API's server-side
-tools (web_search, fetch_url, sandbox, MCP, ...) in their params, so the
-nested agent researches with the same tools the orchestrator has -- which is
-what tool inheritance bought the original.
+StrandsPlugin gets). The session models are GeminiModel factories, so they
+carry Google's built-in tools (Search, Code Execution, URL Context) on
+``gemini_tools``. The nested agent therefore researches with the same model
+tools the orchestrator has -- which is what tool inheritance bought the original.
 """
 
 from __future__ import annotations

@@ -1,0 +1,4370 @@
+{
+  "issue": "GWEN-30",
+  "captured_at": "2026-08-11T14:17:04-0700",
+  "provider": {
+    "model_id": "sonar",
+    "base_url": "https://api.perplexity.ai",
+    "adapter": "strands.models.openai.OpenAIModel"
+  },
+  "graph_id": "evidence-run-1",
+  "topology": {
+    "nodes": [
+      {
+        "id": "research",
+        "system_prompt": "You are a researcher. Answer the task in exactly one short sentence."
+      },
+      {
+        "id": "expert",
+        "type": "skill_agent",
+        "skill": "wf-skill"
+      }
+    ],
+    "edges": [
+      {
+        "from": "research",
+        "to": "expert"
+      }
+    ]
+  },
+  "task": "State one interesting fact about graphs (the data structure). One sentence.",
+  "event_count": 153,
+  "event_type_histogram": {
+    "content+status": 3,
+    "node_id+node_type+type": 2,
+    "event+node_id+type": 144,
+    "node_id+node_result+type": 2,
+    "from_node_ids+to_node_ids+type": 1,
+    "result+type": 1
+  },
+  "events": [
+    {
+      "phase": "create",
+      "seq": 0,
+      "t": 1786483021.086,
+      "event_keys": [
+        "content",
+        "status"
+      ],
+      "event": {
+        "status": "success",
+        "content": [
+          {
+            "text": "Graph evidence-run-1 created successfully with 2 nodes"
+          }
+        ]
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 1,
+      "t": 1786483021.268,
+      "event_keys": [
+        "node_id",
+        "node_type",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_start",
+        "node_id": "research",
+        "node_type": "agent"
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 2,
+      "t": 1786483021.268,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "init_event_loop": true
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 3,
+      "t": 1786483021.268,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "start": true
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 4,
+      "t": 1786483021.268,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "start_event_loop": true
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 5,
+      "t": 1786483023.162,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "messageStart": {
+              "role": "assistant"
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 6,
+      "t": 1786483023.167,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockStart": {
+              "start": {}
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 7,
+      "t": 1786483023.167,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": "A"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 8,
+      "t": 1786483023.167,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": "A",
+          "delta": {
+            "text": "A"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 9,
+      "t": 1786483023.199,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " graph"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 10,
+      "t": 1786483023.199,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " graph",
+          "delta": {
+            "text": " graph"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 11,
+      "t": 1786483023.258,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " can"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 12,
+      "t": 1786483023.258,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " can",
+          "delta": {
+            "text": " can"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 13,
+      "t": 1786483023.258,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " model"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 14,
+      "t": 1786483023.258,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " model",
+          "delta": {
+            "text": " model"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 15,
+      "t": 1786483023.258,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " **"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 16,
+      "t": 1786483023.258,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " **",
+          "delta": {
+            "text": " **"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 17,
+      "t": 1786483023.288,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": "any"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 18,
+      "t": 1786483023.288,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": "any",
+          "delta": {
+            "text": "any"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 19,
+      "t": 1786483023.288,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": "**"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 20,
+      "t": 1786483023.288,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": "**",
+          "delta": {
+            "text": "**"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 21,
+      "t": 1786483023.305,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " relationship"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 22,
+      "t": 1786483023.305,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " relationship",
+          "delta": {
+            "text": " relationship"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 23,
+      "t": 1786483023.306,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " network"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 24,
+      "t": 1786483023.306,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " network",
+          "delta": {
+            "text": " network"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 25,
+      "t": 1786483023.306,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": ","
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 26,
+      "t": 1786483023.306,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": ",",
+          "delta": {
+            "text": ","
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 27,
+      "t": 1786483023.317,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " from"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 28,
+      "t": 1786483023.317,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " from",
+          "delta": {
+            "text": " from"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 29,
+      "t": 1786483023.338,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " social"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 30,
+      "t": 1786483023.339,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " social",
+          "delta": {
+            "text": " social"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 31,
+      "t": 1786483023.407,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " connections"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 32,
+      "t": 1786483023.407,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " connections",
+          "delta": {
+            "text": " connections"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 33,
+      "t": 1786483023.407,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " to"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 34,
+      "t": 1786483023.407,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " to",
+          "delta": {
+            "text": " to"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 35,
+      "t": 1786483023.462,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " road"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 36,
+      "t": 1786483023.462,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " road",
+          "delta": {
+            "text": " road"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 37,
+      "t": 1786483023.536,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " maps"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 38,
+      "t": 1786483023.536,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " maps",
+          "delta": {
+            "text": " maps"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 39,
+      "t": 1786483023.555,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": ","
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 40,
+      "t": 1786483023.555,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": ",",
+          "delta": {
+            "text": ","
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 41,
+      "t": 1786483023.555,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " because"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 42,
+      "t": 1786483023.555,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " because",
+          "delta": {
+            "text": " because"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 43,
+      "t": 1786483023.56,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " its"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 44,
+      "t": 1786483023.56,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " its",
+          "delta": {
+            "text": " its"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 45,
+      "t": 1786483023.586,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " nodes"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 46,
+      "t": 1786483023.586,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " nodes",
+          "delta": {
+            "text": " nodes"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 47,
+      "t": 1786483023.586,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " and"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 48,
+      "t": 1786483023.586,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " and",
+          "delta": {
+            "text": " and"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 49,
+      "t": 1786483023.586,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " edges"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 50,
+      "t": 1786483023.586,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " edges",
+          "delta": {
+            "text": " edges"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 51,
+      "t": 1786483023.586,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " are"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 52,
+      "t": 1786483023.586,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " are",
+          "delta": {
+            "text": " are"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 53,
+      "t": 1786483023.617,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " not"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 54,
+      "t": 1786483023.617,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " not",
+          "delta": {
+            "text": " not"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 55,
+      "t": 1786483023.617,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " limited"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 56,
+      "t": 1786483023.617,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " limited",
+          "delta": {
+            "text": " limited"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 57,
+      "t": 1786483023.617,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " to"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 58,
+      "t": 1786483023.617,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " to",
+          "delta": {
+            "text": " to"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 59,
+      "t": 1786483023.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " a"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 60,
+      "t": 1786483023.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " a",
+          "delta": {
+            "text": " a"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 61,
+      "t": 1786483023.624,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " linear"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 62,
+      "t": 1786483023.624,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " linear",
+          "delta": {
+            "text": " linear"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 63,
+      "t": 1786483023.733,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " order"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 64,
+      "t": 1786483023.733,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": " order",
+          "delta": {
+            "text": " order"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 65,
+      "t": 1786483023.741,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": "."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 66,
+      "t": 1786483023.741,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": ".",
+          "delta": {
+            "text": "."
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 67,
+      "t": 1786483023.742,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": "[1]"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 68,
+      "t": 1786483023.742,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": "[1]",
+          "delta": {
+            "text": "[1]"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 69,
+      "t": 1786483023.745,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": "[3]"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 70,
+      "t": 1786483023.745,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "data": "[3]",
+          "delta": {
+            "text": "[3]"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 71,
+      "t": 1786483023.769,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "contentBlockStop": {}
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 72,
+      "t": 1786483023.769,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "messageStop": {
+              "stopReason": "end_turn"
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 73,
+      "t": 1786483023.771,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "event": {
+            "metadata": {
+              "usage": {
+                "inputTokens": 28,
+                "outputTokens": 36,
+                "totalTokens": 64
+              },
+              "metrics": {
+                "latencyMs": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 74,
+      "t": 1786483023.771,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "text": "A graph can model **any** relationship network, from social connections to road maps, because its nodes and edges are not limited to a linear order.[1][3]"
+              }
+            ],
+            "metadata": {
+              "usage": {
+                "inputTokens": 28,
+                "outputTokens": 36,
+                "totalTokens": 64
+              },
+              "metrics": {
+                "latencyMs": 0,
+                "timeToFirstByteMs": 2080
+              }
+            },
+            "tracking_id": "72a1c714-63d0-4a15-b85e-7ee61a424f04"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 75,
+      "t": 1786483023.771,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "research",
+        "event": {
+          "result": {
+            "__type__": "AgentResult",
+            "__repr__": "AgentResult(stop_reason='end_turn', message={'role': 'assistant', 'content': [{'text': 'A graph can model **any** relationship network, from social connections to road maps, because its nodes and edges are not limited to a linear order.[1][3]'}], 'metadata': {'usage': {'inputTokens': 28, 'outputTokens': 36, 'totalTokens': 64}, 'metrics': {'latencyMs': 0, 'timeToFirstByteMs': 2080}}, 'tracking_id': '72a1c714-63d0-4a15-b85e-7ee61a424f04'}, metrics=EventLoopMetrics(cycle_count=1, tool_metrics={}, c"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 76,
+      "t": 1786483023.771,
+      "event_keys": [
+        "node_id",
+        "node_result",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stop",
+        "node_id": "research",
+        "node_result": {
+          "__type__": "NodeResult",
+          "__repr__": "NodeResult(result=AgentResult(stop_reason='end_turn', message={'role': 'assistant', 'content': [{'text': 'A graph can model **any** relationship network, from social connections to road maps, because its nodes and edges are not limited to a linear order.[1][3]'}], 'metadata': {'usage': {'inputTokens': 28, 'outputTokens': 36, 'totalTokens': 64}, 'metrics': {'latencyMs': 0, 'timeToFirstByteMs': 2080}}, 'tracking_id': '72a1c714-63d0-4a15-b85e-7ee61a424f04'}, metrics=EventLoopMetrics(cycle_count=1, "
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 77,
+      "t": 1786483023.771,
+      "event_keys": [
+        "from_node_ids",
+        "to_node_ids",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_handoff",
+        "from_node_ids": [
+          "research"
+        ],
+        "to_node_ids": [
+          "expert"
+        ]
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 78,
+      "t": 1786483023.777,
+      "event_keys": [
+        "node_id",
+        "node_type",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_start",
+        "node_id": "expert",
+        "node_type": "agent"
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 79,
+      "t": 1786483023.777,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "init_event_loop": true,
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114046cf0>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('9ac29909-f1bf-4002-8e96-8df1eaec4df9')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x114094830>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 80,
+      "t": 1786483023.777,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "start": true
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 81,
+      "t": 1786483023.777,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "start_event_loop": true
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 82,
+      "t": 1786483024.485,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "messageStart": {
+              "role": "assistant"
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 83,
+      "t": 1786483024.485,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockStart": {
+              "start": {}
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 84,
+      "t": 1786483024.485,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": "A"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 85,
+      "t": 1786483024.485,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": "A",
+          "delta": {
+            "text": "A"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 86,
+      "t": 1786483024.485,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " graph"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 87,
+      "t": 1786483024.485,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " graph",
+          "delta": {
+            "text": " graph"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 88,
+      "t": 1786483024.485,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " can"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 89,
+      "t": 1786483024.485,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " can",
+          "delta": {
+            "text": " can"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 90,
+      "t": 1786483024.485,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " model"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 91,
+      "t": 1786483024.485,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " model",
+          "delta": {
+            "text": " model"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 92,
+      "t": 1786483024.507,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " nearly"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 93,
+      "t": 1786483024.507,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " nearly",
+          "delta": {
+            "text": " nearly"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 94,
+      "t": 1786483024.508,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " any"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 95,
+      "t": 1786483024.508,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " any",
+          "delta": {
+            "text": " any"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 96,
+      "t": 1786483024.53,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " network"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 97,
+      "t": 1786483024.53,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " network",
+          "delta": {
+            "text": " network"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 98,
+      "t": 1786483024.533,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " of"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 99,
+      "t": 1786483024.533,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " of",
+          "delta": {
+            "text": " of"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 100,
+      "t": 1786483024.533,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " relationships"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 101,
+      "t": 1786483024.533,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " relationships",
+          "delta": {
+            "text": " relationships"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 102,
+      "t": 1786483024.533,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": ","
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 103,
+      "t": 1786483024.533,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": ",",
+          "delta": {
+            "text": ","
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 104,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " from"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 105,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " from",
+          "delta": {
+            "text": " from"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 106,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " social"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 107,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " social",
+          "delta": {
+            "text": " social"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 108,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " connections"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 109,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " connections",
+          "delta": {
+            "text": " connections"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 110,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " to"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 111,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " to",
+          "delta": {
+            "text": " to"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 112,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " road"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 113,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " road",
+          "delta": {
+            "text": " road"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 114,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " maps"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 115,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " maps",
+          "delta": {
+            "text": " maps"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 116,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": ","
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 117,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": ",",
+          "delta": {
+            "text": ","
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 118,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " because"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 119,
+      "t": 1786483024.618,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " because",
+          "delta": {
+            "text": " because"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 120,
+      "t": 1786483024.624,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " its"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 121,
+      "t": 1786483024.624,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " its",
+          "delta": {
+            "text": " its"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 122,
+      "t": 1786483024.626,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " nodes"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 123,
+      "t": 1786483024.626,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " nodes",
+          "delta": {
+            "text": " nodes"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 124,
+      "t": 1786483024.628,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " and"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 125,
+      "t": 1786483024.628,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " and",
+          "delta": {
+            "text": " and"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 126,
+      "t": 1786483024.638,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " edges"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 127,
+      "t": 1786483024.638,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " edges",
+          "delta": {
+            "text": " edges"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 128,
+      "t": 1786483024.657,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " are"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 129,
+      "t": 1786483024.657,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " are",
+          "delta": {
+            "text": " are"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 130,
+      "t": 1786483024.658,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " not"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 131,
+      "t": 1786483024.658,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " not",
+          "delta": {
+            "text": " not"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 132,
+      "t": 1786483024.66,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " limited"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 133,
+      "t": 1786483024.66,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " limited",
+          "delta": {
+            "text": " limited"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 134,
+      "t": 1786483024.66,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " to"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 135,
+      "t": 1786483024.66,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " to",
+          "delta": {
+            "text": " to"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 136,
+      "t": 1786483024.676,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " a"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 137,
+      "t": 1786483024.676,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " a",
+          "delta": {
+            "text": " a"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 138,
+      "t": 1786483024.676,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " linear"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 139,
+      "t": 1786483024.676,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " linear",
+          "delta": {
+            "text": " linear"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 140,
+      "t": 1786483024.779,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": " order"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 141,
+      "t": 1786483024.779,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": " order",
+          "delta": {
+            "text": " order"
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 142,
+      "t": 1786483024.779,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockDelta": {
+              "delta": {
+                "text": "."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 143,
+      "t": 1786483024.779,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "data": ".",
+          "delta": {
+            "text": "."
+          },
+          "agent": {
+            "__type__": "Agent",
+            "__repr__": "<strands.agent.agent.Agent object at 0x114047230>"
+          },
+          "event_loop_cycle_id": {
+            "__type__": "UUID",
+            "__repr__": "UUID('2c5a6485-f737-4fd2-a1f5-0e77b72796d8')"
+          },
+          "request_state": {},
+          "event_loop_cycle_trace": {
+            "__type__": "Trace",
+            "__repr__": "<strands.telemetry.metrics.Trace object at 0x115c6d590>"
+          },
+          "event_loop_cycle_span": {
+            "__type__": "NonRecordingSpan",
+            "__repr__": "NonRecordingSpan(SpanContext(trace_id=0x00000000000000000000000000000000, span_id=0x0000000000000000, trace_flags=0x00, trace_state=[], is_remote=False))"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 144,
+      "t": 1786483024.809,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "contentBlockStop": {}
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 145,
+      "t": 1786483024.809,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "messageStop": {
+              "stopReason": "end_turn"
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 146,
+      "t": 1786483024.809,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "event": {
+            "metadata": {
+              "usage": {
+                "inputTokens": 462,
+                "outputTokens": 30,
+                "totalTokens": 492
+              },
+              "metrics": {
+                "latencyMs": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 147,
+      "t": 1786483024.809,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "text": "A graph can model nearly any network of relationships, from social connections to road maps, because its nodes and edges are not limited to a linear order."
+              }
+            ],
+            "metadata": {
+              "usage": {
+                "inputTokens": 462,
+                "outputTokens": 30,
+                "totalTokens": 492
+              },
+              "metrics": {
+                "latencyMs": 0,
+                "timeToFirstByteMs": 712
+              }
+            },
+            "tracking_id": "69fce7bb-5d44-4b72-a63b-4b2983b7e147"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 148,
+      "t": 1786483024.809,
+      "event_keys": [
+        "event",
+        "node_id",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stream",
+        "node_id": "expert",
+        "event": {
+          "result": {
+            "__type__": "AgentResult",
+            "__repr__": "AgentResult(stop_reason='end_turn', message={'role': 'assistant', 'content': [{'text': 'A graph can model nearly any network of relationships, from social connections to road maps, because its nodes and edges are not limited to a linear order.'}], 'metadata': {'usage': {'inputTokens': 462, 'outputTokens': 30, 'totalTokens': 492}, 'metrics': {'latencyMs': 0, 'timeToFirstByteMs': 712}}, 'tracking_id': '69fce7bb-5d44-4b72-a63b-4b2983b7e147'}, metrics=EventLoopMetrics(cycle_count=1, tool_metrics={},"
+          }
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 149,
+      "t": 1786483024.809,
+      "event_keys": [
+        "node_id",
+        "node_result",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_node_stop",
+        "node_id": "expert",
+        "node_result": {
+          "__type__": "NodeResult",
+          "__repr__": "NodeResult(result=AgentResult(stop_reason='end_turn', message={'role': 'assistant', 'content': [{'text': 'A graph can model nearly any network of relationships, from social connections to road maps, because its nodes and edges are not limited to a linear order.'}], 'metadata': {'usage': {'inputTokens': 462, 'outputTokens': 30, 'totalTokens': 492}, 'metrics': {'latencyMs': 0, 'timeToFirstByteMs': 712}}, 'tracking_id': '69fce7bb-5d44-4b72-a63b-4b2983b7e147'}, metrics=EventLoopMetrics(cycle_count=1"
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 150,
+      "t": 1786483024.809,
+      "event_keys": [
+        "result",
+        "type"
+      ],
+      "event": {
+        "type": "multiagent_result",
+        "result": {
+          "__type__": "GraphResult",
+          "__repr__": "GraphResult(status=<Status.COMPLETED: 'completed'>, results={'research': NodeResult(result=AgentResult(stop_reason='end_turn', message={'role': 'assistant', 'content': [{'text': 'A graph can model **any** relationship network, from social connections to road maps, because its nodes and edges are not limited to a linear order.[1][3]'}], 'metadata': {'usage': {'inputTokens': 28, 'outputTokens': 36, 'totalTokens': 64}, 'metrics': {'latencyMs': 0, 'timeToFirstByteMs': 2080}}, 'tracking_id': '72a1c71"
+        }
+      }
+    },
+    {
+      "phase": "execute",
+      "seq": 151,
+      "t": 1786483024.81,
+      "event_keys": [
+        "content",
+        "status"
+      ],
+      "event": {
+        "status": "success",
+        "content": [
+          {
+            "text": "Graph evidence-run-1 executed in 3724ms (completed)."
+          },
+          {
+            "text": "Node research: A graph can model **any** relationship network, from social connections to road maps, because its nodes and edges are not limited to a linear order.[1][3]\n"
+          },
+          {
+            "text": "Node expert: A graph can model nearly any network of relationships, from social connections to road maps, because its nodes and edges are not limited to a linear order.\n"
+          }
+        ]
+      }
+    },
+    {
+      "phase": "delete",
+      "seq": 152,
+      "t": 1786483024.81,
+      "event_keys": [
+        "content",
+        "status"
+      ],
+      "event": {
+        "status": "success",
+        "content": [
+          {
+            "text": "Graph evidence-run-1 deleted successfully"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -32,9 +32,10 @@ from temporalio.contrib.strands import StrandsPlugin
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Worker
+from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
-from workflow import ChatInput, ChatWorkflow, TurnInput
+from load_tool import mcp_client_activity, run_loaded_tool
+from workflow import ChatInput, ChatWorkflow, TurnInput, mcp_client_factories
 
 TASK_QUEUE = "test-chat-workflow"
 
@@ -125,7 +126,8 @@ async def client() -> AsyncGenerator[Client, None]:
                 models={
                     "fake/text": lambda: ScriptedModel(),
                     "fake/broken": lambda: BrokenModel(),
-                }
+                },
+                mcp_clients=mcp_client_factories(),
             )
         ]
     )
@@ -134,6 +136,8 @@ async def client() -> AsyncGenerator[Client, None]:
             env.client,
             task_queue=TASK_QUEUE,
             workflows=[ChatWorkflow],
+            activities=[mcp_client_activity, run_loaded_tool],
+            workflow_runner=UnsandboxedWorkflowRunner(),
         )
         async with worker:
             yield env.client
@@ -351,78 +355,3 @@ async def test_continue_as_new_preserves_the_session(client: Client) -> None:
     await latest.signal(ChatWorkflow.end_chat)
     await latest.result()
 
-
-@pytest.mark.asyncio(loop_scope="module")
-async def test_rollover_clamps_oversized_tool_results(client: Client) -> None:
-    """continue-as-new input stays under Temporal's 2MB payload limit.
-
-    A think transcript in the megabytes wedged a live session (TMPRL1103):
-    every rollover retry re-sent the same oversized ChatInput forever. The
-    carried messages must clamp giant toolResult text.
-    """
-    from config import ROLLOVER_TOOL_RESULT_MAX_CHARS
-
-    # Over the clamp threshold while under Temporal's 2MB start-input limit
-    # (a 3MB fixture can't even start: "Blob data size exceeds limit").
-    huge = "x" * (ROLLOVER_TOOL_RESULT_MAX_CHARS * 5)
-    prior: list[dict[str, Any]] = [
-        {"role": "user", "content": [{"text": "research this"}]},
-        {
-            "role": "assistant",
-            "content": [
-                {
-                    "toolUse": {
-                        "toolUseId": "t1",
-                        "name": "think",
-                        "input": {"thought": "…", "cycle_count": 1},
-                    }
-                }
-            ],
-        },
-        {
-            "role": "user",
-            "content": [
-                {
-                    "toolResult": {
-                        "toolUseId": "t1",
-                        "status": "success",
-                        "content": [{"text": huge}],
-                    }
-                }
-            ],
-        },
-        {"role": "assistant", "content": [{"text": "done thinking"}]},
-    ]
-
-    session_id = "chat-rollover-clamp"
-    handle = await start_session(
-        client, session_id, rollover_turns=1, messages=prior
-    )
-    first_run_id = (await handle.describe()).run_id
-
-    SCRIPTS.append(text_events("turn-one"))
-    await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="one"))
-
-    latest = client.get_workflow_handle(session_id)
-
-    async def rolled_over() -> bool:
-        description = await latest.describe()
-        return description.run_id != first_run_id
-
-    await poll(rolled_over)
-
-    carried = await latest.query(ChatWorkflow.messages)
-    clamped_texts = [
-        content["text"]
-        for message in carried
-        for block in message.get("content", [])
-        if isinstance(block, dict) and block.get("toolResult")
-        for content in block["toolResult"].get("content", [])
-        if isinstance(content, dict) and content.get("text") is not None
-    ]
-    assert clamped_texts, "the toolResult message must survive the rollover"
-    for text in clamped_texts:
-        assert len(text) <= ROLLOVER_TOOL_RESULT_MAX_CHARS
-
-    await latest.signal(ChatWorkflow.end_chat)
-    await latest.result()

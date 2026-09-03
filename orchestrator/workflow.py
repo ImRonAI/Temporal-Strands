@@ -10,8 +10,7 @@ verified against temporalio 1.31.0 / strands-agents 1.50.2:
   ``__init__``" (guide R7).
 - Pattern 3 (HITL): the turn loop answers ``result.stop_reason == "interrupt"``;
   ``approve`` signals the answer back. Every interrupt in ``result.interrupts``
-  is answered and the full list handed back (guide R9). No tool is gated today,
-  so the loop only engages if a tool itself raises an interrupt.
+  is answered and the full list handed back (guide R9).
 - Pattern 8 (streaming): ``WorkflowStream`` hosts the topic named by
   ``TemporalAgent(streaming_topic=...)``; ``server.py`` subscribes to the same
   name. The names must match exactly (guide R10).
@@ -25,46 +24,117 @@ protected route ``app/api/orchestrator/route.ts``:
                      interrupt is pending and again with ``None`` once answered.
 - ``tool_results`` -- ``{"tool_use_id", "status", "content"}``, published from an
   ``AfterToolCallEvent`` hook.
-- ``thinking``    -- raw Strands ``StreamEvent`` dicts published by the reasoning
-  agent's own model activity. The reasoning agent is registered on the
-  orchestrator as the ``think`` tool via ``Agent.as_tool()``
-  (``strands/agent/agent.py:958-990``), so the orchestrator calls it when it
-  chooses. ``route.ts`` turns this topic's text deltas into Chain of Thought
-  thought blocks and its native tool frames into tool components nested there.
+- ``thinking``    -- graph tool ``ToolStreamEvent`` envelopes (``tool_use`` +
+                     ``data`` with native ``multiagent_*`` events) published
+                     from ``graph_activity``; also kept for SSE stability.
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import json
 from datetime import timedelta
 from dataclasses import dataclass, field
+from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from strands.hooks import HookProvider, HookRegistry
-from strands.hooks.events import AfterToolCallEvent
+from strands.hooks.events import AfterToolCallEvent, BeforeToolCallEvent
 from strands.types.content import Messages
+from strands.types.exceptions import EventLoopException
 from strands.types.interrupt import InterruptResponseContent
 from temporalio import workflow
 from temporalio.exceptions import ApplicationError
-from temporalio.contrib.strands import TemporalAgent
+from temporalio.contrib.strands import TemporalAgent, TemporalMCPClient
 from temporalio.contrib.strands.workflow import activity_as_tool
 from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamState
 
 from config import (
+    COMPUTER_USE_HEARTBEAT,
+    COMPUTER_USE_SCHEDULE_TO_CLOSE,
+    COMPUTER_USE_START_TO_CLOSE,
     MODEL_HEARTBEAT,
     MODEL_RETRY_POLICY,
     MODEL_SCHEDULE_TO_CLOSE,
     MODEL_START_TO_CLOSE,
-    ROLLOVER_TOOL_RESULT_MAX_CHARS,
 )
 
-# The activity callable is only inspected here (activity_as_tool reads its
-# @activity.defn name and signature); its body runs on the worker. Imported
-# with passthrough so the workflow sandbox does not re-import its
-# dependencies (guide: sandbox passthrough for activity modules).
 with workflow.unsafe.imports_passed_through():
-    from think_activity import think
+    from computer_use_activity import COMPUTER_USE_ACTIVITIES, COMPUTER_USE_TOOL_NAMES
+    from graph_activity import graph_activity
+    from load_tool import (
+        mcp_client_activity,
+        register_community_tool,
+        tool_file_path,
+        wrap_loaded_io_tool,
+    )
+    from use_skill_activity import use_skill_activity
+
+    from strands import tool
+    from strands.tools.mcp import MCPClient
+    from strands_tools.load_tool import load_tool
+
+    # Official load_tool is sync; Strands stream() uses asyncio.to_thread, which
+    # Temporal workflows block. Not in PERMANENT — swap at execution via hook.
+    @tool
+    async def _load_tool_workflow_exec(path: str, name: str, agent: Any = None) -> dict[str, Any]:
+        return load_tool._tool_func(path=tool_file_path(path), name=name, agent=agent)
+
+_MCP_ACTIVITY_OPTIONS = dict(
+    start_to_close_timeout=MODEL_START_TO_CLOSE,
+    schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,
+    heartbeat_timeout=MODEL_HEARTBEAT,
+    retry_policy=MODEL_RETRY_POLICY,
+)
+
+PERMANENT_COMMUNITY_TOOLS = (
+    load_tool,
+    activity_as_tool(mcp_client_activity, **_MCP_ACTIVITY_OPTIONS),
+    activity_as_tool(graph_activity, **_MCP_ACTIVITY_OPTIONS),
+    activity_as_tool(use_skill_activity, **_MCP_ACTIVITY_OPTIONS),
+)
+
+_MCP_CONFIG_PATH = Path(__file__).resolve().parent / "mcp.json"
+_SHELL_MCP = Path(__file__).resolve().parent / ".venv/bin/strands-shell"
+
+
+def _eager_mcp_server_names() -> frozenset[str]:
+    """Servers registered on the worker via StrandsPlugin (shell only today)."""
+    servers = json.loads(_MCP_CONFIG_PATH.read_text()).get("mcpServers", {})
+    return frozenset(
+        name for name, cfg in servers.items() if not cfg.get("continue_on_error")
+    )
+
+
+def mcp_client_factories() -> dict[str, Callable[[], MCPClient]]:
+    """Worker-side MCP factories for StrandsPlugin — shell only.
+
+    Remote catalog entries (``continue_on_error`` in mcp.json, e.g. datacommons)
+    are real servers but must not register Temporal ``{server}-list-tools``
+    activities. Those use the native ``mcp_client`` tool
+    (connect / list_tools / call_tool) on demand instead.
+
+    https://github.com/temporalio/sdk-python/blob/main/temporalio/contrib/strands/README.md
+    """
+    raw = json.loads(_MCP_CONFIG_PATH.read_text())
+    if _SHELL_MCP.is_file():
+        raw["mcpServers"]["shell"]["command"] = str(_SHELL_MCP.resolve())
+    eager = _eager_mcp_server_names()
+    return {
+        client._application_name: (lambda c=client: c)
+        for client in MCPClient.load_servers(raw)
+        if client._application_name in eager
+    }
+
+
+def temporal_mcp_clients() -> tuple[TemporalMCPClient, ...]:
+    """Workflow-side TemporalMCPClient handles for eager mcp.json servers only."""
+    return tuple(
+        TemporalMCPClient(server=name, cache_tools=True, **_MCP_ACTIVITY_OPTIONS)
+        for name in mcp_client_factories()
+    )
 
 # Topic names shared with server.py's subscriber and, through it, the SSE frames
 # the protected Next.js route parses. Changing one of these without changing the
@@ -74,15 +144,14 @@ EVENTS_TOPIC = "events"
 THINKING_TOPIC = "thinking"
 
 APPROVAL_TOPIC = "approval"
+HANDOFF_TOPIC = "handoff"
 
 
 def _clamp_tool_results(messages: Messages) -> Messages:
-    """Clamp oversized toolResult text before continue-as-new.
+    """Drop Computer Use screenshot bytes before continue-as-new.
 
-    Temporal rejects any single payload over 2MB (TMPRL1103), and the
-    continue-as-new input carries the whole message history. A think
-    transcript or sandbox stdout in the megabytes wedged a live session:
-    the rollover failed, retried with the same input, and looped forever.
+    Screenshots are not part of the model's token budget and must not ride
+    the carried message history. Text is not truncated.
     """
     clamped: Messages = []
     for message in messages:
@@ -96,25 +165,38 @@ def _clamp_tool_results(messages: Messages) -> Messages:
             if result and isinstance(result.get("content"), list):
                 new_result_content = []
                 for item in result["content"]:
-                    text = item.get("text") if isinstance(item, dict) else None
-                    if text and len(text) > ROLLOVER_TOOL_RESULT_MAX_CHARS:
-                        marker = "\n…[truncated for rollover]"
-                        keep = ROLLOVER_TOOL_RESULT_MAX_CHARS - len(marker)
-                        item = {**item, "text": text[:keep] + marker}
+                    if not isinstance(item, dict):
+                        new_result_content.append(item)
+                        continue
+                    if "image" in item:
+                        continue
+                    text = item.get("text")
+                    if isinstance(text, str) and text.lstrip().startswith("{"):
+                        try:
+                            data = json.loads(text)
+                            if isinstance(data, dict) and "screenshot" in data:
+                                data.pop("screenshot", None)
+                                data.pop("mediaType", None)
+                                item = {**item, "text": json.dumps(data)}
+                                text = item["text"]
+                        except json.JSONDecodeError:
+                            pass
                     new_result_content.append(item)
                 block = {**block, "toolResult": {**result, "content": new_result_content}}
             new_content.append(block)
         clamped.append({**message, "content": new_content})
     return clamped
+
+
 TOOL_RESULTS_TOPIC = "tool_results"
 
 
 @dataclass
 class TurnImage:
-    """An image attached to a user turn, already split by the Next.js route.
+    """An image attached to a user turn.
 
     ``format`` is one of png/jpeg/gif/webp and ``data`` is bare base64 with the
-    ``data:`` URL prefix stripped -- exactly what ``route.ts`` sends.
+    ``data:`` URL prefix stripped — the Strands Gemini image block shape.
     """
 
     format: str
@@ -122,11 +204,37 @@ class TurnImage:
 
 
 @dataclass
+class TurnDocument:
+    """A document attached to a user turn (Strands ``document`` content block)."""
+
+    format: str
+    data: str
+
+
+@dataclass
+class TurnVideo:
+    """A video attached to a user turn (Strands ``video`` content block)."""
+
+    format: str
+    data: str
+
+
+@dataclass
 class TurnInput:
-    """One user turn: prompt text plus any image attachments."""
+    """One user turn: prompt text plus multimodal attachments."""
 
     prompt: str
     images: list[TurnImage] = field(default_factory=list)
+    documents: list[TurnDocument] = field(default_factory=list)
+    videos: list[TurnVideo] = field(default_factory=list)
+
+
+@dataclass
+class LoadedTool:
+    """A community tool loaded via ``load_tool`` and carried across continue-as-new."""
+
+    path: str
+    name: str
 
 
 @dataclass
@@ -149,13 +257,62 @@ class ChatInput:
     # real history is nowhere near is_continue_as_new_suggested(). None in
     # production, where the SDK's own suggestion is the only trigger.
     rollover_turns: int | None = None
+    loaded_tools: list[LoadedTool] = field(default_factory=list)
+    extra_mcp_servers: list[str] = field(default_factory=list)
+    connected_mcp_servers: list[str] = field(default_factory=list)
 
 
-# Image formats the Perplexity Agent API accepts, mirroring the IMAGE_FORMATS
-# map in app/api/orchestrator/route.ts. Anything else is dropped rather than
-# sent, because PerplexityModel._image_part would resolve it to
-# application/octet-stream and the API would reject the whole request.
+# Formats from the Strands Gemini multimodal docs (image / document / video).
+# Anything else is dropped rather than sent as a guessed MIME type.
 _SUPPORTED_IMAGE_FORMATS = frozenset({"png", "jpeg", "gif", "webp"})
+_SUPPORTED_DOCUMENT_FORMATS = frozenset(
+    {"pdf", "txt", "html", "csv", "md", "json"}
+)
+_SUPPORTED_VIDEO_FORMATS = frozenset({"mp4", "mpeg", "mov", "avi", "webm", "wmv", "flv", "mpg", "mpegps", "3gpp"})
+
+
+def turn_content_blocks(turn: TurnInput) -> list[dict[str, Any]]:
+    """Strands ContentBlocks for one turn (pure; safe to unit-test).
+
+    Shapes match the Strands Gemini multimodal docs: image, document, video.
+    """
+    blocks: list[dict[str, Any]] = []
+    if turn.prompt:
+        blocks.append({"text": turn.prompt})
+    for image in turn.images:
+        if image.format not in _SUPPORTED_IMAGE_FORMATS:
+            continue
+        blocks.append(
+            {
+                "image": {
+                    "format": image.format,
+                    "source": {"bytes": base64.b64decode(image.data)},
+                }
+            }
+        )
+    for document in turn.documents:
+        if document.format not in _SUPPORTED_DOCUMENT_FORMATS:
+            continue
+        blocks.append(
+            {
+                "document": {
+                    "format": document.format,
+                    "source": {"bytes": base64.b64decode(document.data)},
+                }
+            }
+        )
+    for video in turn.videos:
+        if video.format not in _SUPPORTED_VIDEO_FORMATS:
+            continue
+        blocks.append(
+            {
+                "video": {
+                    "format": video.format,
+                    "source": {"bytes": base64.b64decode(video.data)},
+                }
+            }
+        )
+    return blocks
 
 
 class _ToolResultHook(HookProvider):
@@ -184,6 +341,178 @@ class _ToolResultHook(HookProvider):
         )
 
 
+def _tool_result_payload(result: dict[str, Any]) -> dict[str, Any] | None:
+    """The official tool's own result dict from an activity ToolResult.
+
+    ``TemporalActivityTool`` serializes the activity's return value to text,
+    so the official mcp_client status/content live inside that JSON.
+    """
+    for block in result.get("content") or []:
+        text = block.get("text") if isinstance(block, dict) else None
+        if not text:
+            continue
+        try:
+            inner = json.loads(text)
+        except ValueError:
+            continue
+        if isinstance(inner, dict) and "status" in inner:
+            return inner
+    return None
+
+
+class _HotLoadHook(HookProvider):
+    """Persist load_tool loads and mcp_client servers across turns and CAN.
+
+    ``load_tools`` cannot execute anywhere: the activity cannot take the live
+    agent, and the workflow cannot see the worker's connections. The hook
+    cancels it with Strands' documented ``cancel_tool`` and records the server;
+    the workflow then re-attaches it the one documented way — a construct-time
+    ``TemporalMCPClient`` on a rebuilt agent (Temporal Strands README, MCP).
+    """
+
+    def __init__(
+        self,
+        loaded_tools: list[LoadedTool],
+        extra_mcp: list[str],
+        connected_mcp: list[str],
+    ) -> None:
+        self._loaded_tools = loaded_tools
+        self._extra_mcp = extra_mcp
+        self._connected_mcp = connected_mcp
+
+    def register_hooks(self, registry: HookRegistry, **kwargs: object) -> None:
+        registry.add_callback(BeforeToolCallEvent, self._before)
+        registry.add_callback(AfterToolCallEvent, self._after)
+
+    def _before(self, event: BeforeToolCallEvent) -> None:
+        if event.tool_use.get("name") == "load_tool":
+            event.selected_tool = _load_tool_workflow_exec
+
+        inp = event.tool_use.get("input") or {}
+        if event.tool_use.get("name") != "mcp_client" or inp.get("action") != "load_tools":
+            return
+        connection_id = inp.get("connection_id")
+        if not connection_id or connection_id not in self._connected_mcp:
+            # Unknown server: let the official tool report its own error.
+            return
+        catalog = {handle.server for handle in temporal_mcp_clients()}
+        if connection_id not in self._extra_mcp and connection_id not in catalog:
+            self._extra_mcp.append(connection_id)
+        event.cancel_tool = True
+
+    def _after(self, event: AfterToolCallEvent) -> None:
+        result = event.result or {}
+        inp = event.tool_use.get("input") or {}
+        name = event.tool_use.get("name")
+        if name == "load_tool":
+            path = inp.get("path")
+            tool_name = inp.get("name")
+            if result.get("status") != "success" or not path or not tool_name:
+                return
+            path = tool_file_path(path)
+            wrap_loaded_io_tool(event.agent, tool_name, path)
+            if not any(rec.name == tool_name for rec in self._loaded_tools):
+                self._loaded_tools.append(LoadedTool(path=path, name=tool_name))
+            return
+        if name != "mcp_client":
+            return
+        connection_id = inp.get("connection_id")
+        if not connection_id:
+            return
+        action = inp.get("action")
+        if action == "connect":
+            inner = _tool_result_payload(result)
+            if (
+                inner is not None
+                and inner.get("status") == "success"
+                and connection_id not in self._connected_mcp
+            ):
+                self._connected_mcp.append(connection_id)
+        elif action == "disconnect":
+            if connection_id in self._connected_mcp:
+                self._connected_mcp.remove(connection_id)
+            if connection_id in self._extra_mcp:
+                self._extra_mcp.remove(connection_id)
+
+
+class _ComputerUseSafetyHook(HookProvider):
+    """HITL gate for Gemini Computer Use safety_decision payloads.
+
+    Gemini may attach a safety decision to a Computer Use function call.
+    Confirmation uses the existing interrupt/approve loop; a block cancels
+    the tool without executing Playwright.
+    """
+
+    def register_hooks(self, registry: HookRegistry, **kwargs: object) -> None:
+        registry.add_callback(BeforeToolCallEvent, self._gate)
+
+    def _gate(self, event: BeforeToolCallEvent) -> None:
+        name = event.tool_use.get("name")
+        if name not in COMPUTER_USE_TOOL_NAMES:
+            return
+        args = event.tool_use.get("input") or {}
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                return
+        if not isinstance(args, dict):
+            return
+        decision = args.get("safety_decision")
+        if not isinstance(decision, dict):
+            return
+        action = str(
+            decision.get("decision") or decision.get("action") or ""
+        ).lower()
+        reason = str(
+            decision.get("explanation")
+            or decision.get("reason")
+            or "Gemini Computer Use safety check"
+        )
+        if "confirm" in action or action == "require_confirmation":
+            approval = event.interrupt("computer_use_safety", reason=reason)
+            if str(approval).strip().lower() not in {"a", "yes", "y", "approve", "true"}:
+                event.cancel_tool = "computer use action was not approved"
+            return
+        if "block" in action:
+            event.cancel_tool = f"blocked by Gemini safety: {reason}"
+
+
+class _HumanControlHook(HookProvider):
+    """Browser handoff using Strands ``BeforeToolCallEvent.interrupt``.
+
+    ``handoff_to_user`` from strands_tools is the canonical tool; the preview
+    panel's Take control signal sets the same interrupt name so the existing
+    approve / resume loop applies.
+    """
+
+    def __init__(
+        self,
+        human_control: list[bool],
+        handoff_requested: list[bool],
+        publish: Any,
+    ) -> None:
+        self._human_control = human_control
+        self._handoff_requested = handoff_requested
+        self._publish = publish
+
+    def register_hooks(self, registry: HookRegistry, **kwargs: object) -> None:
+        registry.add_callback(BeforeToolCallEvent, self._gate)
+
+    def _gate(self, event: BeforeToolCallEvent) -> None:
+        name = event.tool_use.get("name")
+        if self._human_control[0] and name in COMPUTER_USE_TOOL_NAMES:
+            event.cancel_tool = "human has control of the browser session"
+            return
+        if not self._handoff_requested[0]:
+            return
+        self._handoff_requested[0] = False
+        self._human_control[0] = True
+        reason = "The user took control of the browser. Wait for their instructions before any further browser actions."
+        self._publish({"active": True, "reason": reason})
+        event.interrupt("handoff_to_user", reason=reason)
+
+
 @workflow.defn
 class ChatWorkflow:
     """One durable chat session. Its id is the session id the UI holds."""
@@ -194,12 +523,19 @@ class ChatWorkflow:
         # __init__ -- it inspects the caller's frame and raises otherwise.
         self._stream = WorkflowStream(prior_state=input.stream_state)
         self._approvals = self._stream.topic(APPROVAL_TOPIC)
+        self._handoffs = self._stream.topic(HANDOFF_TOPIC)
         self._tool_results = self._stream.topic(TOOL_RESULTS_TOPIC)
 
         self._model_id = input.model_id
         self._system_prompt = input.system_prompt
         self._session_id = input.session_id
         self._rollover_turns = input.rollover_turns
+        self._loaded_tools = list(input.loaded_tools)
+        self._extra_mcp_servers = list(input.extra_mcp_servers)
+        self._connected_mcp_servers = list(input.connected_mcp_servers)
+        # Extra-MCP set the current agent was constructed with; a difference
+        # after a turn means a load_tools ran and the agent must be rebuilt.
+        self._agent_extra_mcp: tuple[str, ...] = ()
         self._completed_turns = 0
 
         # Serializes concurrent turn updates. Two browser tabs posting at once
@@ -218,6 +554,8 @@ class ChatWorkflow:
         # for the partial turn and silently show nothing until the next one.
         self._turn_start_offset: int | None = None
         self._approval: str | None = None
+        self._human_control = [False]
+        self._handoff_requested = [False]
         self._pending_reason: str | None = None
 
     def _stream_offset(self) -> int:
@@ -232,7 +570,14 @@ class ChatWorkflow:
         return state.base_offset + len(state.log)
 
     def _build_agent(self, messages: Messages) -> TemporalAgent:
-        return TemporalAgent(
+        catalog = temporal_mcp_clients()
+        catalog_names = {handle.server for handle in catalog}
+        extras = tuple(
+            TemporalMCPClient(server=name, cache_tools=True, **_MCP_ACTIVITY_OPTIONS)
+            for name in self._extra_mcp_servers
+            if name not in catalog_names
+        )
+        agent = TemporalAgent(
             # A registered factory NAME from run_worker.py's models= mapping,
             # never a Model instance (guide R1).
             model=self._model_id,
@@ -252,53 +597,48 @@ class ChatWorkflow:
             streaming_topic=EVENTS_TOPIC,
             system_prompt=self._system_prompt,
             messages=list(messages),
-            # The reasoning stage: strands_tools' think, reworked to async
-            # streaming and registered as an activity_as_tool per the
-            # strands-temporal guide (think_activity.py). The tool name comes
-            # from the @activity.defn name and must stay "think": the UI keys
-            # its Chain of Thought suppression off it exactly
-            # (components/v0/agent-activity.tsx:887). The tool description --
-            # the contract that stops the orchestrator re-running searches the
-            # stage already performed -- lives in the activity's docstring,
-            # which activity_as_tool extracts as the ToolSpec
-            # (_temporal_activity_tool.py:28-31). The activity streams every
-            # model chunk onto THINKING_TOPIC itself, so nothing here
-            # republishes frames.
             tools=[
-                activity_as_tool(
-                    think,
-                    start_to_close_timeout=MODEL_START_TO_CLOSE,
-                    schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,
-                    retry_policy=MODEL_RETRY_POLICY,
-                )
+                *PERMANENT_COMMUNITY_TOOLS,
+                *catalog,
+                *extras,
+                *(
+                    activity_as_tool(
+                        computer_use_activity,
+                        start_to_close_timeout=COMPUTER_USE_START_TO_CLOSE,
+                        schedule_to_close_timeout=COMPUTER_USE_SCHEDULE_TO_CLOSE,
+                        heartbeat_timeout=COMPUTER_USE_HEARTBEAT,
+                        retry_policy=MODEL_RETRY_POLICY,
+                    )
+                    for computer_use_activity in COMPUTER_USE_ACTIVITIES
+                ),
             ],
             hooks=[
                 _ToolResultHook(self._tool_results.publish),
+                _ComputerUseSafetyHook(),
+                _HumanControlHook(
+                    self._human_control,
+                    self._handoff_requested,
+                    self._handoffs.publish,
+                ),
+                _HotLoadHook(
+                    self._loaded_tools,
+                    self._extra_mcp_servers,
+                    self._connected_mcp_servers,
+                ),
             ],
         )
+        for rec in self._loaded_tools:
+            register_community_tool(agent, rec.path, rec.name)
+        self._agent_extra_mcp = tuple(self._extra_mcp_servers)
+        return agent
 
     def _content_blocks(self, turn: TurnInput) -> list[dict[str, Any]]:
         """Strands ContentBlocks for one turn.
 
-        Returns a plain prompt string's block list; images become ``image``
-        blocks with raw bytes, which is what PerplexityModel._image_part reads.
+        Image, document, and video blocks match the Strands Gemini multimodal
+        docs: ``{"image"|"document"|"video": {"format": ..., "source": {"bytes": ...}}}``.
         """
-        blocks: list[dict[str, Any]] = []
-        if turn.prompt:
-            blocks.append({"text": turn.prompt})
-        for image in turn.images:
-            if image.format not in _SUPPORTED_IMAGE_FORMATS:
-                continue
-            # b64decode is pure computation, deterministic under replay.
-            blocks.append(
-                {
-                    "image": {
-                        "format": image.format,
-                        "source": {"bytes": base64.b64decode(image.data)},
-                    }
-                }
-            )
-        return blocks
+        return turn_content_blocks(turn)
 
     @workflow.update
     async def turn(self, turn: TurnInput) -> str:
@@ -328,20 +668,25 @@ class ChatWorkflow:
 
             blocks = self._content_blocks(turn)
 
-            # The reasoning stage is a TOOL on the orchestrator (registered in
-            # _build_agent via Agent.as_tool), not a separate pre-invocation.
-            # Invoking it here and prepending str(result) dropped everything it
-            # researched: native Perplexity tool payloads are emitted as
-            # {"perplexity": ...} chunks (perplexity_model.py:413) that match no
-            # branch in Strands' process_stream (strands/event_loop/streaming.py:
-            # 462-479), so they never reach AgentResult.message and str() cannot
-            # see them (strands/agent/agent_result.py:78-91). The orchestrator
-            # therefore had no record of the research and repeated every search.
-            # As a tool, the stage's reply comes back as a real toolResult block
-            # (strands/agent/_agent_as_tool.py:229-235), which IS in the
-            # orchestrator's message contract, so it answers from those findings
-            # instead of re-running them.
-            result = await agent.invoke_async(blocks)
+            # EventLoopException is Strands' wrapper for a model/tool activity
+            # that exhausted its retries (strands/event_loop/event_loop.py:396).
+            # It is a plain Exception, and per Temporal's update semantics a
+            # non-FailureError raised from an update handler is a Workflow TASK
+            # failure -- the server retries the task forever, replaying the
+            # same doomed turn while the caller's stream stays silent
+            # (docs.temporal.io/handling-messages, "Exceptions in Updates").
+            # Re-raising as ApplicationError fails only the UPDATE: server.py
+            # surfaces the error to the caller and the session keeps running,
+            # matching how a failed model activity already reaches the caller
+            # (tests/test_workflow.py::test_failed_model_activity_surfaces_to_the_caller).
+            try:
+                result = await agent.invoke_async(blocks)
+            except EventLoopException as error:
+                raise ApplicationError(
+                    f"Turn failed: {error.__cause__ or error}",
+                    type="TurnFailed",
+                    non_retryable=True,
+                ) from error
 
             # HITL resume loop. The agent never self-resumes: every interrupt
             # must be answered and the complete list passed back (guide R9).
@@ -370,6 +715,13 @@ class ChatWorkflow:
                 # stops showing an answered question.
                 self._approvals.publish({"reason": None})
                 result = await agent.invoke_async(responses)
+
+            # A load_tools this turn recorded a new extra MCP server. Only
+            # TemporalAgent's constructor installs the Temporal refresh for
+            # TemporalMCPClient providers, so re-construct the agent with the
+            # provider in tools=[...] (Temporal Strands README, MCP).
+            if tuple(self._extra_mcp_servers) != self._agent_extra_mcp:
+                agent = self._agent = self._build_agent(list(agent.messages))
 
             # Drop the previous turns' frames now that this turn's reply is
             # ready. Truncating only up to THIS turn's start leaves every
@@ -411,6 +763,28 @@ class ChatWorkflow:
         if self._pending_reason is None:
             return
         self._approval = response
+
+    @workflow.signal
+    def take_control(self) -> None:
+        """User took the browser from the Computer Use preview."""
+        self._human_control[0] = True
+        self._handoff_requested[0] = True
+        self._handoffs.publish(
+            {
+                "active": True,
+                "reason": "User took control of the browser session",
+            }
+        )
+
+    @workflow.signal
+    def give_control(self, message: str) -> None:
+        """User returned control with instructions for the agent."""
+        self._human_control[0] = False
+        self._handoff_requested[0] = False
+        self._handoffs.publish({"active": False, "reason": None})
+        text = message.strip()
+        if self._pending_reason is not None and text:
+            self._approval = text
 
     @workflow.signal
     def end_chat(self) -> None:
@@ -498,6 +872,9 @@ class ChatWorkflow:
                     # successor's turn counter starts at zero, so a threshold
                     # of N means N turns per run, not N turns per session.
                     rollover_turns=self._rollover_turns,
+                    loaded_tools=list(self._loaded_tools),
+                    extra_mcp_servers=list(self._extra_mcp_servers),
+                    connected_mcp_servers=list(self._connected_mcp_servers),
                 )
             ]
         )

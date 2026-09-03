@@ -58,15 +58,19 @@ from compare_workflow import (
 )
 from config import TASK_QUEUE
 from run_worker import READINESS_PATH, agent_identity
+from skills_config import augmented_system_prompt
 from workflow import (
     THINKING_TOPIC,
     APPROVAL_TOPIC,
+    HANDOFF_TOPIC,
     EVENTS_TOPIC,
     TOOL_RESULTS_TOPIC,
     ChatInput,
     ChatWorkflow,
+    TurnDocument,
     TurnImage,
     TurnInput,
+    TurnVideo,
 )
 
 _ROOT = Path(__file__).resolve().parent
@@ -75,7 +79,20 @@ load_dotenv(_ROOT.parent / ".env.local", override=False)
 logger = logging.getLogger(__name__)
 
 MAX_COMPARE_MODELS = 4
-CHAT_TOPICS = [EVENTS_TOPIC, APPROVAL_TOPIC, TOOL_RESULTS_TOPIC, THINKING_TOPIC]
+
+
+# Idle-compatible with the protected route's agent_runs branch. Gemini does
+# not publish this topic; keeping the name avoids a protocol break.
+AGENT_RUNS_TOPIC = "agent_runs"
+
+CHAT_TOPICS = [
+    EVENTS_TOPIC,
+    APPROVAL_TOPIC,
+    HANDOFF_TOPIC,
+    TOOL_RESULTS_TOPIC,
+    THINKING_TOPIC,
+    AGENT_RUNS_TOPIC,
+]
 
 _state: dict[str, Any] = {"client": None, "system_prompt": ""}
 
@@ -105,7 +122,7 @@ def models_of(record: dict[str, Any] | None) -> list[str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _, system_prompt = agent_identity()
-    _state["system_prompt"] = system_prompt
+    _state["system_prompt"] = augmented_system_prompt(system_prompt)
     try:
         _state["client"] = await Client.connect(
             os.environ.get("TEMPORAL_ADDRESS", "localhost:7233"),
@@ -114,9 +131,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as error:  # noqa: BLE001 - API stays up so /health can report
         logger.warning("Temporal unavailable at startup: %s", error)
         _state["client"] = None
-    # One pooled client for file proxying: constructing an AsyncClient per
-    # request meant a fresh TLS handshake to api.perplexity.ai every time,
-    # with no keep-alive reuse.
     async with httpx.AsyncClient(timeout=60) as http:
         _state["http"] = http
         yield
@@ -140,18 +154,25 @@ class StartSession(BaseModel):
     model_id: str = Field(min_length=1)
 
 
-class TurnImagePayload(BaseModel):
+class TurnMediaPayload(BaseModel):
     format: str
     data: str
 
 
 class TurnRequest(BaseModel):
     prompt: str = ""
-    images: list[TurnImagePayload] = Field(default_factory=list)
+    images: list[TurnMediaPayload] = Field(default_factory=list)
+    documents: list[TurnMediaPayload] = Field(default_factory=list)
+    videos: list[TurnMediaPayload] = Field(default_factory=list)
 
 
 class ApproveRequest(BaseModel):
     response: str = Field(min_length=1)
+
+
+class HandoffRequest(BaseModel):
+    action: str = Field(pattern="^(take|give)$")
+    message: str = ""
 
 
 class CompareRequest(BaseModel):
@@ -200,9 +221,13 @@ async def start_session(body: StartSession) -> dict[str, str]:
 
 @app.post("/sessions/{session_id}/turns/stream")
 async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
-    if not body.prompt.strip() and not body.images:
-        raise HTTPException(422, "A prompt or at least one image is required")
-
+    if (
+        not body.prompt.strip()
+        and not body.images
+        and not body.documents
+        and not body.videos
+    ):
+        raise HTTPException(422, "A prompt or at least one attachment is required")
     client = temporal()
     handle = client.get_workflow_handle(session_id)
 
@@ -260,6 +285,14 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
                     TurnImage(format=image.format, data=image.data)
                     for image in body.images
                 ],
+                documents=[
+                    TurnDocument(format=document.format, data=document.data)
+                    for document in body.documents
+                ],
+                videos=[
+                    TurnVideo(format=video.format, data=video.data)
+                    for video in body.videos
+                ],
             ),
             wait_for_stage=WorkflowUpdateStage.ACCEPTED,
         )
@@ -316,6 +349,20 @@ async def approve(session_id: str, body: ApproveRequest) -> None:
         raise HTTPException(502, str(error)) from error
 
 
+@app.post("/sessions/{session_id}/handoff", status_code=204)
+async def handoff(session_id: str, body: HandoffRequest) -> None:
+    handle = temporal().get_workflow_handle(session_id)
+    try:
+        if body.action == "take":
+            await handle.signal(ChatWorkflow.take_control)
+            return
+        await handle.signal(ChatWorkflow.give_control, body.message)
+    except RPCError as error:
+        if error.status == RPCStatusCode.NOT_FOUND:
+            raise HTTPException(404, f"Unknown session: {session_id}") from error
+        raise HTTPException(502, str(error)) from error
+
+
 @app.post("/sessions/{session_id}/end", status_code=204)
 async def end_session(session_id: str) -> None:
     client = _state["client"]
@@ -333,30 +380,8 @@ async def end_session(session_id: str) -> None:
 
 @app.get("/responses/{response_id}/files/{file_id}/content")
 async def response_file_content(response_id: str, file_id: str) -> Response:
-    """Proxy a sandbox-produced file so the browser can load it.
-
-    The Agent API returns raw bytes from
-    GET /v1/agent/{response_id}/files/{file_id}/content and requires the API
-    key, which must never reach the browser. `share_file` items carry exactly
-    this relative path, so the UI can use it directly as an <img> src.
-    """
-    api_key = os.environ.get("PERPLEXITY_API_KEY")
-    if not api_key:
-        raise HTTPException(503, "PERPLEXITY_API_KEY is not configured")
-
-    url = (
-        f"https://api.perplexity.ai/v1/agent/{response_id}"
-        f"/files/{file_id}/content"
-    )
-    upstream = await _state["http"].get(
-        url, headers={"Authorization": f"Bearer {api_key}"}
-    )
-    if upstream.status_code != 200:
-        raise HTTPException(upstream.status_code, "File unavailable")
-    return Response(
-        content=upstream.content,
-        media_type=upstream.headers.get("content-type", "application/octet-stream"),
-    )
+    """Former Perplexity Agent API file proxy. Gemini sessions do not use it."""
+    raise HTTPException(410, "Perplexity file proxy has been removed")
 
 
 @app.post("/compare/stream")

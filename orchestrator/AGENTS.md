@@ -16,21 +16,27 @@ Fake models in tests are driven by a module-level `SCRIPTS: deque` — `ModelAct
 ## Non-negotiable conventions
 
 - Constants live in `config.py` (`TASK_QUEUE`, timeouts, `MODEL_RETRY_POLICY`, `EMBEDDING_GENERATIONS`) — never inline them at call sites.
-- `run_worker.py:7-20`: model ids like `openai/gpt-5.6-sol` are REAL live catalog ids — pass them verbatim, never "correct" them.
+- Model factory: `run_worker.py` registers `GeminiModel` for `gemini-3.8-flash` (`GEMINI_MODEL_ID` in `config.py`) and dynamic alias `gemini-flash-latest`.
 - `run_worker.py:22-27`: `StrandsPlugin` goes on the **Client**, never the Worker.
 - `workflow.py:58-61`: streaming topics `events` / `thinking` / `approval` / `tool_results` are a shared contract with `server.py` and the frontend.
-- `workflow.py:293`: the reasoning stage is registered as the tool named `"think"` — `components/v0/agent-activity.tsx:887` keys Chain-of-Thought suppression off that exact name. Never rename it.
+- The `think` community tool is discontinued. Do not register `activity_as_tool(think)` or add `think` to the worker. Reasoning is Gemini thought parts (`include_thoughts=True`) streamed as `reasoningContent` on `events`. `AgentActivity` still hides a tool card named `"think"` if one appears.
 - `server.py`: never iterate a turn stream to exhaustion; cancel the consumer, never the workflow update.
 - Live `Model` instances never go into workflow `__init__` — use Temporal's official Strands integration (`TemporalAgent` + named model factories on the worker).
 - Graceful degradation for optional infra — `telemetry.py` is the reference (missing OTLP endpoint → log + empty plugin list, never raise).
 
-## Graph tool (critical)
+## Graph tool
 
-- `orchestrator/graph_tool.py` and `graph_activity.py` are **ABSENT and PROTECTED**. Never create or edit them opportunistically.
-- The actual formation graph tool lives in a **separate repo**: `/Users/tims-stuff/Desktop/strands-tools` — package `strands-heterogeneous-graph-tool` 0.1.0. Public API (`src/strands_graph_tool/__init__.py`): `GraphManager, build_graph, configure_skills, graph`. `graph` is an async-generator `@tool` (`graph.py`); skill-agent nodes come from `skill_nodes.py` (`configure_skills` + `build_skill_agent`). Its `tests/test_graph_tool.py` has 12 passing tests. `examples/basic_graph_agent.py` is stale (legacy API) — do not use it.
-- Integration is tracked in Jira: Feature GWEN-21, Epics GWEN-22 (frontend canvas) / GWEN-23 (tool build + validation), Stories/Tasks GWEN-24..30. Two validation gaps remain: live end-to-end stream capture (GWEN-30) and event-shape reconciliation against the `data-graph-event` contract (GWEN-27).
-- The two failing tests in `app/api/orchestrator/route.test.ts` assert that contract and are **expected to fail** — never fix or delete them.
+- Formation graph: **`strands_graph_tool.graph`**, wired as ``activity_as_tool(graph_activity)`` in ``workflow.py`` (Temporal Strands README tools pattern). The activity publishes ``ToolStreamEvent`` envelopes on ``THINKING_TOPIC``; the frontend consumes ``data-graph-run`` via ``route.ts``.
+- Package: sibling repo ``../../strands-tools`` (`strands-heterogeneous-graph-tool` 0.1.0). Node types: ``agent``, ``skill_agent``, ``swarm``, ``graph``, ``workflow``, ``parallel``.
+
+## Agent Skills (present)
+
+- Catalog: ``../../strands-tools/skills`` (``SKILLS_DIR`` override). Worker: ``ensure_skills_configured`` + ``configure_skills`` for graph ``skill_agent`` nodes.
+- Pattern 2: ``skills_loader.py`` — ``load_tool(..., name="list_skills"|"skill")``.
+- Pattern 3: ``use_skill_activity`` — permanent ``activity_as_tool``; streams on ``THINKING_TOPIC``.
+- Install: ``pnpm skills:add owner/repo`` (``npx skills`` CLI).
+- ``orchestrator/graph_tool.py`` remains **absent and protected** — do not add a duplicate tool implementation.
 
 ## Planned modules (do not import)
 
-`perplexity_operations.py`, `memory.py`, `mcp_config.py`, `pophive_sync.py`, `agent_runtime.py`, `run_workflow.py`, `README.md`, `tests/histories/` are design intent only — not on disk. `compare_workflow.py`, `run_worker.py`, and `server.py` have no test suites yet (GWEN-12/13/14).
+`memory.py`, `mcp_config.py`, `pophive_sync.py`, `agent_runtime.py`, `run_workflow.py`, `README.md`, `tests/histories/` are design intent only — not on disk. `compare_workflow.py`, `run_worker.py`, and `server.py` have no test suites yet (GWEN-12/13/14).

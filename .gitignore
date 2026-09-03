@@ -16,3 +16,6 @@ node_modules
 .worktrees/
 # Graph tool durable state (SQLite store + session dirs)
 orchestrator/.graph-tool/
+# Installed strands_tools package, linked at worker start for load_tool discovery
+orchestrator/strands-tools
+orchestrator/tools/*.py

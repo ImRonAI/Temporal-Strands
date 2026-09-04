@@ -24,6 +24,7 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
+import load_tool as load_tool_module
 from load_tool import STRANDS_TOOLS_DIR, mcp_client_activity, run_loaded_tool
 from workflow import ChatInput, ChatWorkflow, TurnInput, mcp_client_factories
 
@@ -99,6 +100,20 @@ def tool_use_events(tool_use_id: str, name: str, arguments: dict[str, Any]) -> l
             }
         },
     ]
+
+
+def test_loaded_tool_activity_options_satisfy_temporal_timeout_rule() -> None:
+    """Temporal requires start_to_close or schedule_to_close on every activity.
+
+    config.py leaves both MODEL_* timeouts None, so the wrapped loaded-tool
+    activity options must carry the shared schedule-to-close fallback
+    (config.closable_activity_options / workflow._closable convention).
+    """
+    options = load_tool_module._ACTIVITY_OPTIONS
+    assert (
+        options.get("start_to_close_timeout") is not None
+        or options.get("schedule_to_close_timeout") is not None
+    )
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")

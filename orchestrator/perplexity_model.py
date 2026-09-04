@@ -25,6 +25,10 @@ class ModelConfig(TypedDict, total=False):
     params: dict[str, Any]
 
 
+PRESET_PREFIX = "preset:"
+PRESETS = frozenset({"fast", "low", "medium", "high", "xhigh", "wide-research"})
+
+
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -79,7 +83,23 @@ class PerplexityModel(Model):
         return cast(ModelConfig, copy.deepcopy(self.config))
 
     @staticmethod
-    def _validate_config(config: ModelConfig) -> None:
+    def _preset_name(model_id: str) -> str | None:
+        """Return the validated preset name for `preset:<name>` ids, else None."""
+        if not model_id.startswith(PRESET_PREFIX):
+            return None
+        name = model_id[len(PRESET_PREFIX) :]
+        if name not in PRESETS:
+            raise _application_error(
+                f"Unknown Perplexity preset: {name!r}. Valid presets: {', '.join(sorted(PRESETS))}",
+                non_retryable=True,
+            )
+        return name
+
+    @classmethod
+    def _validate_config(cls, config: ModelConfig) -> None:
+        model_id = config.get("model_id")
+        if isinstance(model_id, str):
+            cls._preset_name(model_id)
         params = config.get("params") or {}
         forbidden = {
             "api_key",
@@ -88,7 +108,7 @@ class PerplexityModel(Model):
             "extra_query",
             "input",
             "model",
-            "models",
+            "preset",
             "previous_response_id",
             "stream",
             "timeout",
@@ -190,12 +210,20 @@ class PerplexityModel(Model):
             }
             for spec in tool_specs or []
         ]
-        request = {
-            "model": self.config["model_id"],
+        model_id = self.config["model_id"]
+        preset = self._preset_name(model_id)
+        request: dict[str, Any] = {
             "input": self._message_items(messages),
             "stream": True,
             **params,
         }
+        # Exactly one of `model`, `models`, or `preset` goes out. A fallback
+        # chain in params ("models") is authoritative over the configured id.
+        if "models" not in request:
+            if preset is not None:
+                request["preset"] = preset
+            else:
+                request["model"] = model_id
         request["tools"] = [*native_tools, *converted_tools]
         if system_prompt is not None:
             request["instructions"] = system_prompt
@@ -476,6 +504,28 @@ class PerplexityModel(Model):
                     native = self._native_event(provider_event)
                     if native is not None:
                         yield native
+                    if event_type.startswith("response.reasoning."):
+                        # A reasoning event's `thought` also surfaces as native
+                        # Strands reasoningContent (one per event) so Chain of
+                        # Thought renders it; the raw envelope above still
+                        # feeds the tool cards.
+                        thought = _value(provider_event, "thought")
+                        if isinstance(thought, str) and thought:
+                            content_index = next_index
+                            next_index += 1
+                            yield {
+                                "contentBlockStart": {
+                                    "contentBlockIndex": content_index,
+                                    "start": {},
+                                }
+                            }
+                            yield {
+                                "contentBlockDelta": {
+                                    "contentBlockIndex": content_index,
+                                    "delta": {"reasoningContent": {"text": thought + "\n"}},
+                                }
+                            }
+                            yield {"contentBlockStop": {"contentBlockIndex": content_index}}
                 elif event_type == "response.completed":
                     response = _value(provider_event, "response")
                     if response is None or _value(response, "status") != "completed":

@@ -543,7 +543,7 @@ def test_update_config_preserves_minimal_model_config() -> None:
     "reserved",
     [
         "model",
-        "models",
+        "preset",
         "input",
         "stream",
         "extra_headers",
@@ -689,3 +689,221 @@ async def test_missing_terminal_usage_does_not_emit_metadata() -> None:
     events = await collect(PerplexityModel(model_id="sonar/test", client=FakeClient([completed()])))
 
     assert not any("metadata" in item for item in events)
+
+
+@pytest.mark.parametrize("name", ["fast", "low", "medium", "high", "xhigh", "wide-research"])
+def test_preset_request_sends_preset_and_no_model(name) -> None:
+    model = PerplexityModel(model_id=f"preset:{name}", client=FakeClient())
+
+    request = model._format_request([], None, "be exact")
+
+    assert request["preset"] == name
+    assert "model" not in request
+    assert request == {
+        "preset": name,
+        "input": [],
+        "stream": True,
+        "tools": [],
+        "instructions": "be exact",
+    }
+    assert model.get_config()["model_id"] == f"preset:{name}"
+
+
+@pytest.mark.asyncio
+async def test_preset_request_still_sends_tools_instructions_and_input() -> None:
+    client = FakeClient([completed()])
+    model = PerplexityModel(model_id="preset:high", client=client)
+    tools = [
+        {
+            "name": "lookup",
+            "description": "Lookup",
+            "inputSchema": {"json": {"type": "object", "properties": {}}},
+        }
+    ]
+
+    await collect(
+        model,
+        [{"role": "user", "content": [{"text": "hi"}]}],
+        tool_specs=tools,
+        system_prompt="be exact",
+    )
+
+    request = client.responses.request
+    assert request["preset"] == "high"
+    assert "model" not in request
+    assert request["instructions"] == "be exact"
+    assert request["input"] == [{"type": "message", "role": "user", "content": "hi"}]
+    assert request["tools"] == [
+        {
+            "type": "function",
+            "name": "lookup",
+            "description": "Lookup",
+            "parameters": {"type": "object", "properties": {}},
+        }
+    ]
+
+
+def test_invalid_preset_is_nonretryable() -> None:
+    with pytest.raises(ApplicationError, match="Unknown Perplexity preset") as caught:
+        PerplexityModel(model_id="preset:turbo", client=FakeClient())
+    assert caught.value.non_retryable is True
+
+
+def test_update_config_rejects_invalid_preset() -> None:
+    model = PerplexityModel(model_id="sonar/test", client=FakeClient())
+    with pytest.raises(ApplicationError, match="Unknown Perplexity preset"):
+        model.update_config(model_id="preset:nope")
+
+
+@pytest.mark.asyncio
+async def test_agent_api_params_pass_through_unmodified() -> None:
+    params = {
+        "skills": [
+            {"type": "builtin", "name": "web_search"},
+            {"type": "custom", "id": "skill-1"},
+        ],
+        "reasoning": {"effort": "high"},
+        "models": ["anthropic/claude-fable-5", "google/gemini-3.8-flash"],
+        "response_format": {"type": "json_schema", "json_schema": {"name": "out"}},
+        "language_preference": "en",
+        "max_steps": 12,
+        "background": True,
+        "store": True,
+        "max_output_tokens": 4096,
+    }
+    original = copy.deepcopy(params)
+    client = FakeClient([completed()])
+
+    await collect(PerplexityModel(model_id="sonar/test", params=params, client=client))
+
+    request = client.responses.request
+    for key, value in original.items():
+        assert request[key] == value
+    assert request["stream"] is True
+    assert params == original
+
+
+@pytest.mark.asyncio
+async def test_models_fallback_chain_replaces_model_key() -> None:
+    client = FakeClient([completed()])
+    model = PerplexityModel(
+        model_id="sonar/test",
+        params={"models": ["anthropic/claude-fable-5", "google/gemini-3.8-flash"]},
+        client=client,
+    )
+
+    await collect(model)
+
+    request = client.responses.request
+    assert request["models"] == ["anthropic/claude-fable-5", "google/gemini-3.8-flash"]
+    assert "model" not in request
+    assert "preset" not in request
+
+
+class ModelDumpEvent(SimpleNamespace):
+    def model_dump(self, mode="json"):
+        return {key: value for key, value in vars(self).items()}
+
+
+@pytest.mark.asyncio
+async def test_reasoning_thought_emits_reasoning_content_and_raw_envelope() -> None:
+    reasoning = ModelDumpEvent(
+        type="response.reasoning.started", thought="Considering the question"
+    )
+    client = FakeClient([reasoning, completed()])
+
+    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
+
+    assert {"perplexity": {"type": "response.reasoning.started", "thought": "Considering the question"}} in events
+    reasoning_deltas = [
+        item
+        for item in events
+        if "contentBlockDelta" in item
+        and "reasoningContent" in item["contentBlockDelta"]["delta"]
+    ]
+    assert reasoning_deltas == [
+        {
+            "contentBlockDelta": {
+                "contentBlockIndex": 0,
+                "delta": {"reasoningContent": {"text": "Considering the question\n"}},
+            }
+        }
+    ]
+    assert {"contentBlockStart": {"contentBlockIndex": 0, "start": {}}} in events
+    assert {"contentBlockStop": {"contentBlockIndex": 0}} in events
+
+
+@pytest.mark.asyncio
+async def test_reasoning_event_without_thought_emits_only_raw_envelope() -> None:
+    reasoning = ModelDumpEvent(type="response.reasoning.stopped", thought=None)
+    client = FakeClient([reasoning, completed()])
+
+    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
+
+    assert {"perplexity": {"type": "response.reasoning.stopped", "thought": None}} in events
+    assert not any(
+        "contentBlockDelta" in item
+        and "reasoningContent" in item["contentBlockDelta"]["delta"]
+        for item in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_reasoning_block_does_not_collide_with_text_block_indices() -> None:
+    reasoning = ModelDumpEvent(type="response.reasoning.started", thought="thinking")
+    client = FakeClient(
+        [
+            reasoning,
+            event("response.output_text.delta", delta="answer", output_index=0, content_index=0),
+            event("response.output_text.done", text="answer", output_index=0, content_index=0),
+            completed(),
+        ]
+    )
+
+    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
+
+    indices = [
+        item["contentBlockDelta"]["contentBlockIndex"]
+        for item in events
+        if "contentBlockDelta" in item
+    ]
+    assert len(set(indices)) == len(indices) or indices == sorted(indices)
+    reasoning_index = next(
+        item["contentBlockDelta"]["contentBlockIndex"]
+        for item in events
+        if "contentBlockDelta" in item
+        and "reasoningContent" in item["contentBlockDelta"]["delta"]
+    )
+    text_index = next(
+        item["contentBlockDelta"]["contentBlockIndex"]
+        for item in events
+        if "contentBlockDelta" in item and "text" in item["contentBlockDelta"]["delta"]
+    )
+    assert reasoning_index != text_index
+
+
+@pytest.mark.asyncio
+async def test_share_file_output_item_is_forwarded_verbatim() -> None:
+    share_file = ModelDumpEvent(
+        type="share_file",
+        file_id="file-1",
+        path="/v1/responses/resp-1/files/file-1/content",
+        status="completed",
+    )
+    client = FakeClient(
+        [
+            event("response.output_item.done", item=share_file, output_index=0),
+            completed(),
+        ]
+    )
+
+    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
+
+    assert {
+        "perplexity": {
+            "type": "share_file",
+            "file_id": "file-1",
+            "path": "/v1/responses/resp-1/files/file-1/content",
+            "status": "completed",
+        }
+    } in events

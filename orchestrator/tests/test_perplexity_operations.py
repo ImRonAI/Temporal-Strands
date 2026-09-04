@@ -239,8 +239,10 @@ async def test_each_preset_sends_its_fixed_preset_and_forced_flags(activity_fn, 
     assert request["stream"] is True
     assert request["input"] == "what is up"
     # Omitted optional fields are not sent at all -- preset internals stay live.
-    for absent in ("model", "models", "instructions", "tools", "skills", "extra_body"):
+    for absent in ("model", "models", "instructions", "tools", "extra_body"):
         assert absent not in request
+    # skills defaults to the builtin office suite when the caller passes none.
+    assert request["skills"] == [dict(skill) for skill in config.BUILTIN_SKILLS]
 
 
 @pytest.mark.asyncio

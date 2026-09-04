@@ -43,6 +43,7 @@ from config import (
     MODEL_RETRY_POLICY,
     MODEL_SCHEDULE_TO_CLOSE,
     MODEL_START_TO_CLOSE,
+    closable_activity_options,
 )
 
 # Official load_tool loads an existing .py file (path + name).
@@ -53,11 +54,16 @@ STRANDS_TOOLS_DIR = Path(__file__).resolve().parent / "tools"
 _IMPLEMENTATIONS: dict[str, AgentTool] = {}
 _LOADED_PATHS: dict[str, str] = {}
 
-_ACTIVITY_OPTIONS = dict(
-    start_to_close_timeout=MODEL_START_TO_CLOSE,
-    schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,
-    heartbeat_timeout=MODEL_HEARTBEAT,
-    retry_policy=MODEL_RETRY_POLICY,
+# Temporal requires start_to_close or schedule_to_close on every activity;
+# config leaves both unset ("we do not cap"), so apply the shared one-day
+# schedule-to-close fallback (same behavior as workflow.py's _closable).
+_ACTIVITY_OPTIONS = closable_activity_options(
+    dict(
+        start_to_close_timeout=MODEL_START_TO_CLOSE,
+        schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,
+        heartbeat_timeout=MODEL_HEARTBEAT,
+        retry_policy=MODEL_RETRY_POLICY,
+    )
 )
 
 _SKIP_PARAMS = frozenset({"self", "cls", "agent", "tool"})

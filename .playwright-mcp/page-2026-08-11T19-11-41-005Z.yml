@@ -1,0 +1,37 @@
+- main [ref=f3e2]:
+  - generic [ref=f3e3]:
+    - generic [ref=f3e4]: v0 / studio
+    - navigation [ref=f3e9]:
+      - button "Community" [ref=f3e10]
+      - button "Pricing" [ref=f3e11]
+      - button "Enterprise" [ref=f3e12]
+      - button "Docs" [ref=f3e13]
+    - generic [ref=f3e14]:
+      - button "Compare models" [ref=f3e15] [cursor=pointer]
+      - button "Sign in" [ref=f3e16]
+      - button "Start building" [ref=f3e17]
+  - generic [ref=f3e18]:
+    - generic [ref=f3e19]: Now in beta
+    - heading "What should we ship today?" [level=1] [ref=f3e22]:
+      - generic [ref=f3e23]: What
+      - generic [ref=f3e25]: should
+      - generic [ref=f3e27]: we
+      - generic [ref=f3e29]: ship
+      - generic [ref=f3e31]: today?
+    - paragraph [ref=f3e34]: Describe an interface in plain language. v0 turns it into clean, production-ready React — components, styling, and all.
+    - generic [ref=f3e35]:
+      - group [ref=f3e37]:
+        - group [ref=f3e38]
+        - textbox "Describe what you want to ship…" [ref=f3e40]
+        - group [ref=f3e41]:
+          - generic [ref=f3e42]:
+            - button [ref=f3e43]
+            - button "Loading models…" [ref=f3e44]
+          - button "Submit" [disabled]
+      - generic [ref=f3e50]:
+        - button "A pricing page with a yearly toggle" [ref=f3e52] [cursor=pointer]
+        - button "An analytics dashboard with charts" [ref=f3e54] [cursor=pointer]
+        - button "A waitlist landing page" [ref=f3e56] [cursor=pointer]
+        - button "A Kanban board with drag and drop" [ref=f3e58] [cursor=pointer]
+        - button "A settings page with tabs" [ref=f3e60] [cursor=pointer]
+    - paragraph [ref=f3e62]: Trusted by design engineers shipping at the edge of the web.

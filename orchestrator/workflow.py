@@ -24,9 +24,16 @@ protected route ``app/api/orchestrator/route.ts``:
                      interrupt is pending and again with ``None`` once answered.
 - ``tool_results`` -- ``{"tool_use_id", "status", "content"}``, published from an
   ``AfterToolCallEvent`` hook.
-- ``thinking``    -- graph tool ``ToolStreamEvent`` envelopes (``tool_use`` +
-                     ``data`` with native ``multiagent_*`` events) published
-                     from ``graph_activity``; also kept for SSE stability.
+- ``thinking``    -- raw model ``StreamEvent`` chunks published live from the
+                     ``think`` activity's nested-agent cycles, plus graph tool
+                     ``ToolStreamEvent`` envelopes (``tool_use`` + ``data``
+                     with native ``multiagent_*`` events) published from
+                     ``graph_activity``.
+
+The ``think`` tool (strands-agents-tools semantics, ``think_activity.py``) is
+both a model-callable tool (``THINK_TOOL``) and forced ahead of the model on
+every new user prompt by ``_ThinkFirstHook`` (``BeforeInvocationEvent``): its
+notes are folded into the user message as a ``<think_notes>`` text block.
 """
 
 from __future__ import annotations
@@ -34,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 from datetime import timedelta
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,17 +49,27 @@ from collections.abc import Callable
 from typing import Any
 
 from strands.hooks import HookProvider, HookRegistry
-from strands.hooks.events import AfterToolCallEvent, BeforeToolCallEvent
+from strands.hooks.events import (
+    AfterToolCallEvent,
+    BeforeInvocationEvent,
+    BeforeToolCallEvent,
+)
 from strands.types.content import Messages
 from strands.types.exceptions import EventLoopException
 from strands.types.interrupt import InterruptResponseContent
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 from temporalio.exceptions import ApplicationError
 from temporalio.contrib.strands import TemporalAgent, TemporalMCPClient
 from temporalio.contrib.strands.workflow import activity_as_tool
 from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamState
 
 from config import (
+    AGENT_CREATE_RETRY_POLICY,
+    AGENT_OPERATION_HEARTBEAT,
+    AGENT_OPERATION_RETRY_POLICY,
+    AGENT_OPERATION_SCHEDULE_TO_CLOSE,
+    AGENT_OPERATION_START_TO_CLOSE,
     COMPUTER_USE_HEARTBEAT,
     COMPUTER_USE_SCHEDULE_TO_CLOSE,
     COMPUTER_USE_START_TO_CLOSE,
@@ -62,6 +80,8 @@ from config import (
 )
 
 with workflow.unsafe.imports_passed_through():
+    import perplexity_operations
+    import think_activity
     from computer_use_activity import COMPUTER_USE_ACTIVITIES, COMPUTER_USE_TOOL_NAMES
     from graph_activity import graph_activity
     from load_tool import (
@@ -82,11 +102,35 @@ with workflow.unsafe.imports_passed_through():
     async def _load_tool_workflow_exec(path: str, name: str, agent: Any = None) -> dict[str, Any]:
         return load_tool._tool_func(path=tool_file_path(path), name=name, agent=agent)
 
-_MCP_ACTIVITY_OPTIONS = dict(
-    start_to_close_timeout=MODEL_START_TO_CLOSE,
-    schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,
-    heartbeat_timeout=MODEL_HEARTBEAT,
-    retry_policy=MODEL_RETRY_POLICY,
+# Temporal validates that every activity carries start_to_close_timeout OR
+# schedule_to_close_timeout (_workflow_instance._outbound_schedule_activity).
+# config.py currently leaves the MODEL_* / AGENT_OPERATION_* envelopes fully
+# unset ("we do not cap"), which that validation rejects at schedule time and
+# permanently fails the workflow task. Until config.py carries a valid
+# envelope, fall back to a generous schedule-to-close cap instead of crashing
+# the session (graceful degradation, telemetry.py convention).
+_UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE = timedelta(days=1)
+
+
+def _closable(options: dict[str, Any]) -> dict[str, Any]:
+    """Ensure the SDK's required timeout is present, preserving config intent."""
+    if options.get("start_to_close_timeout") or options.get(
+        "schedule_to_close_timeout"
+    ):
+        return options
+    return {
+        **options,
+        "schedule_to_close_timeout": _UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE,
+    }
+
+
+_MCP_ACTIVITY_OPTIONS = _closable(
+    dict(
+        start_to_close_timeout=MODEL_START_TO_CLOSE,
+        schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,
+        heartbeat_timeout=MODEL_HEARTBEAT,
+        retry_policy=MODEL_RETRY_POLICY,
+    )
 )
 
 PERMANENT_COMMUNITY_TOOLS = (
@@ -94,6 +138,68 @@ PERMANENT_COMMUNITY_TOOLS = (
     activity_as_tool(mcp_client_activity, **_MCP_ACTIVITY_OPTIONS),
     activity_as_tool(graph_activity, **_MCP_ACTIVITY_OPTIONS),
     activity_as_tool(use_skill_activity, **_MCP_ACTIVITY_OPTIONS),
+)
+
+# The think activity streams nested-agent cycles on THINKING_TOPIC and
+# heartbeats per chunk. No THINK_* timeout constants exist in config.py yet,
+# so the envelope lives here: one attempt (a failed thought is re-thought by
+# the orchestrator, not blindly replayed), 10 minutes per attempt, and a
+# heartbeat window generous enough for slow model chunks.
+_THINK_ACTIVITY_OPTIONS = dict(
+    start_to_close_timeout=timedelta(minutes=10),
+    heartbeat_timeout=timedelta(minutes=2),
+    retry_policy=RetryPolicy(maximum_attempts=1),
+)
+
+THINK_TOOL = activity_as_tool(think_activity.think, **_THINK_ACTIVITY_OPTIONS)
+
+# Perplexity Agent API sub-agent operations (perplexity_operations.py).
+# Background preset runs can research for many minutes; the AGENT_OPERATION_*
+# envelope from config.py is the generous-stream envelope. Creates get exactly
+# one automatic attempt (no idempotency key on POST /v1/responses — see
+# config.AGENT_CREATE_RETRY_POLICY); retrieve/list/download are read-only and
+# retry normally.
+_AGENT_OPERATION_OPTIONS = _closable(
+    dict(
+        start_to_close_timeout=AGENT_OPERATION_START_TO_CLOSE,
+        schedule_to_close_timeout=AGENT_OPERATION_SCHEDULE_TO_CLOSE,
+        heartbeat_timeout=AGENT_OPERATION_HEARTBEAT,
+    )
+)
+
+_AGENT_CREATE_ACTIVITIES = (
+    perplexity_operations.create_fast_agent_response,
+    perplexity_operations.create_low_agent_response,
+    perplexity_operations.create_medium_agent_response,
+    perplexity_operations.create_high_agent_response,
+    perplexity_operations.create_xhigh_agent_response,
+    perplexity_operations.create_wide_research_agent_response,
+)
+
+_AGENT_READ_ACTIVITIES = (
+    perplexity_operations.retrieve_agent_response,
+    perplexity_operations.list_agent_response_files,
+    perplexity_operations.download_agent_response_file,
+    perplexity_operations.list_agent_models,
+)
+
+AGENT_API_TOOLS = (
+    *(
+        activity_as_tool(
+            activity_fn,
+            retry_policy=AGENT_CREATE_RETRY_POLICY,
+            **_AGENT_OPERATION_OPTIONS,
+        )
+        for activity_fn in _AGENT_CREATE_ACTIVITIES
+    ),
+    *(
+        activity_as_tool(
+            activity_fn,
+            retry_policy=AGENT_OPERATION_RETRY_POLICY,
+            **_AGENT_OPERATION_OPTIONS,
+        )
+        for activity_fn in _AGENT_READ_ACTIVITIES
+    ),
 )
 
 _MCP_CONFIG_PATH = Path(__file__).resolve().parent / "mcp.json"
@@ -435,6 +541,116 @@ class _HotLoadHook(HookProvider):
                 self._extra_mcp.remove(connection_id)
 
 
+def _prompt_text_from_message(message: Any) -> str | None:
+    """The joined text of a plain user message, or None if not think-eligible.
+
+    Eligible means: a dict message with role == "user" whose content list has
+    at least one text block and no interruptResponse blocks (the HITL resume
+    path re-fires BeforeInvocationEvent with interruptResponse content).
+    """
+    if not isinstance(message, dict) or message.get("role") != "user":
+        return None
+    content = message.get("content")
+    if not isinstance(content, list):
+        return None
+    texts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if "interruptResponse" in block:
+            return None
+        text = block.get("text")
+        if isinstance(text, str):
+            texts.append(text)
+    joined = "\n".join(texts).strip()
+    return joined or None
+
+
+def _think_notes_text(result: Any) -> str:
+    """Joined content[].text of the think activity's returned dict."""
+    if not isinstance(result, dict):
+        return ""
+    parts: list[str] = []
+    for block in result.get("content") or []:
+        if isinstance(block, dict) and isinstance(block.get("text"), str):
+            parts.append(block["text"])
+    return "\n".join(parts).strip()
+
+
+class _ThinkFirstHook(HookProvider):
+    """Runs the ``think`` activity BEFORE the model on each new user prompt.
+
+    Registered on ``BeforeInvocationEvent``: at hook time the new user message
+    is ``event.messages`` (not yet appended to ``agent.messages``), so folding
+    the think notes into the last message's content mutates exactly what the
+    model will see. ``HookRegistry.invoke_callbacks_async`` awaits coroutine
+    callbacks, and awaiting ``workflow.execute_activity`` inside an async hook
+    is the same pattern the SDK's own MCP refresh hook uses on
+    ``BeforeModelCallEvent`` — the hook itself is deterministic apart from the
+    activity call, so it is replay-safe.
+
+    Guards:
+    - Skips interruptResponse resumes and any non-user/non-text message.
+    - Runs at most once per turn (``mark_turn_start`` resets the flag).
+    - A failed think activity is logged and swallowed; the turn proceeds
+      without notes (graceful degradation, telemetry.py convention).
+
+    ``executor`` defaults to ``workflow.execute_activity`` and is injectable
+    for unit tests.
+    """
+
+    def __init__(
+        self,
+        system_prompt: str,
+        executor: Callable[..., Any] | None = None,
+    ) -> None:
+        self._system_prompt = system_prompt
+        self._executor = executor
+        self._ran_this_turn = False
+
+    def mark_turn_start(self) -> None:
+        """Reset the once-per-turn flag; called at the start of ``turn``."""
+        self._ran_this_turn = False
+
+    def register_hooks(self, registry: HookRegistry, **kwargs: object) -> None:
+        registry.add_callback(BeforeInvocationEvent, self._think_first)
+
+    async def _think_first(self, event: BeforeInvocationEvent) -> None:
+        if self._ran_this_turn:
+            return
+        messages = event.messages
+        if not messages:  # None on some invocation paths, or empty
+            return
+        prompt = _prompt_text_from_message(messages[-1])
+        if prompt is None:
+            return
+        self._ran_this_turn = True
+        executor = self._executor or workflow.execute_activity
+        try:
+            result = await executor(
+                think_activity.think,
+                args=[prompt, 1, self._system_prompt],
+                **_THINK_ACTIVITY_OPTIONS,
+            )
+        except Exception as error:
+            # workflow.logger requires the workflow event loop; unit tests
+            # drive the hook outside one.
+            log = workflow.logger if workflow.in_workflow() else logging.getLogger(__name__)
+            log.warning(
+                "think-first hook failed; continuing without notes: %s", error
+            )
+            return
+        notes = _think_notes_text(result)
+        if not notes:
+            return
+        message = messages[-1]
+        content = message.get("content")
+        if isinstance(content, list):
+            content.append(
+                {"text": "\n\n<think_notes>\n" + notes + "\n</think_notes>"}
+            )
+
+
 class _ComputerUseSafetyHook(HookProvider):
     """HITL gate for Gemini Computer Use safety_decision payloads.
 
@@ -557,6 +773,8 @@ class ChatWorkflow:
         self._human_control = [False]
         self._handoff_requested = [False]
         self._pending_reason: str | None = None
+        # Installed by _build_agent; turn() resets its once-per-turn flag.
+        self._think_hook: _ThinkFirstHook | None = None
 
     def _stream_offset(self) -> int:
         """Current global stream offset: base_offset + log length.
@@ -577,12 +795,53 @@ class ChatWorkflow:
             for name in self._extra_mcp_servers
             if name not in catalog_names
         )
+        # Computer Use is Gemini-only (the tools drive Gemini's native
+        # computer_use function calls). Non-Gemini sessions get neither the
+        # tools nor their gating hooks.
+        is_gemini = self._model_id.startswith("gemini")
+        computer_use_tools = (
+            tuple(
+                activity_as_tool(
+                    computer_use_activity,
+                    **_closable(
+                        dict(
+                            start_to_close_timeout=COMPUTER_USE_START_TO_CLOSE,
+                            schedule_to_close_timeout=COMPUTER_USE_SCHEDULE_TO_CLOSE,
+                            heartbeat_timeout=COMPUTER_USE_HEARTBEAT,
+                            retry_policy=MODEL_RETRY_POLICY,
+                        )
+                    ),
+                )
+                for computer_use_activity in COMPUTER_USE_ACTIVITIES
+            )
+            if is_gemini
+            else ()
+        )
+        computer_use_hooks = (
+            [
+                _ComputerUseSafetyHook(),
+                _HumanControlHook(
+                    self._human_control,
+                    self._handoff_requested,
+                    self._handoffs.publish,
+                ),
+            ]
+            if is_gemini
+            else []
+        )
+        self._think_hook = _ThinkFirstHook(self._system_prompt)
+        model_options = _closable(
+            dict(
+                start_to_close_timeout=MODEL_START_TO_CLOSE,
+                schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,
+            )
+        )
         agent = TemporalAgent(
             # A registered factory NAME from run_worker.py's models= mapping,
             # never a Model instance (guide R1).
             model=self._model_id,
-            start_to_close_timeout=MODEL_START_TO_CLOSE,
-            schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,
+            start_to_close_timeout=model_options["start_to_close_timeout"],
+            schedule_to_close_timeout=model_options["schedule_to_close_timeout"],
             heartbeat_timeout=MODEL_HEARTBEAT,
             retry_policy=MODEL_RETRY_POLICY,
             # Temporal's own value for LLM streaming (docs.temporal.io,
@@ -599,27 +858,16 @@ class ChatWorkflow:
             messages=list(messages),
             tools=[
                 *PERMANENT_COMMUNITY_TOOLS,
+                THINK_TOOL,
+                *AGENT_API_TOOLS,
                 *catalog,
                 *extras,
-                *(
-                    activity_as_tool(
-                        computer_use_activity,
-                        start_to_close_timeout=COMPUTER_USE_START_TO_CLOSE,
-                        schedule_to_close_timeout=COMPUTER_USE_SCHEDULE_TO_CLOSE,
-                        heartbeat_timeout=COMPUTER_USE_HEARTBEAT,
-                        retry_policy=MODEL_RETRY_POLICY,
-                    )
-                    for computer_use_activity in COMPUTER_USE_ACTIVITIES
-                ),
+                *computer_use_tools,
             ],
             hooks=[
+                self._think_hook,
                 _ToolResultHook(self._tool_results.publish),
-                _ComputerUseSafetyHook(),
-                _HumanControlHook(
-                    self._human_control,
-                    self._handoff_requested,
-                    self._handoffs.publish,
-                ),
+                *computer_use_hooks,
                 _HotLoadHook(
                     self._loaded_tools,
                     self._extra_mcp_servers,
@@ -665,6 +913,11 @@ class ChatWorkflow:
             # small".
             turn_start_offset = self._stream_offset()
             self._turn_start_offset = turn_start_offset
+
+            # New turn: the think-first hook runs once for this turn's fresh
+            # user prompt, and never again for HITL interrupt resumes below.
+            if self._think_hook is not None:
+                self._think_hook.mark_turn_start()
 
             blocks = self._content_blocks(turn)
 

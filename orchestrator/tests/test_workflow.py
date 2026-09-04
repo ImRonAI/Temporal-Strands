@@ -34,6 +34,7 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
+import think_activity
 from load_tool import mcp_client_activity, run_loaded_tool
 from workflow import ChatInput, ChatWorkflow, TurnInput, mcp_client_factories
 
@@ -118,30 +119,72 @@ class BrokenModel(ScriptedModel):
         yield  # unreachable; makes this an async generator
 
 
+THINK_NOTES = "scripted think notes"
+
+
+class ThinkModel(Model):
+    """The nested think-cycle model: a fixed reply, independent of SCRIPTS.
+
+    The think-first hook runs the think activity before EVERY turn's model
+    call; keeping its model outside the SCRIPTS deque means existing tests'
+    script accounting is untouched.
+    """
+
+    def update_config(self, **model_config: Any) -> None:  # pragma: no cover
+        pass
+
+    def get_config(self) -> Any:  # pragma: no cover
+        return {}
+
+    async def structured_output(
+        self, output_model: Any, prompt: Any, system_prompt: Any = None, **kwargs: Any
+    ) -> AsyncGenerator[dict[str, Any], None]:  # pragma: no cover
+        raise NotImplementedError
+        yield
+
+    async def stream(
+        self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        for event in text_events(THINK_NOTES):
+            yield event
+
+
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def client() -> AsyncGenerator[Client, None]:
+    model_factories = {
+        "fake/text": lambda: ScriptedModel(),
+        "fake/broken": lambda: BrokenModel(),
+    }
     env = await WorkflowEnvironment.start_local(
         plugins=[
             StrandsPlugin(
-                models={
-                    "fake/text": lambda: ScriptedModel(),
-                    "fake/broken": lambda: BrokenModel(),
-                },
+                models=model_factories,
                 mcp_clients=mcp_client_factories(),
             )
         ]
+    )
+    # The think-first hook runs the think activity before every turn; its
+    # nested agent resolves the session model id through configure(), exactly
+    # as run_worker.py does. ThinkModel keeps it independent of SCRIPTS.
+    think_activity.configure(
+        {model_id: (lambda: ThinkModel()) for model_id in model_factories}
     )
     try:
         worker = Worker(
             env.client,
             task_queue=TASK_QUEUE,
             workflows=[ChatWorkflow],
-            activities=[mcp_client_activity, run_loaded_tool],
+            activities=[
+                mcp_client_activity,
+                run_loaded_tool,
+                think_activity.think,
+            ],
             workflow_runner=UnsandboxedWorkflowRunner(),
         )
         async with worker:
             yield env.client
     finally:
+        think_activity.configure({})
         await env.shutdown()
 
 
@@ -205,6 +248,12 @@ async def test_turn_replies_and_history_is_queryable(client: Client) -> None:
     messages = await handle.query(ChatWorkflow.messages)
     assert [m["role"] for m in messages] == ["user", "assistant"]
     assert "first reply" in assistant_texts(messages)
+
+    # The think-first hook ran before the model and folded its notes into the
+    # user message as a <think_notes> block.
+    user_text = str(messages[0]["content"])
+    assert "<think_notes>" in user_text
+    assert THINK_NOTES in user_text
 
     await handle.signal(ChatWorkflow.end_chat)
     await handle.result()

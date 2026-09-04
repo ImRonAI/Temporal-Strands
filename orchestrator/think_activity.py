@@ -16,6 +16,23 @@ A faithful copy of ``strands_tools.think`` (installed at
    the strands-temporal guide. The nested per-cycle agent is a plain
    ``strands.Agent`` running inside this activity -- NOT a TemporalAgent.
 
+This activity is LIVE, wired in two ways by ``workflow.py``:
+
+- ``THINK_TOOL`` -- a model-callable tool on every session agent; the
+  orchestrator is encouraged to call it frequently (agent.json guidance).
+- ``_ThinkFirstHook`` -- forced ahead of the model on every new user prompt
+  (``BeforeInvocationEvent``); the notes it returns are folded into the user
+  message as a ``<think_notes>`` block.
+
+``activity.heartbeat()`` is sent for every streamed chunk so long cycles stay
+visibly alive to Temporal whenever a heartbeat timeout is configured.
+
+Tool inheritance note: only model-authored arguments cross the activity
+boundary (``activity_as_tool`` contract), so the nested agent CANNOT see the
+parent agent's tool list. It runs toolless (``tools=[]``) apart from the
+session model's own server-side natives -- the b8e1d70 behavior, kept
+deliberately.
+
 The activity name must stay ``think``: ``activity_as_tool`` derives the tool
 name from the ``@activity.defn`` name, and the UI keys Chain-of-Thought
 suppression off that exact string (components/v0/agent-activity.tsx:908,
@@ -238,6 +255,15 @@ Please provide your analysis directly:
         async for event in agent.stream_async(prompt):
             if "event" in event:
                 publish(event["event"])
+                # One beat per streamed chunk: long cycles stay visibly alive
+                # to Temporal whenever a heartbeat timeout is configured.
+                # No-op outside an activity context (unit tests drive this
+                # method directly through ActivityEnvironment, which accepts
+                # heartbeats).
+                try:
+                    activity.heartbeat()
+                except RuntimeError:  # pragma: no cover - no activity context
+                    pass
             if "result" in event:
                 result = event["result"]
 

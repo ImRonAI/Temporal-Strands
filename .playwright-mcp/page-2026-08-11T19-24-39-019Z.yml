@@ -1,0 +1,807 @@
+- generic [ref=f1e2]:
+  - link "Skip to Main Content" [ref=f1e3] [cursor=pointer]:
+    - /url: "#content"
+  - generic [ref=f1e4]:
+    - log
+    - navigation "Primary" [ref=f1e6]:
+      - generic [ref=f1e7]:
+        - generic [ref=f1e8]:
+          - link [ref=f1e9] [cursor=pointer]:
+            - /url: /
+          - paragraph [ref=f1e12]: Web UI
+        - button "Collapse Navigation" [ref=f1e13] [cursor=pointer]
+      - list [ref=f1e16]:
+        - listitem [ref=f1e17]:
+          - link "Namespaces" [ref=f1e18] [cursor=pointer]:
+            - /url: /namespaces
+        - listitem [ref=f1e23]:
+          - link "Workflows" [ref=f1e24] [cursor=pointer]:
+            - /url: /namespaces/default/workflows
+        - listitem [ref=f1e29]:
+          - link "Standalone Activities" [ref=f1e30] [cursor=pointer]:
+            - /url: /namespaces/default/activities
+        - listitem [ref=f1e35]:
+          - link "Schedules" [ref=f1e36] [cursor=pointer]:
+            - /url: /namespaces/default/schedules
+        - listitem [ref=f1e41]:
+          - link "Batch" [ref=f1e42] [cursor=pointer]:
+            - /url: /namespaces/default/batch-operations
+        - listitem [ref=f1e49]:
+          - link "Workers" [ref=f1e50] [cursor=pointer]:
+            - /url: /namespaces/default/workers
+        - listitem [ref=f1e55]:
+          - link "Nexus" [ref=f1e56] [cursor=pointer]:
+            - /url: /nexus
+        - separator [ref=f1e61]
+        - listitem [ref=f1e62]:
+          - link "Archive" [ref=f1e63] [cursor=pointer]:
+            - /url: /namespaces/default/archival
+        - listitem [ref=f1e68]:
+          - link "Import" [ref=f1e69] [cursor=pointer]:
+            - /url: /import/events
+        - listitem [ref=f1e74]:
+          - link "Docs" [ref=f1e75] [cursor=pointer]:
+            - /url: http://docs.temporal.io
+        - separator [ref=f1e80]
+      - generic [ref=f1e81]:
+        - listitem [ref=f1e82]:
+          - link "Feedback" [ref=f1e83] [cursor=pointer]:
+            - /url: https://github.com/temporalio/ui/issues/new/choose
+        - generic [ref=f1e88]:
+          - generic [ref=f1e89]: Version
+          - text: 2.49.1
+    - generic [ref=f1e90]:
+      - navigation "Main" [ref=f1e91]:
+        - generic [ref=f1e94]:
+          - generic [ref=f1e95] [cursor=pointer]: Select a Namespace
+          - generic [ref=f1e97]:
+            - combobox "Select a Namespace" [ref=f1e101]: default
+            - button [ref=f1e104] [cursor=pointer]
+        - generic [ref=f1e108]:
+          - button "Timezone local" [ref=f1e110] [cursor=pointer]:
+            - generic [ref=f1e113]: local
+          - button "Configure Codec Server" [ref=f1e119] [cursor=pointer]
+          - button [ref=f1e124] [cursor=pointer]:
+            - img "User Profile" [ref=f1e126]
+      - main [ref=f1e130]:
+        - generic [ref=f1e131]:
+          - link "Back to Workflows" [ref=f1e134] [cursor=pointer]:
+            - /url: /namespaces/default/workflows?
+          - generic [ref=f1e137]:
+            - generic [ref=f1e138]:
+              - generic [ref=f1e139]:
+                - generic [ref=f1e140]: Running
+                - heading [level=1] [ref=f1e149]:
+                  - button "chat-21795cb06a876836" [ref=f1e150] [cursor=pointer]
+              - generic [ref=f1e153]:
+                - button "Request Cancellation" [ref=f1e154] [cursor=pointer]
+                - button "More Actions" [ref=f1e156] [cursor=pointer]
+            - generic "workflow details" [ref=f1e161]:
+              - definition [ref=f1e162]: Start
+              - term [ref=f1e163]:
+                - generic [ref=f1e164]: Aug 11, 2026, 12:22:19.18 PM PDT
+              - definition [ref=f1e166]: End
+              - term [ref=f1e167]:
+                - generic [ref=f1e168]: "-"
+              - definition [ref=f1e169]: Duration
+              - term [ref=f1e170]:
+                - generic [ref=f1e171]: 2m 13s 322ms
+              - generic [ref=f1e173]:
+                - definition [ref=f1e174]: Run ID
+                - term [ref=f1e175]:
+                  - generic [ref=f1e176]: 019ff246-92ad-7d27-8501-5b513e924a7e
+                  - button "Click to copy content" [ref=f1e179] [cursor=pointer]:
+                    - img "Click to copy content" [ref=f1e180]
+                - definition [ref=f1e182]: Workflow Type
+                - term [ref=f1e183]:
+                  - link "ChatWorkflow" [ref=f1e184] [cursor=pointer]:
+                    - /url: /namespaces/default/workflows?query=WorkflowType%3D%22ChatWorkflow%22
+                  - button "Click to copy content" [ref=f1e189] [cursor=pointer]:
+                    - img "Click to copy content" [ref=f1e190]
+                - definition [ref=f1e192]: Task Queue
+                - term [ref=f1e193]:
+                  - link "perplexity-orchestrator" [ref=f1e194] [cursor=pointer]:
+                    - /url: /namespaces/default/task-queues/perplexity-orchestrator
+              - generic [ref=f1e197]:
+                - definition [ref=f1e198]: History Size
+                - term [ref=f1e199]:
+                  - generic [ref=f1e200]: 85.61 KB
+                - definition [ref=f1e202]: State Transitions
+                - term [ref=f1e203]:
+                  - generic [ref=f1e204]: "16"
+                - definition [ref=f1e206]: Workflow SDK
+                - term [ref=f1e207]:
+                  - paragraph [ref=f1e208]:
+                    - generic [ref=f1e210]: Python 1.31.0
+                    - link "Docs" [ref=f1e211] [cursor=pointer]:
+                      - /url: https://docs.temporal.io/develop/python
+            - tablist "workflow detail" [ref=f1e215]:
+              - tab "Timeline" [ref=f1e216] [cursor=pointer]
+              - tab "Event History 34" [selected] [ref=f1e217] [cursor=pointer]:
+                - text: Event History
+                - generic [ref=f1e218]: "34"
+              - tab "Relationships 0" [ref=f1e219] [cursor=pointer]:
+                - text: Relationships
+                - generic [ref=f1e220]: "0"
+              - tab "Workers" [ref=f1e221] [cursor=pointer]
+              - tab "Pending Activities 0" [ref=f1e222] [cursor=pointer]:
+                - text: Pending Activities
+                - generic [ref=f1e223]: "0"
+              - tab "Call Stack" [ref=f1e225] [cursor=pointer]
+              - tab "Queries" [ref=f1e226] [cursor=pointer]
+              - tab "User Metadata" [ref=f1e227] [cursor=pointer]
+              - tab "Search Attributes" [ref=f1e228] [cursor=pointer]
+              - tab "Memo" [ref=f1e229] [cursor=pointer]
+          - generic [ref=f1e230]:
+            - generic [ref=f1e231]:
+              - heading "Input" [level=3] [ref=f1e232]
+              - generic [ref=f1e234]:
+                - generic [ref=f1e237]:
+                  - generic [ref=f1e238]: ⌄
+                  - textbox [ref=f1e241]:
+                    - generic [ref=f1e242]: "{"
+                    - generic [ref=f1e243]: "\"model_id\": \"openai/gpt-5.6-sol\","
+                    - generic [ref=f1e244]: "\"system_prompt\": \"You are a capable engineering assistant with durable, long-running tools at your disposal. Use them when they make your answer better, and answer directly when they would not.When you need an explicit model override or a models fallback list for one of the six create_*_agent_response tools, call list_agent_models first and use the returned ids verbatim — never guess, correct, or hardcode model ids. When you use a preset's default model, do not call list_agent_models.Your output is rendered as GitHub-flavored Markdown with KaTeX, which only recognises dollar delimiters: $x^2$ inline and $$...$$ for display. Bracket delimiters \\\\\\\\[ ... \\\\\\\\] are not parsed and their raw LaTeX is shown to the user verbatim.\","
+                    - generic [ref=f1e245]: "\"session_id\": \"chat-21795cb06a876836\","
+                    - generic [ref=f1e246]: "\"messages\": [],"
+                    - generic [ref=f1e247]: "\"stream_state\": null,"
+                    - generic [ref=f1e248]: "\"rollover_turns\": null"
+                    - generic [ref=f1e249]: "}"
+                - generic [ref=f1e250]:
+                  - button "Click to copy content" [ref=f1e251] [cursor=pointer]:
+                    - img "Click to copy content" [ref=f1e252]
+                  - button "Maximize" [ref=f1e254] [cursor=pointer]:
+                    - img "Maximize" [ref=f1e255]
+            - generic [ref=f1e257]:
+              - heading "Result" [level=3] [ref=f1e258]
+              - textbox [ref=f1e266]:
+                - generic [ref=f1e267]: Results will appear upon completion.
+          - generic [ref=f1e268]:
+            - generic [ref=f1e269]:
+              - generic [ref=f1e270]:
+                - heading "Event History" [level=2] [ref=f1e271]
+                - tablist [ref=f1e272]:
+                  - button "All" [ref=f1e273] [cursor=pointer]
+                  - button "Compact" [ref=f1e280] [cursor=pointer]
+                  - button "JSON" [ref=f1e285] [cursor=pointer]
+              - generic [ref=f1e291]:
+                - button "Descending" [ref=f1e292] [cursor=pointer]
+                - button "Filter" [ref=f1e298] [cursor=pointer]
+                - button "Auto Refresh On" [ref=f1e304] [cursor=pointer]
+                - button "Download" [ref=f1e306] [cursor=pointer]
+            - generic [ref=f1e314]:
+              - table [ref=f1e315]:
+                - rowgroup [ref=f1e316]:
+                  - row [ref=f1e317]:
+                    - columnheader "Event ID" [ref=f1e318]
+                    - columnheader "Timestamp" [ref=f1e320]
+                    - columnheader "Event Type" [ref=f1e322]
+                    - columnheader "Details" [ref=f1e327]
+                - rowgroup [ref=f1e329]:
+                  - row [ref=f1e330]:
+                    - cell [ref=f1e331]:
+                      - link "34" [ref=f1e332] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/34
+                    - cell "Aug 11, 2026, 12:22:20.97 PM PDT" [ref=f1e333]
+                    - cell [ref=f1e336]:
+                      - paragraph [ref=f1e337]:
+                        - img "Update" [ref=f1e338]
+                        - text: Workflow Execution Update Completed
+                    - 'cell "Outcome Failure {\"message\":\"Activity task failed\",\"cause\":{\"message\":\"invali" [ref=f1e340]':
+                      - generic [ref=f1e342]:
+                        - paragraph [ref=f1e343]: Outcome Failure
+                        - code [ref=f1e346]:
+                          - generic [ref=f1e347]: "{\"message\":\"Activity task failed\",\"cause\":{\"message\":\"invali"
+                  - row [ref=f1e348]:
+                    - cell [ref=f1e349]:
+                      - link "33" [ref=f1e350] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/33
+                    - cell "Aug 11, 2026, 12:22:20.97 PM PDT" [ref=f1e351]
+                    - cell [ref=f1e354]:
+                      - paragraph [ref=f1e355]:
+                        - img "Workflow" [ref=f1e356]
+                        - text: Workflow Task Completed
+                    - cell "Identity 92620@Timothys-MacBook-Pro.local" [ref=f1e358]:
+                      - generic [ref=f1e360]:
+                        - paragraph [ref=f1e361]: Identity
+                        - generic [ref=f1e362]: 92620@Timothys-MacBook-Pro.local
+                  - row [ref=f1e363]:
+                    - cell [ref=f1e364]:
+                      - link "32" [ref=f1e365] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/32
+                    - cell "Aug 11, 2026, 12:22:20.96 PM PDT" [ref=f1e366]
+                    - cell [ref=f1e369]:
+                      - paragraph [ref=f1e370]:
+                        - img "Workflow" [ref=f1e371]
+                        - text: Workflow Task Started
+                    - cell "History Size Bytes 85348" [ref=f1e373]:
+                      - generic [ref=f1e375]:
+                        - paragraph [ref=f1e376]: History Size Bytes
+                        - generic [ref=f1e377]: "85348"
+                  - row [ref=f1e378]:
+                    - cell [ref=f1e379]:
+                      - link "31" [ref=f1e380] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/31
+                    - cell "Aug 11, 2026, 12:22:20.96 PM PDT" [ref=f1e381]
+                    - cell [ref=f1e384]:
+                      - paragraph [ref=f1e385]:
+                        - img "Workflow" [ref=f1e386]
+                        - text: Workflow Task Scheduled
+                    - cell [ref=f1e388]:
+                      - generic [ref=f1e390]:
+                        - paragraph [ref=f1e391]: Task Queue Name
+                        - link "92620@Timothys-MacBook-Pro.local-027fae8bb78b42ddb94304a22054dc9e" [ref=f1e393] [cursor=pointer]:
+                          - /url: /namespaces/default/task-queues/92620%40Timothys-MacBook-Pro.local-027fae8bb78b42ddb94304a22054dc9e
+                  - row [ref=f1e394] [cursor=pointer]:
+                    - cell [ref=f1e395]:
+                      - link "30" [ref=f1e396]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/30
+                    - cell "Aug 11, 2026, 12:22:20.96 PM PDT" [ref=f1e397]
+                    - cell [ref=f1e400]:
+                      - paragraph [ref=f1e401]:
+                        - img "Activity" [ref=f1e402]
+                        - text: Activity Task Failed
+                    - cell "Failure Message invalid request" [ref=f1e404]:
+                      - generic [ref=f1e406]:
+                        - paragraph [ref=f1e407]: Failure Message
+                        - generic [ref=f1e408]: invalid request
+                  - row [ref=f1e874]:
+                    - cell [ref=f1e875]:
+                      - generic [ref=f1e876]:
+                        - generic [ref=f1e877]:
+                          - generic [ref=f1e878]:
+                            - generic [ref=f1e879]:
+                              - link "10" [ref=f1e880] [cursor=pointer]:
+                                - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/10
+                              - paragraph [ref=f1e881]: Activity Task Scheduled
+                            - paragraph [ref=f1e882]: Aug 11, 2026, 12:22:19.29 PM PDT
+                          - generic [ref=f1e883]:
+                            - generic [ref=f1e884]:
+                              - generic [ref=f1e885]:
+                                - paragraph [ref=f1e886]: Activity ID
+                                - paragraph [ref=f1e887]: "1"
+                              - generic [ref=f1e888]:
+                                - paragraph [ref=f1e889]: Activity Type
+                                - paragraph [ref=f1e890]: invoke_model_streaming
+                              - generic [ref=f1e891]:
+                                - paragraph [ref=f1e892]: Task Queue Kind
+                                - paragraph [ref=f1e893]: TASK_QUEUE_KIND_NORMAL
+                              - generic [ref=f1e894]:
+                                - paragraph [ref=f1e895]: Schedule To Close Timeout
+                                - paragraph [ref=f1e896]: 30 minutes
+                              - generic [ref=f1e897]:
+                                - paragraph [ref=f1e898]: Schedule To Start Timeout
+                                - paragraph [ref=f1e899]: 30 minutes
+                              - generic [ref=f1e900]:
+                                - paragraph [ref=f1e901]: Start To Close Timeout
+                                - paragraph [ref=f1e902]: 10 minutes
+                              - generic [ref=f1e903]:
+                                - paragraph [ref=f1e904]: Heartbeat Timeout
+                                - paragraph [ref=f1e905]: 30 seconds
+                              - generic [ref=f1e906]:
+                                - paragraph [ref=f1e907]: Workflow Task Completed Event ID
+                                - paragraph [ref=f1e908]: "7"
+                              - generic [ref=f1e909]:
+                                - paragraph [ref=f1e910]: Retry Policy Initial Interval
+                                - paragraph [ref=f1e911]: 1s
+                              - generic [ref=f1e912]:
+                                - paragraph [ref=f1e913]: Retry Policy Backoff Coefficient
+                                - paragraph [ref=f1e914]: "2"
+                              - generic [ref=f1e915]:
+                                - paragraph [ref=f1e916]: Retry Policy Maximum Interval
+                                - paragraph [ref=f1e917]: 30s
+                              - generic [ref=f1e918]:
+                                - paragraph [ref=f1e919]: Retry Policy Maximum Attempts
+                                - paragraph [ref=f1e920]: "6"
+                              - generic [ref=f1e921]:
+                                - paragraph [ref=f1e922]: Use Workflow Build ID
+                                - paragraph [ref=f1e923]: "true"
+                              - generic [ref=f1e924]:
+                                - paragraph [ref=f1e925]: Task Queue Name
+                                - link "perplexity-orchestrator" [ref=f1e927] [cursor=pointer]:
+                                  - /url: /namespaces/default/task-queues/perplexity-orchestrator
+                            - generic [ref=f1e929]:
+                              - paragraph [ref=f1e930]: Input
+                              - generic [ref=f1e932]:
+                                - generic [ref=f1e935]:
+                                  - generic [ref=f1e937]:
+                                    - generic [ref=f1e938]: ⌄
+                                    - generic [ref=f1e939]: ⌄
+                                    - generic [ref=f1e940]: ⌄
+                                    - generic [ref=f1e941]: ⌄
+                                    - generic [ref=f1e942]: ⌄
+                                    - generic [ref=f1e943]: ⌄
+                                    - generic [ref=f1e944]: ⌄
+                                    - generic [ref=f1e945]: ⌄
+                                  - textbox [ref=f1e946]:
+                                    - generic [ref=f1e947]: "{"
+                                    - generic [ref=f1e948]: "\"model_name\": \"openai/gpt-5.6-sol\","
+                                    - generic [ref=f1e949]: "\"messages\": ["
+                                    - generic [ref=f1e950]: "{"
+                                    - generic [ref=f1e951]: "\"role\": \"user\","
+                                    - generic [ref=f1e952]: "\"content\": ["
+                                    - generic [ref=f1e953]: "{"
+                                    - generic [ref=f1e954]: "\"text\": \"Call the list_agent_models tool and list a few returned model IDs.\""
+                                    - generic [ref=f1e955]: "}"
+                                    - generic [ref=f1e956]: "]"
+                                    - generic [ref=f1e957]: "}"
+                                    - generic [ref=f1e958]: "],"
+                                    - generic [ref=f1e959]: "\"invocation_state\": {"
+                                    - generic [ref=f1e960]: "\"request_state\": {}"
+                                    - generic [ref=f1e961]: "},"
+                                    - generic [ref=f1e962]: "\"tool_specs\": ["
+                                    - generic [ref=f1e963]: "{"
+                                    - generic [ref=f1e964]: "\"name\": \"think\","
+                                    - generic [ref=f1e965]: "\"description\": \"Recursive thinking tool for sophisticated thought generation.This tool implements a multi-cycle cognitive analysis approach thatprogressively refines thoughts through iterative processing. Each cyclebuilds upon insights from the previous cycle, creating a depth of analysisthat would be difficult to achieve in a single pass.Returns: Dict containing status and response content in the format: { \\\"status\\\": \\\"success|error\\\", \\\"content\\\": [{\\\"text\\\": \\\"Detailed thinking output across all cycles\\\"}] } Success case: Returns concatenated results from all thinking cycles Error case: Returns information about what went wrong during processing\","
+                                - generic [ref=f1e967]:
+                                  - button "Click to copy content" [ref=f1e968] [cursor=pointer]:
+                                    - img "Click to copy content" [ref=f1e969]
+                                  - button "Maximize" [ref=f1e971] [cursor=pointer]:
+                                    - img "Maximize" [ref=f1e972]
+                        - generic [ref=f1e974]:
+                          - generic [ref=f1e975]:
+                            - generic [ref=f1e976]:
+                              - link "29" [ref=f1e977] [cursor=pointer]:
+                                - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/29
+                              - paragraph [ref=f1e978]: Activity Task Started
+                            - paragraph [ref=f1e979]: Aug 11, 2026, 12:22:19.29 PM PDT
+                          - generic [ref=f1e981]:
+                            - generic [ref=f1e982]:
+                              - paragraph [ref=f1e983]: Identity
+                              - paragraph [ref=f1e984]: 92620@Timothys-MacBook-Pro.local
+                            - generic [ref=f1e985]:
+                              - paragraph [ref=f1e986]: Request ID
+                              - paragraph [ref=f1e987]: eded44a1-c73e-487b-8e9e-535069d1e45f
+                            - generic [ref=f1e988]:
+                              - paragraph [ref=f1e989]: Attempt
+                              - paragraph [ref=f1e990]: "1"
+                            - generic [ref=f1e991]:
+                              - paragraph [ref=f1e992]: Worker Version
+                              - paragraph [ref=f1e993]: 884d9394d3150402756b764c06c93da0
+                        - generic [ref=f1e994]:
+                          - generic [ref=f1e995]:
+                            - generic [ref=f1e996]:
+                              - link "30" [ref=f1e997] [cursor=pointer]:
+                                - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/30
+                              - paragraph [ref=f1e998]: Activity Task Failed
+                            - paragraph [ref=f1e999]: Aug 11, 2026, 12:22:20.96 PM PDT
+                          - generic [ref=f1e1000]:
+                            - generic [ref=f1e1001]:
+                              - generic [ref=f1e1002]:
+                                - paragraph [ref=f1e1003]: Identity
+                                - paragraph [ref=f1e1004]: 92620@Timothys-MacBook-Pro.local
+                              - generic [ref=f1e1005]:
+                                - paragraph [ref=f1e1006]: Retry State
+                                - paragraph [ref=f1e1007]: RETRY_STATE_NON_RETRYABLE_FAILURE
+                            - generic [ref=f1e1008]:
+                              - generic [ref=f1e1009]:
+                                - paragraph [ref=f1e1010]: Failure
+                                - generic [ref=f1e1012]:
+                                  - generic [ref=f1e1015]:
+                                    - generic [ref=f1e1016]: ⌄
+                                    - textbox [ref=f1e1019]:
+                                      - generic [ref=f1e1020]: "{"
+                                      - generic [ref=f1e1021]: "\"message\": \"invalid request\","
+                                      - generic [ref=f1e1022]: "\"stackTrace\": \" File \\\"/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py\\\", line 351, in _handle_start_activity_task result = await self._execute_activity( ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ start, running_activity, task_token, data_converter ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ) ^ File \\\"/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py\\\", line 681, in _execute_activity return await impl.execute_activity(input) ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ File \\\"/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py\\\", line 890, in execute_activity return await input.fn(*input.args) ^^^^^^^^^^^^^^^^^^^^^^^^^^^ File \\\"/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py\\\", line 23, in wrapper return await fn(*args, **kwargs) ^^^^^^^^^^^^^^^^^^^^^^^^^ File \\\"/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py\\\", line 92, in invoke_model_streaming async for event in _stream(model, input): events.append(event) topic.publish(event) File \\\"/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py\\\", line 469, in stream self._raise_failed(_value(provider_event, \\\"error\\\")) ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ File \\\"/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py\\\", line 261, in _raise_failed raise _application_error(message, non_retryable=non_retryable)\","
+                                  - generic [ref=f1e1024]:
+                                    - button "Click to copy content" [ref=f1e1025] [cursor=pointer]:
+                                      - img "Click to copy content" [ref=f1e1026]
+                                    - button "Maximize" [ref=f1e1028] [cursor=pointer]:
+                                      - img "Maximize" [ref=f1e1029]
+                              - generic [ref=f1e1031]:
+                                - paragraph [ref=f1e1032]: Call Stack
+                                - generic [ref=f1e1034]:
+                                  - textbox [ref=f1e1040]:
+                                    - generic [ref=f1e1041]: File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+                                    - generic [ref=f1e1042]: result = await self._execute_activity(
+                                    - generic [ref=f1e1043]: ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                    - generic [ref=f1e1044]: start, running_activity, task_token, data_converter
+                                    - generic [ref=f1e1045]: ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                    - generic [ref=f1e1046]: )
+                                    - generic [ref=f1e1047]: ^
+                                    - generic [ref=f1e1049]: File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+                                    - generic [ref=f1e1050]: return await impl.execute_activity(input)
+                                    - generic [ref=f1e1051]: ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                    - generic [ref=f1e1053]: File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+                                    - generic [ref=f1e1054]: return await input.fn(*input.args)
+                                  - generic [ref=f1e1056]:
+                                    - button "Click to copy content" [ref=f1e1057] [cursor=pointer]:
+                                      - img "Click to copy content" [ref=f1e1058]
+                                    - button "Maximize" [ref=f1e1060] [cursor=pointer]:
+                                      - img "Maximize" [ref=f1e1061]
+                  - row [ref=f1e409]:
+                    - cell [ref=f1e410]:
+                      - link "29" [ref=f1e411] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/29
+                    - cell "Aug 11, 2026, 12:22:19.29 PM PDT" [ref=f1e412]
+                    - cell [ref=f1e415]:
+                      - paragraph [ref=f1e416]:
+                        - img "Activity" [ref=f1e417]
+                        - text: Activity Task Started
+                    - cell "Attempt 1" [ref=f1e419]:
+                      - generic [ref=f1e421]:
+                        - paragraph [ref=f1e422]: Attempt
+                        - generic [ref=f1e423]: "1"
+                  - row [ref=f1e424]:
+                    - cell [ref=f1e425]:
+                      - link "28" [ref=f1e426] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/28
+                    - cell "Aug 11, 2026, 12:22:20.41 PM PDT" [ref=f1e427]
+                    - cell [ref=f1e430]:
+                      - paragraph [ref=f1e431]:
+                        - img "Update" [ref=f1e432]
+                        - text: Workflow Execution Update Accepted
+                    - cell "Name __temporal_workflow_stream_poll" [ref=f1e434]:
+                      - generic [ref=f1e436]:
+                        - paragraph [ref=f1e437]: Name
+                        - generic [ref=f1e438]: __temporal_workflow_stream_poll
+                  - row [ref=f1e439]:
+                    - cell [ref=f1e440]:
+                      - link "27" [ref=f1e441] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/27
+                    - cell "Aug 11, 2026, 12:22:20.41 PM PDT" [ref=f1e442]
+                    - cell [ref=f1e445]:
+                      - paragraph [ref=f1e446]:
+                        - img "Workflow" [ref=f1e447]
+                        - text: Workflow Task Completed
+                    - cell "Identity 92620@Timothys-MacBook-Pro.local" [ref=f1e449]:
+                      - generic [ref=f1e451]:
+                        - paragraph [ref=f1e452]: Identity
+                        - generic [ref=f1e453]: 92620@Timothys-MacBook-Pro.local
+                  - row [ref=f1e454]:
+                    - cell [ref=f1e455]:
+                      - link "26" [ref=f1e456] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/26
+                    - cell "Aug 11, 2026, 12:22:20.41 PM PDT" [ref=f1e457]
+                    - cell [ref=f1e460]:
+                      - paragraph [ref=f1e461]:
+                        - img "Workflow" [ref=f1e462]
+                        - text: Workflow Task Started
+                    - cell "History Size Bytes 82422" [ref=f1e464]:
+                      - generic [ref=f1e466]:
+                        - paragraph [ref=f1e467]: History Size Bytes
+                        - generic [ref=f1e468]: "82422"
+                  - row [ref=f1e469]:
+                    - cell [ref=f1e470]:
+                      - link "25" [ref=f1e471] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/25
+                    - cell "Aug 11, 2026, 12:22:20.41 PM PDT" [ref=f1e472]
+                    - cell [ref=f1e475]:
+                      - paragraph [ref=f1e476]:
+                        - img "Workflow" [ref=f1e477]
+                        - text: Workflow Task Scheduled
+                    - cell [ref=f1e479]:
+                      - generic [ref=f1e481]:
+                        - paragraph [ref=f1e482]: Task Queue Name
+                        - link "92620@Timothys-MacBook-Pro.local-027fae8bb78b42ddb94304a22054dc9e" [ref=f1e484] [cursor=pointer]:
+                          - /url: /namespaces/default/task-queues/92620%40Timothys-MacBook-Pro.local-027fae8bb78b42ddb94304a22054dc9e
+                  - row [ref=f1e485]:
+                    - cell [ref=f1e486]:
+                      - link "24" [ref=f1e487] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/24
+                    - cell "Aug 11, 2026, 12:22:20.31 PM PDT" [ref=f1e488]
+                    - cell [ref=f1e491]:
+                      - paragraph [ref=f1e492]:
+                        - img "Update" [ref=f1e493]
+                        - text: Workflow Execution Update Completed
+                    - 'cell "Outcome Success {\"items\":[{\"topic\":\"events\",\"data\":\"ChYKCGVuY29kaW5nEgpqc29u" [ref=f1e495]':
+                      - generic [ref=f1e497]:
+                        - paragraph [ref=f1e498]: Outcome Success
+                        - code [ref=f1e501]:
+                          - generic [ref=f1e502]: "{\"items\":[{\"topic\":\"events\",\"data\":\"ChYKCGVuY29kaW5nEgpqc29u"
+                  - row [ref=f1e503]:
+                    - cell [ref=f1e504]:
+                      - link "23" [ref=f1e505] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/23
+                    - cell "Aug 11, 2026, 12:22:20.31 PM PDT" [ref=f1e506]
+                    - cell [ref=f1e509]:
+                      - paragraph [ref=f1e510]:
+                        - img "Workflow" [ref=f1e511]
+                        - text: Workflow Task Completed
+                    - cell "Identity 92620@Timothys-MacBook-Pro.local" [ref=f1e513]:
+                      - generic [ref=f1e515]:
+                        - paragraph [ref=f1e516]: Identity
+                        - generic [ref=f1e517]: 92620@Timothys-MacBook-Pro.local
+                  - row [ref=f1e518]:
+                    - cell [ref=f1e519]:
+                      - link "22" [ref=f1e520] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/22
+                    - cell "Aug 11, 2026, 12:22:20.30 PM PDT" [ref=f1e521]
+                    - cell [ref=f1e524]:
+                      - paragraph [ref=f1e525]:
+                        - img "Workflow" [ref=f1e526]
+                        - text: Workflow Task Started
+                    - cell "History Size Bytes 53804" [ref=f1e528]:
+                      - generic [ref=f1e530]:
+                        - paragraph [ref=f1e531]: History Size Bytes
+                        - generic [ref=f1e532]: "53804"
+                  - row [ref=f1e533]:
+                    - cell [ref=f1e534]:
+                      - link "21" [ref=f1e535] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/21
+                    - cell "Aug 11, 2026, 12:22:20.30 PM PDT" [ref=f1e536]
+                    - cell [ref=f1e539]:
+                      - paragraph [ref=f1e540]:
+                        - img "Workflow" [ref=f1e541]
+                        - text: Workflow Task Scheduled
+                    - cell [ref=f1e543]:
+                      - generic [ref=f1e545]:
+                        - paragraph [ref=f1e546]: Task Queue Name
+                        - link "92620@Timothys-MacBook-Pro.local-027fae8bb78b42ddb94304a22054dc9e" [ref=f1e548] [cursor=pointer]:
+                          - /url: /namespaces/default/task-queues/92620%40Timothys-MacBook-Pro.local-027fae8bb78b42ddb94304a22054dc9e
+                  - row [ref=f1e549]:
+                    - cell [ref=f1e550]:
+                      - link "20" [ref=f1e551] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/20
+                    - cell "Aug 11, 2026, 12:22:20.30 PM PDT" [ref=f1e552]
+                    - cell [ref=f1e555]:
+                      - paragraph [ref=f1e556]:
+                        - img "Signal" [ref=f1e557]
+                        - text: Workflow Execution Signaled
+                    - cell "Signal Name __temporal_workflow_stream_publish" [ref=f1e560]:
+                      - generic [ref=f1e562]:
+                        - paragraph [ref=f1e563]: Signal Name
+                        - generic [ref=f1e564]: __temporal_workflow_stream_publish
+                  - row [ref=f1e565]:
+                    - cell [ref=f1e566]:
+                      - link "19" [ref=f1e567] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/19
+                    - cell "Aug 11, 2026, 12:22:20.02 PM PDT" [ref=f1e568]
+                    - cell [ref=f1e571]:
+                      - paragraph [ref=f1e572]:
+                        - img "Update" [ref=f1e573]
+                        - text: Workflow Execution Update Accepted
+                    - cell "Name __temporal_workflow_stream_poll" [ref=f1e575]:
+                      - generic [ref=f1e577]:
+                        - paragraph [ref=f1e578]: Name
+                        - generic [ref=f1e579]: __temporal_workflow_stream_poll
+                  - row [ref=f1e580]:
+                    - cell [ref=f1e581]:
+                      - link "18" [ref=f1e582] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/18
+                    - cell "Aug 11, 2026, 12:22:20.02 PM PDT" [ref=f1e583]
+                    - cell [ref=f1e586]:
+                      - paragraph [ref=f1e587]:
+                        - img "Workflow" [ref=f1e588]
+                        - text: Workflow Task Completed
+                    - cell "Identity 92620@Timothys-MacBook-Pro.local" [ref=f1e590]:
+                      - generic [ref=f1e592]:
+                        - paragraph [ref=f1e593]: Identity
+                        - generic [ref=f1e594]: 92620@Timothys-MacBook-Pro.local
+                  - row [ref=f1e595]:
+                    - cell [ref=f1e596]:
+                      - link "17" [ref=f1e597] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/17
+                    - cell "Aug 11, 2026, 12:22:20.01 PM PDT" [ref=f1e598]
+                    - cell [ref=f1e601]:
+                      - paragraph [ref=f1e602]:
+                        - img "Workflow" [ref=f1e603]
+                        - text: Workflow Task Started
+                    - cell "History Size Bytes 24609" [ref=f1e605]:
+                      - generic [ref=f1e607]:
+                        - paragraph [ref=f1e608]: History Size Bytes
+                        - generic [ref=f1e609]: "24609"
+                  - row [ref=f1e610]:
+                    - cell [ref=f1e611]:
+                      - link "16" [ref=f1e612] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/16
+                    - cell "Aug 11, 2026, 12:22:20.01 PM PDT" [ref=f1e613]
+                    - cell [ref=f1e616]:
+                      - paragraph [ref=f1e617]:
+                        - img "Workflow" [ref=f1e618]
+                        - text: Workflow Task Scheduled
+                    - cell [ref=f1e620]:
+                      - generic [ref=f1e622]:
+                        - paragraph [ref=f1e623]: Task Queue Name
+                        - link "92620@Timothys-MacBook-Pro.local-027fae8bb78b42ddb94304a22054dc9e" [ref=f1e625] [cursor=pointer]:
+                          - /url: /namespaces/default/task-queues/92620%40Timothys-MacBook-Pro.local-027fae8bb78b42ddb94304a22054dc9e
+                  - row [ref=f1e626]:
+                    - cell [ref=f1e627]:
+                      - link "15" [ref=f1e628] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/15
+                    - cell "Aug 11, 2026, 12:22:19.90 PM PDT" [ref=f1e629]
+                    - cell [ref=f1e632]:
+                      - paragraph [ref=f1e633]:
+                        - img "Update" [ref=f1e634]
+                        - text: Workflow Execution Update Completed
+                    - 'cell "Outcome Success {\"items\":[{\"topic\":\"events\",\"data\":\"ChYKCGVuY29kaW5nEgpqc29u" [ref=f1e636]':
+                      - generic [ref=f1e638]:
+                        - paragraph [ref=f1e639]: Outcome Success
+                        - code [ref=f1e642]:
+                          - generic [ref=f1e643]: "{\"items\":[{\"topic\":\"events\",\"data\":\"ChYKCGVuY29kaW5nEgpqc29u"
+                  - row [ref=f1e644]:
+                    - cell [ref=f1e645]:
+                      - link "14" [ref=f1e646] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/14
+                    - cell "Aug 11, 2026, 12:22:19.90 PM PDT" [ref=f1e647]
+                    - cell [ref=f1e650]:
+                      - paragraph [ref=f1e651]:
+                        - img "Workflow" [ref=f1e652]
+                        - text: Workflow Task Completed
+                    - cell "Identity 92620@Timothys-MacBook-Pro.local" [ref=f1e654]:
+                      - generic [ref=f1e656]:
+                        - paragraph [ref=f1e657]: Identity
+                        - generic [ref=f1e658]: 92620@Timothys-MacBook-Pro.local
+                  - row [ref=f1e659]:
+                    - cell [ref=f1e660]:
+                      - link "13" [ref=f1e661] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/13
+                    - cell "Aug 11, 2026, 12:22:19.90 PM PDT" [ref=f1e662]
+                    - cell [ref=f1e665]:
+                      - paragraph [ref=f1e666]:
+                        - img "Workflow" [ref=f1e667]
+                        - text: Workflow Task Started
+                    - cell "History Size Bytes 24037" [ref=f1e669]:
+                      - generic [ref=f1e671]:
+                        - paragraph [ref=f1e672]: History Size Bytes
+                        - generic [ref=f1e673]: "24037"
+                  - row [ref=f1e674]:
+                    - cell [ref=f1e675]:
+                      - link "12" [ref=f1e676] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/12
+                    - cell "Aug 11, 2026, 12:22:19.90 PM PDT" [ref=f1e677]
+                    - cell [ref=f1e680]:
+                      - paragraph [ref=f1e681]:
+                        - img "Workflow" [ref=f1e682]
+                        - text: Workflow Task Scheduled
+                    - cell [ref=f1e684]:
+                      - generic [ref=f1e686]:
+                        - paragraph [ref=f1e687]: Task Queue Name
+                        - link "92620@Timothys-MacBook-Pro.local-027fae8bb78b42ddb94304a22054dc9e" [ref=f1e689] [cursor=pointer]:
+                          - /url: /namespaces/default/task-queues/92620%40Timothys-MacBook-Pro.local-027fae8bb78b42ddb94304a22054dc9e
+                  - row [ref=f1e690]:
+                    - cell [ref=f1e691]:
+                      - link "11" [ref=f1e692] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/11
+                    - cell "Aug 11, 2026, 12:22:19.90 PM PDT" [ref=f1e693]
+                    - cell [ref=f1e696]:
+                      - paragraph [ref=f1e697]:
+                        - img "Signal" [ref=f1e698]
+                        - text: Workflow Execution Signaled
+                    - cell "Signal Name __temporal_workflow_stream_publish" [ref=f1e701]:
+                      - generic [ref=f1e703]:
+                        - paragraph [ref=f1e704]: Signal Name
+                        - generic [ref=f1e705]: __temporal_workflow_stream_publish
+                  - row [ref=f1e706]:
+                    - cell [ref=f1e707]:
+                      - link "10" [ref=f1e708] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/10
+                    - cell "Aug 11, 2026, 12:22:19.29 PM PDT" [ref=f1e709]
+                    - cell [ref=f1e712]:
+                      - paragraph [ref=f1e713]:
+                        - img "Activity" [ref=f1e714]
+                        - text: Activity Task Scheduled
+                    - cell "Activity Type invoke_model_streaming" [ref=f1e716]:
+                      - generic [ref=f1e718]:
+                        - paragraph [ref=f1e719]: Activity Type
+                        - generic [ref=f1e720]: invoke_model_streaming
+                  - row [ref=f1e721]:
+                    - cell [ref=f1e722]:
+                      - link "9" [ref=f1e723] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/9
+                    - cell "Aug 11, 2026, 12:22:19.29 PM PDT" [ref=f1e724]
+                    - cell [ref=f1e727]:
+                      - paragraph [ref=f1e728]:
+                        - img "Update" [ref=f1e729]
+                        - text: Workflow Execution Update Accepted
+                    - cell "Name __temporal_workflow_stream_poll" [ref=f1e731]:
+                      - generic [ref=f1e733]:
+                        - paragraph [ref=f1e734]: Name
+                        - generic [ref=f1e735]: __temporal_workflow_stream_poll
+                  - row [ref=f1e736]:
+                    - cell [ref=f1e737]:
+                      - link "8" [ref=f1e738] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/8
+                    - cell "Aug 11, 2026, 12:22:19.29 PM PDT" [ref=f1e739]
+                    - cell [ref=f1e742]:
+                      - paragraph [ref=f1e743]:
+                        - img "Update" [ref=f1e744]
+                        - text: Workflow Execution Update Accepted
+                    - cell "Name turn" [ref=f1e746]:
+                      - generic [ref=f1e748]:
+                        - paragraph [ref=f1e749]: Name
+                        - generic [ref=f1e750]: turn
+                  - row [ref=f1e751]:
+                    - cell [ref=f1e752]:
+                      - link "7" [ref=f1e753] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/7
+                    - cell "Aug 11, 2026, 12:22:19.29 PM PDT" [ref=f1e754]
+                    - cell [ref=f1e757]:
+                      - paragraph [ref=f1e758]:
+                        - img "Workflow" [ref=f1e759]
+                        - text: Workflow Task Completed
+                    - cell "Identity 92620@Timothys-MacBook-Pro.local" [ref=f1e761]:
+                      - generic [ref=f1e763]:
+                        - paragraph [ref=f1e764]: Identity
+                        - generic [ref=f1e765]: 92620@Timothys-MacBook-Pro.local
+                  - row [ref=f1e766]:
+                    - cell [ref=f1e767]:
+                      - link "6" [ref=f1e768] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/6
+                    - cell "Aug 11, 2026, 12:22:19.28 PM PDT" [ref=f1e769]
+                    - cell [ref=f1e772]:
+                      - paragraph [ref=f1e773]:
+                        - img "Workflow" [ref=f1e774]
+                        - text: Workflow Task Started
+                    - cell "History Size Bytes 1456" [ref=f1e776]:
+                      - generic [ref=f1e778]:
+                        - paragraph [ref=f1e779]: History Size Bytes
+                        - generic [ref=f1e780]: "1456"
+                  - row [ref=f1e781]:
+                    - cell [ref=f1e782]:
+                      - link "5" [ref=f1e783] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/5
+                    - cell "Aug 11, 2026, 12:22:19.28 PM PDT" [ref=f1e784]
+                    - cell [ref=f1e787]:
+                      - paragraph [ref=f1e788]:
+                        - img "Workflow" [ref=f1e789]
+                        - text: Workflow Task Scheduled
+                    - cell [ref=f1e791]:
+                      - generic [ref=f1e793]:
+                        - paragraph [ref=f1e794]: Task Queue Name
+                        - link "92620@Timothys-MacBook-Pro.local-027fae8bb78b42ddb94304a22054dc9e" [ref=f1e796] [cursor=pointer]:
+                          - /url: /namespaces/default/task-queues/92620%40Timothys-MacBook-Pro.local-027fae8bb78b42ddb94304a22054dc9e
+                  - row [ref=f1e797]:
+                    - cell [ref=f1e798]:
+                      - link "4" [ref=f1e799] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/4
+                    - cell "Aug 11, 2026, 12:22:19.27 PM PDT" [ref=f1e800]
+                    - cell [ref=f1e803]:
+                      - paragraph [ref=f1e804]:
+                        - img "Workflow" [ref=f1e805]
+                        - text: Workflow Task Completed
+                    - cell "Identity 92620@Timothys-MacBook-Pro.local" [ref=f1e807]:
+                      - generic [ref=f1e809]:
+                        - paragraph [ref=f1e810]: Identity
+                        - generic [ref=f1e811]: 92620@Timothys-MacBook-Pro.local
+                  - row [ref=f1e812]:
+                    - cell [ref=f1e813]:
+                      - link "3" [ref=f1e814] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/3
+                    - cell "Aug 11, 2026, 12:22:19.18 PM PDT" [ref=f1e815]
+                    - cell [ref=f1e818]:
+                      - paragraph [ref=f1e819]:
+                        - img "Workflow" [ref=f1e820]
+                        - text: Workflow Task Started
+                    - cell "History Size Bytes 1182" [ref=f1e822]:
+                      - generic [ref=f1e824]:
+                        - paragraph [ref=f1e825]: History Size Bytes
+                        - generic [ref=f1e826]: "1182"
+                  - row [ref=f1e827]:
+                    - cell [ref=f1e828]:
+                      - link "2" [ref=f1e829] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/2
+                    - cell "Aug 11, 2026, 12:22:19.18 PM PDT" [ref=f1e830]
+                    - cell [ref=f1e832]:
+                      - paragraph [ref=f1e833]:
+                        - img "Workflow" [ref=f1e834]
+                        - text: Workflow Task Scheduled
+                    - cell [ref=f1e836]:
+                      - generic [ref=f1e838]:
+                        - paragraph [ref=f1e839]: Task Queue Name
+                        - link "perplexity-orchestrator" [ref=f1e841] [cursor=pointer]:
+                          - /url: /namespaces/default/task-queues/perplexity-orchestrator
+                  - row [ref=f1e842]:
+                    - cell [ref=f1e843]:
+                      - link "1" [ref=f1e844] [cursor=pointer]:
+                        - /url: /namespaces/default/workflows/chat-21795cb06a876836/019ff246-92ad-7d27-8501-5b513e924a7e/history/events/1
+                    - cell "Aug 11, 2026, 12:22:19.18 PM PDT" [ref=f1e845]
+                    - cell [ref=f1e847]:
+                      - paragraph [ref=f1e848]:
+                        - img "Workflow" [ref=f1e849]
+                        - text: Workflow Execution Started
+                    - cell "Workflow Type Name ChatWorkflow" [ref=f1e851]:
+                      - generic [ref=f1e853]:
+                        - paragraph [ref=f1e854]: Workflow Type Name
+                        - generic [ref=f1e855]: ChatWorkflow
+              - generic [ref=f1e856]:
+                - generic [ref=f1e857]:
+                  - generic [ref=f1e858] [cursor=pointer]: Per Page
+                  - combobox "Per Page" [ref=f1e860]:
+                    - option "100" [selected]
+                    - option "250"
+                    - option "500"
+                - button "Go to page 1" [ref=f1e862] [cursor=pointer]: "1"
+                - navigation [ref=f1e863]:
+                  - button "Previous Page" [disabled] [ref=f1e864]
+                  - button "Next Page" [disabled] [ref=f1e868]

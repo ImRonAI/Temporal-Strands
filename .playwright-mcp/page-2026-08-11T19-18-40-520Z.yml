@@ -1,0 +1,26 @@
+- generic [active] [ref=f4e1]:
+  - main [ref=f4e2]:
+    - generic [ref=f4e3]:
+      - generic [ref=f4e4]: v0 / studio
+      - navigation [ref=f4e9]:
+        - button "Community" [ref=f4e10]
+        - button "Pricing" [ref=f4e11]
+        - button "Enterprise" [ref=f4e12]
+        - button "Docs" [ref=f4e13]
+      - generic [ref=f4e14]:
+        - button "Compare models" [ref=f4e15] [cursor=pointer]
+        - button "Sign in" [ref=f4e16]
+        - button "Start building" [ref=f4e17]
+    - generic [ref=f4e77]:
+      - log [ref=f4e78]:
+        - paragraph [ref=f4e85]: "First, call the list_agent_models tool and show me several of the valid model IDs it returns. Then pick one of those returned IDs verbatim and call create_fast_agent_response with that ID as the model override, asking it: \"What are the top technology news headlines today?\" Finally, summarize the sub-agent's result for me."
+      - group [ref=f4e89]:
+        - group [ref=f4e90]
+        - textbox "Ask for a change, or start something new…" [ref=f4e92]
+        - group [ref=f4e93]:
+          - generic [ref=f4e94]:
+            - button [ref=f4e95]
+            - button "gpt-5.6-sol" [ref=f4e96]
+          - button "Submit" [disabled]
+  - button "Open Next.js Dev Tools" [ref=f4e68] [cursor=pointer]
+  - alert [ref=f4e75]

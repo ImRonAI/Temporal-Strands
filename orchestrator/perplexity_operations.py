@@ -57,6 +57,10 @@ from temporalio import activity
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
 from temporalio.exceptions import ApplicationError
 
+# agent_api_tools deliberately imports nothing from this module (or from
+# run_worker/workflow), so defaulting the create activities' tools to the
+# shared native array introduces no import cycle.
+import agent_api_tools
 import config
 
 # Shared workflow/server contract: nested sub-agent run events ride this topic.
@@ -76,6 +80,7 @@ _NATIVE_TOOL_TYPES = frozenset(
         "function",
         "sandbox",
         "mcp",
+        "connector",
     }
 )
 _SEARCH_CONTEXT_SIZES = frozenset({"low", "medium", "high"})
@@ -311,6 +316,8 @@ def _validate_skills(skills: list[Any]) -> None:
 
 
 def _validate_tools(tools: list[Any]) -> None:
+    # OpenAPI: server_label is ^[a-zA-Z0-9_-]{1,64}$ and unique per request,
+    # across BOTH mcp and connector entries.
     seen_mcp_labels: set[str] = set()
     for tool in tools:
         if not isinstance(tool, Mapping):
@@ -349,6 +356,18 @@ def _validate_tools(tools: list[Any]) -> None:
             url = tool.get("server_url")
             if not isinstance(url, str) or not url.startswith("https://"):
                 raise _invalid("mcp server_url must use https")
+        elif tool_type == "connector":
+            connector_id = tool.get("id")
+            if not isinstance(connector_id, str) or not connector_id:
+                raise _invalid("connector tools require an id")
+            label = tool.get("server_label")
+            if not isinstance(label, str) or not _MCP_SERVER_LABEL_RE.match(label):
+                raise _invalid(f"invalid connector server_label {label!r}")
+            if label in seen_mcp_labels:
+                raise _invalid(
+                    f"connector server_label {label!r} is not unique within the request"
+                )
+            seen_mcp_labels.add(label)
 
 
 def _validate_response_format(response_format: Any) -> None:
@@ -543,7 +562,10 @@ async def _run_create(
     each SDK event verbatim in an envelope on ``agent_runs`` and heartbeating
     bounded progress (response id + last sequence number).
     """
-    request = _build_request(preset, _decode_fields(fields))
+    decoded = _decode_fields(fields)
+    if decoded.get("skills") is None:
+        decoded["skills"] = [dict(skill) for skill in config.BUILTIN_SKILLS]
+    request = _build_request(preset, decoded)
     client = _get_client()
     info = activity.info()
 

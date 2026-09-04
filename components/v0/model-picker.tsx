@@ -32,7 +32,22 @@ function providerLabel(ownedBy: string) {
   return PROVIDER_LABELS[ownedBy] ?? ownedBy
 }
 
+// Human-readable preset names for the worker's "preset:<name>" model ids
+// (the Perplexity Agent API dynamic presets).
+const PRESET_LABELS: Record<string, string> = {
+  fast: "Fast",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "XHigh",
+  "wide-research": "Wide Research",
+}
+
 function modelLabel(id: string) {
+  if (id.startsWith("preset:")) {
+    const preset = id.slice("preset:".length)
+    return `${PRESET_LABELS[preset] ?? preset} (preset)`
+  }
   return id.replace(/^[^/]+\//, "")
 }
 

@@ -6,6 +6,62 @@ from typing import Optional
 from temporalio.common import RetryPolicy
 
 TASK_QUEUE = "perplexity-orchestrator"
+# --- Perplexity Agent API (outer model provider) ---
+# Pinned explicitly rather than inherited from the environment: the Perplexity
+# SDK reads PERPLEXITY_BASE_URL on construction, and .env.local may point it at
+# the stateless router endpoint, which rejects catalog model ids and
+# background/store/max_steps.
+PERPLEXITY_API_BASE = "https://api.perplexity.ai"
+# The six documented dynamic presets, in registration/readiness order. Each is
+# registered as model id "preset:<name>" (perplexity_model.PRESET_PREFIX).
+PERPLEXITY_PRESETS = ("fast", "low", "medium", "high", "xhigh", "wide-research")
+# Session default whenever the Perplexity key is present; otherwise the worker
+# falls back to the first Gemini id.
+DEFAULT_MODEL_ID = "preset:high"
+# Builtin Agent API skills attached to every outer PerplexityModel request.
+# Tuple of mappings; consumers copy before sending.
+BUILTIN_SKILLS = tuple(
+    {"type": "builtin", "name": name}
+    for name in (
+        "office",
+        "office/pdf",
+        "office/docx",
+        "office/pptx",
+        "office/xlsx",
+    )
+)
+# Dashboard-authorized Agent API connectors, attached to every request as
+# native {"type": "connector"} tools (agent_api_tools.connector_tools).
+# Authorization lives in the Perplexity dashboard; requests only reference the
+# connector id. Overridable via PERPLEXITY_CONNECTOR_IDS as comma-separated
+# label=id pairs (see agent_api_tools.CONNECTOR_IDS_ENV).
+CONNECTORS: tuple[dict[str, str], ...] = (
+    {
+        "id": "connector_googledrive",
+        "server_label": "google_drive",
+        "server_description": (
+            "The user's Google Drive: search, read, and reference their "
+            "Docs, Sheets, Slides, and files."
+        ),
+    },
+    {
+        "id": "connector_github",
+        "server_label": "github",
+        "server_description": (
+            "The user's GitHub: repositories, issues, pull requests, and "
+            "file contents; credentials are shared into the sandbox for "
+            "git/gh."
+        ),
+    },
+)
+# The Agent API's own documented ceilings, not numbers chosen by this client.
+MAX_STEPS_CEILING = 100
+MAX_OUTPUT_TOKENS_CEILING = 128_000
+# Per-provider output ceilings for catalog provider/model ids. The catalog
+# exposes no limit field; google/* rejects 128000 but accepts 65536 (verified
+# against the live API on 2026-08-02). Anything not listed gets the platform
+# ceiling. Presets own their budgets and never get max_output_tokens.
+PROVIDER_OUTPUT_CEILINGS = {"google/": 65_536}
 GEMINI_MODEL_ID = "gemini-3.8-flash"
 # Every id the worker registers a GeminiModel factory for (and advertises in
 # the readiness file). 3.7 is the fallback while 3.8 returns 503 UNAVAILABLE
@@ -28,6 +84,26 @@ MODEL_START_TO_CLOSE: Optional[timedelta] = None
 MODEL_SCHEDULE_TO_CLOSE: Optional[timedelta] = None
 MODEL_HEARTBEAT: Optional[timedelta] = None
 MODEL_RETRY_POLICY = RetryPolicy()
+# Temporal validates that every activity carries start_to_close_timeout OR
+# schedule_to_close_timeout (_workflow_instance._outbound_schedule_activity).
+# The envelopes above are deliberately unset ("we do not cap"), which that
+# validation rejects at schedule time. Callers wrap their activity options in
+# ``closable_activity_options`` so a generous schedule-to-close fallback is
+# applied only when both timeouts are None (graceful degradation, matching
+# workflow.py's ``_closable``).
+UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE = timedelta(days=1)
+
+
+def closable_activity_options(options: dict) -> dict:
+    """Ensure the SDK's required timeout is present, preserving config intent."""
+    if options.get("start_to_close_timeout") or options.get(
+        "schedule_to_close_timeout"
+    ):
+        return options
+    return {
+        **options,
+        "schedule_to_close_timeout": UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE,
+    }
 # The think activity streams every model chunk to the thinking topic; same
 # batching Temporal documents for LLM streaming (see workflow.py's
 # streaming_batch_interval note -- this is a history-pressure dial).

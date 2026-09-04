@@ -1,0 +1,39 @@
+- generic [active] [ref=f4e1]:
+  - main [ref=f4e2]:
+    - generic [ref=f4e3]:
+      - generic [ref=f4e4]: v0 / studio
+      - navigation [ref=f4e9]:
+        - button "Community" [ref=f4e10]
+        - button "Pricing" [ref=f4e11]
+        - button "Enterprise" [ref=f4e12]
+        - button "Docs" [ref=f4e13]
+      - generic [ref=f4e14]:
+        - button "Compare models" [ref=f4e15] [cursor=pointer]
+        - button "Sign in" [ref=f4e16]
+        - button "Start building" [ref=f4e17]
+    - generic [ref=f4e76]:
+      - log [ref=f4e77]:
+        - generic [ref=f4e79]:
+          - paragraph [ref=f4e84]: Use the think tool (cycle_count 1) to reason about whether 23 is prime, then answer briefly.
+          - generic [ref=f4e87]:
+            - generic [ref=f4e88]:
+              - button "Chain of Thought" [expanded] [ref=f4e117]
+              - generic [ref=f4e131]:
+                - generic [ref=f4e132]: Thinking
+                - generic [ref=f4e133]:
+                  - paragraph [ref=f4e134]: "(\\sqrt{23} \\approx 4.8). The primes up to (4.8) are (2) and (3)."
+                  - list [ref=f4e135]:
+                    - listitem [ref=f4e136]: (23) is not divisible by (2) because it is odd.
+                    - listitem [ref=f4e137]: (23) is not divisible by (3) because (2+3=5), which is not divisible by (3).
+                  - paragraph [ref=f4e138]: Therefore, 23 is prime.
+            - paragraph [ref=f4e140]: Yes. 23 is prime because it has no positive divisors other than 1 and 23.
+      - group [ref=f4e105]:
+        - group [ref=f4e106]
+        - textbox "Ask for a change, or start something new…" [ref=f4e108]
+        - group [ref=f4e109]:
+          - generic [ref=f4e110]:
+            - button [ref=f4e111]
+            - button "gpt-5.6-sol" [ref=f4e112]
+          - button "Submit" [disabled]
+  - button "Open Next.js Dev Tools" [ref=f4e68] [cursor=pointer]
+  - alert [ref=f4e75]

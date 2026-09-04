@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from collections.abc import AsyncIterator
 import asyncio
 from contextlib import asynccontextmanager, suppress
@@ -57,6 +58,7 @@ from compare_workflow import (
     model_topic,
 )
 from config import TASK_QUEUE
+from perplexity_operations import AGENT_RUNS_TOPIC
 from run_worker import READINESS_PATH, agent_identity
 from skills_config import augmented_system_prompt
 from workflow import (
@@ -81,9 +83,9 @@ logger = logging.getLogger(__name__)
 MAX_COMPARE_MODELS = 4
 
 
-# Idle-compatible with the protected route's agent_runs branch. Gemini does
-# not publish this topic; keeping the name avoids a protocol break.
-AGENT_RUNS_TOPIC = "agent_runs"
+# AGENT_RUNS_TOPIC is live again: perplexity_operations.py publishes every
+# nested Agent API run event on it (imported above so the two sides can never
+# drift). The protected route's agent_runs branch consumes these frames.
 
 CHAT_TOPICS = [
     EVENTS_TOPIC,
@@ -187,13 +189,22 @@ async def health() -> dict[str, Any]:
     record = await readiness()
     temporal_ok = _state["client"] is not None
     worker_ok = record is not None
-    return {
+    model_ids = models_of(record)
+    payload: dict[str, Any] = {
         "status": "ok" if (temporal_ok and worker_ok) else "degraded",
         "api": True,
         "temporal": temporal_ok,
         "worker": worker_ok,
-        "models": len(models_of(record)),
+        "models": len(model_ids),
+        # Full readiness catalog, in worker registration order. The Next.js
+        # model helper (lib/perplexity.ts) reads this so the picker mirrors
+        # the live worker catalog; "models" stays a count for compatibility.
+        "model_ids": model_ids,
     }
+    default_model = (record or {}).get("default_model")
+    if isinstance(default_model, str) and default_model:
+        payload["default_model"] = default_model
+    return payload
 
 
 @app.post("/sessions")
@@ -202,7 +213,12 @@ async def start_session(body: StartSession) -> dict[str, str]:
     if not models:
         raise HTTPException(503, "No worker is ready")
     if body.model_id not in models:
-        raise HTTPException(400, f"Unsupported model: {body.model_id}")
+        preview = ", ".join(models[:5])
+        if len(models) > 5:
+            preview += ", ..."
+        raise HTTPException(
+            400, f"Unsupported model: {body.model_id}. Available: {preview}"
+        )
 
     client = temporal()
     session_id = f"chat-{os.urandom(8).hex()}"
@@ -378,10 +394,60 @@ async def end_session(session_id: str) -> None:
         logger.warning("end_chat failed for %s: %s", session_id, error)
 
 
+_FILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_\-]+$")
+
+
 @app.get("/responses/{response_id}/files/{file_id}/content")
+@app.get("/agent/{response_id}/files/{file_id}/content")
 async def response_file_content(response_id: str, file_id: str) -> Response:
-    """Former Perplexity Agent API file proxy. Gemini sessions do not use it."""
-    raise HTTPException(410, "Perplexity file proxy has been removed")
+    """Proxy a sandbox-produced file so the browser can load it.
+
+    The Agent API returns raw bytes from
+    GET /v1/agent/{response_id}/files/{file_id}/content and requires the API
+    key, which must never reach the browser. `share_file` items carry a
+    relative path of the form /v1/{responses|agent}/{id}/files/{id}/content;
+    app/api/orchestrator/file/route.ts accepts either prefix and forwards to
+    the /responses form here, but both are served. The body is streamed, not
+    buffered, so large files do not sit in memory.
+    """
+    if not _FILE_ID_PATTERN.match(response_id) or not _FILE_ID_PATTERN.match(file_id):
+        raise HTTPException(422, "Invalid response or file id")
+
+    api_key = os.environ.get("PERPLEXITY_API_KEY")
+    if not api_key:
+        raise HTTPException(503, "PERPLEXITY_API_KEY is not configured")
+
+    url = (
+        f"https://api.perplexity.ai/v1/agent/{response_id}"
+        f"/files/{file_id}/content"
+    )
+    # The pooled lifespan client keeps TLS sessions to api.perplexity.ai warm;
+    # send() with stream=True defers the body so it can be forwarded chunkwise.
+    request = _state["http"].build_request(
+        "GET", url, headers={"Authorization": f"Bearer {api_key}"}
+    )
+    upstream = await _state["http"].send(request, stream=True)
+    if upstream.status_code != 200:
+        await upstream.aclose()
+        raise HTTPException(upstream.status_code, "File unavailable")
+
+    headers: dict[str, str] = {}
+    disposition = upstream.headers.get("content-disposition")
+    if disposition:
+        headers["Content-Disposition"] = disposition
+
+    async def body_iter() -> AsyncIterator[bytes]:
+        try:
+            async for chunk in upstream.aiter_bytes():
+                yield chunk
+        finally:
+            await upstream.aclose()
+
+    return StreamingResponse(
+        body_iter(),
+        media_type=upstream.headers.get("content-type", "application/octet-stream"),
+        headers=headers,
+    )
 
 
 @app.post("/compare/stream")

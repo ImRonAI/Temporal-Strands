@@ -1,0 +1,39 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: v0 / studio
+      - navigation [ref=e9]:
+        - button "Community" [ref=e10]
+        - button "Pricing" [ref=e11]
+        - button "Enterprise" [ref=e12]
+        - button "Docs" [ref=e13]
+      - generic [ref=e14]:
+        - button "Compare models" [ref=e15] [cursor=pointer]
+        - button "Sign in" [ref=e16]
+        - button "Start building" [ref=e17]
+    - generic [ref=e18]:
+      - generic [ref=e19]: Now in beta
+      - heading "What should we ship today?" [level=1] [ref=e22]:
+        - generic [ref=e23]: What
+        - generic [ref=e25]: should
+        - generic [ref=e27]: we
+        - generic [ref=e29]: ship
+        - generic [ref=e31]: today?
+      - paragraph [ref=e34]: Describe an interface in plain language. v0 turns it into clean, production-ready React — components, styling, and all.
+      - generic [ref=e35]:
+        - group [ref=e37]:
+          - group [ref=e38]
+          - textbox "Describe what you want to ship…" [ref=e40]
+          - group [ref=e41]:
+            - generic [ref=e42]:
+              - button [ref=e43]
+              - button "Loading models…" [ref=e44]
+            - button "Submit" [disabled]
+        - generic [ref=e50]:
+          - button "A pricing page with a yearly toggle" [ref=e52] [cursor=pointer]
+          - button "An analytics dashboard with charts" [ref=e54] [cursor=pointer]
+          - button "A waitlist landing page" [ref=e56] [cursor=pointer]
+          - button "A Kanban board with drag and drop" [ref=e58] [cursor=pointer]
+          - button "A settings page with tabs" [ref=e60] [cursor=pointer]
+      - paragraph [ref=e62]: Trusted by design engineers shipping at the edge of the web.
+  - button "Open Next.js Dev Tools" [ref=e68] [cursor=pointer]

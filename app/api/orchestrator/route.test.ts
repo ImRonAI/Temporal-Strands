@@ -635,6 +635,52 @@ describe("POST multimodal attachments", () => {
   })
 })
 
+describe("POST per-turn model switching", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  // Compatibility test for per-turn model switching: the orchestrator's
+  // /turns/stream endpoint accepts an optional model_id (validated against
+  // the readiness catalog, forwarded to the workflow which rebuilds its agent
+  // on the new factory). The backend cannot satisfy that contract unless the
+  // route forwards the useChat body's `model` as `model_id` on the turn POST.
+  it("forwards the request body model as model_id on the turn POST", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(`data: ${JSON.stringify({ done: true, reply: "ok" })}\n\n`, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    await POST(
+      new Request("http://localhost/api/orchestrator", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "session-1",
+          model: "anthropic/claude-fable-5",
+          messages: [
+            {
+              id: "message-1",
+              role: "user",
+              parts: [{ type: "text", text: "hello" }],
+            },
+          ],
+        }),
+      })
+    )
+
+    const turnCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).includes("/turns/stream")
+    )
+    expect(turnCall).toBeDefined()
+    const body = JSON.parse((turnCall?.[1] as RequestInit).body as string)
+    expect(body.model_id).toBe("anthropic/claude-fable-5")
+  })
+})
+
 describe("POST Gemini Google Maps grounding", () => {
   afterEach(() => {
     vi.unstubAllGlobals()

@@ -166,6 +166,11 @@ class TurnRequest(BaseModel):
     images: list[TurnMediaPayload] = Field(default_factory=list)
     documents: list[TurnMediaPayload] = Field(default_factory=list)
     videos: list[TurnMediaPayload] = Field(default_factory=list)
+    # Optional per-turn model switch: validated against the worker's readiness
+    # catalog and forwarded to the workflow, which rebuilds its agent on the
+    # new factory name before running the turn. Omitted -> keep the session's
+    # current model.
+    model_id: str | None = None
 
 
 class ApproveRequest(BaseModel):
@@ -244,6 +249,15 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
         and not body.videos
     ):
         raise HTTPException(422, "A prompt or at least one attachment is required")
+    if body.model_id is not None:
+        models = models_of(await readiness())
+        if body.model_id not in models:
+            preview = ", ".join(models[:5])
+            if len(models) > 5:
+                preview += ", ..."
+            raise HTTPException(
+                400, f"Unsupported model: {body.model_id}. Available: {preview}"
+            )
     client = temporal()
     handle = client.get_workflow_handle(session_id)
 
@@ -309,6 +323,7 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
                     TurnVideo(format=video.format, data=video.data)
                     for video in body.videos
                 ],
+                model_id=body.model_id,
             ),
             wait_for_stage=WorkflowUpdateStage.ACCEPTED,
         )

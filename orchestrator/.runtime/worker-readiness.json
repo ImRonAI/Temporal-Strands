@@ -40,6 +40,7 @@
     "openai/gpt-5.6-luna",
     "openai/gpt-5.6-sol",
     "openai/gpt-5.6-terra",
+    "openai/gpt-6-astra",
     "perplexity/deepseek-v4-flash-0731",
     "perplexity/deepseek-v4-pro-0813",
     "perplexity/glm-5.2",

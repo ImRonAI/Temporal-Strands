@@ -565,6 +565,10 @@ async def _run_create(
     decoded = _decode_fields(fields)
     if decoded.get("skills") is None:
         decoded["skills"] = [dict(skill) for skill in config.BUILTIN_SKILLS]
+    if decoded.get("tools") is None:
+        # Same server-side tool surface as the outer model: static union
+        # members + remote MCP servers + dashboard connectors.
+        decoded["tools"] = agent_api_tools.native_tools()
     request = _build_request(preset, decoded)
     client = _get_client()
     info = activity.info()

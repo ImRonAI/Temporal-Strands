@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-v0-style chat product: Next.js UI streams durable agent turns from a Python Temporal/Strands orchestrator backed by Google Gemini (`gemini-3.8-flash`).
+v0-style chat product: Next.js UI streams durable agent turns from a Python Temporal/Strands orchestrator backed by Google Gemini (`gemini-flash-latest`).
 
 > **Read this first.** The architecture below is the *target* design. The frontend and the orchestrator's core runtime exist; several supporting modules are still planned. See [Current state](#current-state) for the exact split. Treat planned modules as binding design intent — they are the contract the remaining work builds against — but do not assume you can import or run them.
 
@@ -14,7 +14,7 @@ Request path: `app/page.tsx` (`useChat` → `/api/orchestrator`) converts FastAP
 - `lib/perplexity.ts` — `DEFAULT_MODEL` + unauthenticated model listing only; all inference goes through the orchestrator.
 - `orchestrator/` — Python stack (`requirements.txt`, local `.venv`). Agent identity lives in `agent.json`.
 
-**Hard rule:** every AI Elements surface must use native subcomponents, props, and animations (`Conversation` scroll, `MessageResponse`/Streamdown, `PromptInput*` submit/attachments, `ChainOfThought*`). Do not reimplement those in `components/v0/`. `reasoning.tsx` is intentionally not vendored — `ChainOfThought` is the only reasoning UI. Model ids are never hardcoded lists; pickers use `/api/models`. A session’s model is fixed at start; switching models ends the session.
+**Hard rule:** every AI Elements surface must use native subcomponents, props, and animations (`Conversation` scroll, `MessageResponse`/Streamdown, `PromptInput*` submit/attachments, `ChainOfThought*`). Do not reimplement those in `components/v0/`. `reasoning.tsx` is intentionally not vendored — `ChainOfThought` is the only reasoning UI. Model ids are never hardcoded lists; pickers use `/api/models`. Models switch per turn: the picker stays live mid-conversation, each turn body carries the selected model, and the orchestrator rebuilds the session's agent on the new model without ending the session.
 
 ### Current state
 

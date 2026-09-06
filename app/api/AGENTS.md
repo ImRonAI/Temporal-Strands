@@ -11,6 +11,7 @@ All six route files here are **PROTECTED**: `orchestrator/route.ts`, `orchestrat
   - `share_file` URLs are rewritten to `/api/orchestrator/file?path=...` (~line 354)
   - reasoning deltas handled at ~lines 231-262
 - Session continuity: a `data-session` part is emitted and scanned by `app/page.tsx`.
+- Per-turn model switching (2026-09-04): the turn POST body forwards the useChat body's `model` as `model_id`, so the orchestrator can rebuild the session's agent on a new model mid-conversation (change proven by the "POST per-turn model switching" compatibility test in `route.test.ts`).
 
 ## Graph contract (implemented 2026-08-12)
 

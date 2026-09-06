@@ -138,7 +138,7 @@ export default function Page() {
   // orchestrator session (see orchestrator/workflow.py) instead of starting
   // a fresh one every message.
 
-  const { messages, setMessages, status, sendMessage, stop, error } = useChat({
+  const { messages, status, sendMessage, stop, error } = useChat({
     transport: new DefaultChatTransport({ api: "/api/orchestrator" }),
     // Without this every token re-renders the whole conversation: the two
     // full messages x parts scans below, plus AgentActivity's filter passes
@@ -148,22 +148,13 @@ export default function Page() {
     throttle: 50,
   })
 
-  // A session's model is fixed when the session starts: a TemporalAgent's
-  // model provider cannot be reconfigured afterwards (TemporalModel's
-  // update_config is a documented no-op). So switching models ends the
-  // current session and starts a fresh conversation, rather than silently
-  // leaving the picker pointing at a model the running session isn't using.
+  // Models switch per turn, mid-session: every sendMessage below carries the
+  // currently selected model in its body, the route forwards it as model_id
+  // on the turn POST, and the orchestrator rebuilds the durable session's
+  // agent on the new registered factory (conversation intact). Picking a new
+  // model here simply means the NEXT turn uses it.
   function changeModel(next: string) {
-    if (next === model) return
     setModel(next)
-    if (sessionId) {
-      void fetch("/api/orchestrator/end", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
-      })
-      setMessages([])
-    }
   }
 
   // The orchestrator route reports the durable session as a `data-session`

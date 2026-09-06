@@ -23,28 +23,62 @@ logger = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).resolve().parent
 _REPO_ROOT = _ROOT.parent
-_DEFAULT_SKILLS_DIR = (_REPO_ROOT.parent / "strands-tools" / "skills").resolve()
+_STRANDS_TOOLS = _REPO_ROOT.parent / "strands-tools"
 
-# Vendored agentskills from aws-samples/sample-strands-agents-agentskills layout.
-_AGENTSKILLS_SRC = (
-    _REPO_ROOT.parent
-    / "strands-tools"
-    / "src"
-    / "strands_tools"
-    / "sessions_and_skills"
-    / "sample_agent_skills"
+# Candidate catalog locations in the sibling repo, first existing wins. The
+# repo moved its catalog from ``skills/`` to ``src/skills/`` in 2026-09.
+_DEFAULT_SKILLS_DIRS = (
+    (_STRANDS_TOOLS / "skills").resolve(),
+    (_STRANDS_TOOLS / "src" / "skills").resolve(),
+)
+
+# Vendored agentskills (aws-samples/sample-strands-agents-agentskills layout).
+# Optional: when neither location is present the skills catalog is simply
+# unavailable and everything degrades to "no skills" (telemetry.py pattern).
+_AGENTSKILLS_SRCS = (
+    _STRANDS_TOOLS / "src" / "strands_tools" / "sessions_and_skills" / "sample_agent_skills",
+    _STRANDS_TOOLS / "src" / "sample_agent_skills",
 )
 
 
+class SkillsUnavailable(RuntimeError):
+    """Raised by the skill tool factories when ``agentskills`` cannot be imported."""
+
+
 def _ensure_agentskills_path() -> None:
-    path = str(_AGENTSKILLS_SRC)
-    if path not in sys.path and _AGENTSKILLS_SRC.is_dir():
-        sys.path.insert(0, path)
+    for src in _AGENTSKILLS_SRCS:
+        path = str(src)
+        if src.is_dir() and path not in sys.path:
+            sys.path.insert(0, path)
+
+
+def _import_agentskills() -> Any | None:
+    """The ``agentskills`` module, or None (logged once) when it is not installed."""
+    _ensure_agentskills_path()
+    try:
+        import agentskills  # type: ignore[import-not-found]
+    except ImportError as error:
+        if not getattr(_import_agentskills, "_warned", False):
+            logger.warning(
+                "agentskills unavailable (%s); Agent Skills catalog disabled. "
+                "Install aws-samples/sample-strands-agents-agentskills or vendor it "
+                "under %s.",
+                error,
+                _AGENTSKILLS_SRCS[0],
+            )
+            _import_agentskills._warned = True  # type: ignore[attr-defined]
+        return None
+    return agentskills
 
 
 def skills_dir() -> Path:
     raw = os.environ.get("SKILLS_DIR", "").strip()
-    return Path(raw).expanduser().resolve() if raw else _DEFAULT_SKILLS_DIR
+    if raw:
+        return Path(raw).expanduser().resolve()
+    for candidate in _DEFAULT_SKILLS_DIRS:
+        if candidate.is_dir():
+            return candidate
+    return _DEFAULT_SKILLS_DIRS[0]
 
 
 def _dedupe_skills(skills: list[Any]) -> list[Any]:
@@ -65,15 +99,24 @@ def _dedupe_skills(skills: list[Any]) -> list[Any]:
 
 @lru_cache(maxsize=1)
 def discovered_skills() -> tuple[Any, ...]:
-    """Discover skills once per worker process."""
-    _ensure_agentskills_path()
-    from agentskills import discover_skills
+    """Discover skills once per worker process.
+
+    Returns an empty tuple, never raises, when the ``agentskills`` package or
+    the skills directory is missing: the catalog is optional infrastructure.
+    """
+    agentskills = _import_agentskills()
+    if agentskills is None:
+        return ()
 
     directory = skills_dir()
     if not directory.is_dir():
         logger.warning("skills directory missing: %s", directory)
         return ()
-    found = _dedupe_skills(discover_skills(directory))
+    try:
+        found = _dedupe_skills(agentskills.discover_skills(directory))
+    except Exception as error:  # noqa: BLE001 - a broken SKILL.md must not kill startup
+        logger.warning("skill discovery failed in %s: %s", directory, error)
+        return ()
     logger.info("discovered %d skills in %s", len(found), directory)
     return tuple(found)
 
@@ -129,18 +172,20 @@ def augmented_system_prompt(base: str) -> str:
 
 def create_inline_skill_tool() -> Any:
     """Pattern 2: ``skill(skill_name)`` factory product."""
-    _ensure_agentskills_path()
-    from agentskills import create_skill_tool
+    agentskills = _import_agentskills()
+    if agentskills is None:
+        raise SkillsUnavailable("agentskills is not installed; Agent Skills are disabled")
 
-    return create_skill_tool(list(discovered_skills()), skills_dir())
+    return agentskills.create_skill_tool(list(discovered_skills()), skills_dir())
 
 
 def create_use_skill_tool(model: Any) -> Any:
     """Pattern 3: ``use_skill(skill_name, request)`` factory product."""
-    _ensure_agentskills_path()
-    from agentskills import create_skill_agent_tool
+    agentskills = _import_agentskills()
+    if agentskills is None:
+        raise SkillsUnavailable("agentskills is not installed; Agent Skills are disabled")
 
-    return create_skill_agent_tool(
+    return agentskills.create_skill_agent_tool(
         list(discovered_skills()),
         skills_dir(),
         base_agent_model=model,

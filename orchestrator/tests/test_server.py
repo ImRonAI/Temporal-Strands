@@ -185,6 +185,102 @@ def test_health_omits_default_model_when_absent(
     assert "default_model" not in body
 
 
+def test_turn_unknown_model_id_is_400_listing_available(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = {"models": ["model-a", "model-b"]}
+    monkeypatch.setattr(server, "readiness", AsyncMock(return_value=record))
+    monkeypatch.setitem(server._state, "client", MagicMock())
+
+    response = client.post(
+        "/sessions/chat-1/turns/stream",
+        json={"prompt": "hi", "model_id": "nope"},
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "nope" in detail
+    assert "model-a" in detail
+    assert "model-b" in detail
+
+
+def test_turn_valid_model_id_is_accepted_and_forwarded(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A catalog model_id passes validation and rides the turn update's
+    TurnInput; the stream still terminates with the reply frame."""
+    record = {"models": ["model-a", "model-b"]}
+    monkeypatch.setattr(server, "readiness", AsyncMock(return_value=record))
+
+    update_handle = MagicMock()
+    update_handle.result = AsyncMock(return_value="switched reply")
+    handle = MagicMock()
+    handle.query = AsyncMock(return_value=None)
+    handle.start_update = AsyncMock(return_value=update_handle)
+    temporal_client = MagicMock()
+    temporal_client.get_workflow_handle = MagicMock(return_value=handle)
+    monkeypatch.setitem(server._state, "client", temporal_client)
+
+    async def _no_frames() -> Any:
+        return
+        yield  # unreachable; makes this an async generator
+
+    stream_client = MagicMock()
+    stream_client.get_offset = AsyncMock(return_value=0)
+    stream_client.subscribe = MagicMock(return_value=_no_frames())
+    monkeypatch.setattr(
+        server.WorkflowStreamClient,
+        "create",
+        MagicMock(return_value=stream_client),
+    )
+
+    response = client.post(
+        "/sessions/chat-1/turns/stream",
+        json={"prompt": "hi", "model_id": "model-b"},
+    )
+
+    assert response.status_code == 200
+    assert '"reply": "switched reply"' in response.text
+    turn_input = handle.start_update.call_args.args[1]
+    assert turn_input.model_id == "model-b"
+    assert turn_input.prompt == "hi"
+
+
+def test_turn_without_model_id_forwards_none(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = {"models": ["model-a"]}
+    monkeypatch.setattr(server, "readiness", AsyncMock(return_value=record))
+
+    update_handle = MagicMock()
+    update_handle.result = AsyncMock(return_value="ok")
+    handle = MagicMock()
+    handle.query = AsyncMock(return_value=None)
+    handle.start_update = AsyncMock(return_value=update_handle)
+    temporal_client = MagicMock()
+    temporal_client.get_workflow_handle = MagicMock(return_value=handle)
+    monkeypatch.setitem(server._state, "client", temporal_client)
+
+    async def _no_frames() -> Any:
+        return
+        yield  # unreachable; makes this an async generator
+
+    stream_client = MagicMock()
+    stream_client.get_offset = AsyncMock(return_value=0)
+    stream_client.subscribe = MagicMock(return_value=_no_frames())
+    monkeypatch.setattr(
+        server.WorkflowStreamClient,
+        "create",
+        MagicMock(return_value=stream_client),
+    )
+
+    response = client.post("/sessions/chat-1/turns/stream", json={"prompt": "hi"})
+
+    assert response.status_code == 200
+    turn_input = handle.start_update.call_args.args[1]
+    assert turn_input.model_id is None
+
+
 def test_start_session_unknown_model_lists_available(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

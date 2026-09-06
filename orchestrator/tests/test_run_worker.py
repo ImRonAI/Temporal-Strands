@@ -40,6 +40,7 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch):
         "DATACOMMONS_MCP_URL",
         "DC_API_KEY",
         "POPHIVE_MCP_URL",
+        "PERPLEXITY_CONNECTOR_IDS",
     ):
         monkeypatch.delenv(name, raising=False)
     yield
@@ -160,6 +161,49 @@ def test_mcp_tools_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert tools["pophive"]["server_url"] == "https://pophive.example/mcp"
     assert "headers" not in tools["pophive"]
     assert "allowed_tools" not in tools["pophive"]
+
+
+# --- connectors -----------------------------------------------------------------
+
+
+def test_native_tools_include_both_dashboard_connectors() -> None:
+    connectors = [
+        tool for tool in run_worker.native_tools() if tool["type"] == "connector"
+    ]
+    assert [(c["id"], c["server_label"]) for c in connectors] == [
+        ("connector_googledrive", "google_drive"),
+        ("connector_github", "github"),
+    ]
+    # Descriptions come from config.CONNECTORS verbatim.
+    for connector in connectors:
+        assert connector["server_description"]
+
+
+def test_connector_tools_env_override_replaces_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "PERPLEXITY_CONNECTOR_IDS",
+        "drive_alt=connector_drivealt, gh_alt=connector_ghalt,malformed",
+    )
+    connectors = run_worker.connector_tools()
+    assert connectors == [
+        {"type": "connector", "id": "connector_drivealt", "server_label": "drive_alt"},
+        {"type": "connector", "id": "connector_ghalt", "server_label": "gh_alt"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "model_id", ["preset:high", "anthropic/claude-opus-5"]
+)
+def test_model_params_tools_include_connectors(model_id: str) -> None:
+    """Both preset and catalog params carry the connector entries."""
+    tools = run_worker.native_tools()
+    params = run_worker.model_params(model_id, tools)
+    connector_ids = [
+        tool["id"] for tool in params["tools"] if tool.get("type") == "connector"
+    ]
+    assert connector_ids == ["connector_googledrive", "connector_github"]
 
 
 # --- catalog fetch --------------------------------------------------------------

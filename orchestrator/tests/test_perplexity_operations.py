@@ -26,6 +26,7 @@ from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 from unittest.mock import patch
 
+import agent_api_tools
 import config
 import perplexity_operations
 from perplexity_operations import (
@@ -239,10 +240,12 @@ async def test_each_preset_sends_its_fixed_preset_and_forced_flags(activity_fn, 
     assert request["stream"] is True
     assert request["input"] == "what is up"
     # Omitted optional fields are not sent at all -- preset internals stay live.
-    for absent in ("model", "models", "instructions", "tools", "extra_body"):
+    for absent in ("model", "models", "instructions", "extra_body"):
         assert absent not in request
     # skills defaults to the builtin office suite when the caller passes none.
     assert request["skills"] == [dict(skill) for skill in config.BUILTIN_SKILLS]
+    # tools defaults to the shared native array, connectors included.
+    assert request["tools"] == agent_api_tools.native_tools()
 
 
 @pytest.mark.asyncio
@@ -500,6 +503,13 @@ async def test_inline_skill_total_instruction_budget_is_enforced() -> None:
             {"type": "mcp", "server_label": "dup", "server_url": "https://a.example"},
             {"type": "mcp", "server_label": "dup", "server_url": "https://b.example"},
         ],
+        # connector: id required, label pattern + uniqueness enforced.
+        [{"type": "connector", "server_label": "github"}],
+        [{"type": "connector", "id": "connector_x", "server_label": "bad label!"}],
+        [
+            {"type": "connector", "id": "connector_a", "server_label": "dup"},
+            {"type": "connector", "id": "connector_b", "server_label": "dup"},
+        ],
     ],
 )
 async def test_native_tool_constraints_are_enforced(tools) -> None:
@@ -508,6 +518,45 @@ async def test_native_tool_constraints_are_enforced(tools) -> None:
         await run_activity(create_medium_agent_response, client, input="q", tools_json=json.dumps(tools))
     assert caught.value.non_retryable is True
     assert client.responses.request is None
+
+
+@pytest.mark.asyncio
+async def test_connector_tool_type_is_accepted() -> None:
+    """A valid {"type": "connector"} tool passes validation and reaches the SDK."""
+    client = FakeClient(events=[completed()])
+    tools = [
+        {"type": "web_search"},
+        {
+            "type": "connector",
+            "id": "connector_googledrive",
+            "server_label": "google_drive",
+            "server_description": "Drive files",
+        },
+    ]
+
+    await run_activity(
+        create_fast_agent_response, client, input="q", tools_json=json.dumps(tools)
+    )
+
+    assert client.responses.request is not None
+    assert client.responses.request["tools"] == tools
+
+
+@pytest.mark.asyncio
+async def test_default_tools_include_dashboard_connectors() -> None:
+    """When the caller sends no tools, the request carries the shared native
+    array, dashboard connectors included."""
+    client = FakeClient(events=[completed()])
+
+    await run_activity(create_fast_agent_response, client, input="q")
+
+    request = client.responses.request
+    assert request is not None
+    assert request["tools"] == agent_api_tools.native_tools()
+    connector_ids = [
+        tool["id"] for tool in request["tools"] if tool.get("type") == "connector"
+    ]
+    assert connector_ids == ["connector_googledrive", "connector_github"]
 
 
 @pytest.mark.asyncio

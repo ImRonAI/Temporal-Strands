@@ -518,7 +518,10 @@ export async function POST(req: Request) {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ prompt, images, documents, videos }),
+            // model_id enables per-turn model switching: the orchestrator
+            // validates it against the worker catalog and rebuilds the
+            // session's agent when it differs from the current model.
+            body: JSON.stringify({ prompt, images, documents, videos, model_id: model }),
           }
         )
         if (!turnRes.ok || !turnRes.body) {

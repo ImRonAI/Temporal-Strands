@@ -327,12 +327,19 @@ class TurnVideo:
 
 @dataclass
 class TurnInput:
-    """One user turn: prompt text plus multimodal attachments."""
+    """One user turn: prompt text plus multimodal attachments.
+
+    ``model_id`` is an optional per-turn model switch: when set and different
+    from the session's current model, the workflow rebuilds its agent on that
+    registered factory name (carried messages, loaded tools, and MCP servers
+    intact) before running the turn. None keeps the current model.
+    """
 
     prompt: str
     images: list[TurnImage] = field(default_factory=list)
     documents: list[TurnDocument] = field(default_factory=list)
     videos: list[TurnVideo] = field(default_factory=list)
+    model_id: str | None = None
 
 
 @dataclass
@@ -900,6 +907,16 @@ class ChatWorkflow:
             agent = self._agent
             if agent is None:  # pragma: no cover - guarded by wait_condition
                 raise RuntimeError("agent not initialized")
+
+            # Per-turn model switch: rebuild the agent on the new registered
+            # factory name, carrying the conversation and every loaded tool /
+            # MCP server exactly as the post-MCP-change rebuild below does.
+            # self._model_id is what the `model_id` query returns (the think
+            # activity resolves its model through it) and what continue-as-new
+            # carries, so both stay in step automatically.
+            if turn.model_id and turn.model_id != self._model_id:
+                self._model_id = turn.model_id
+                agent = self._agent = self._build_agent(list(agent.messages))
 
             # Where this turn's stream frames begin. Everything before it
             # belongs to turns already delivered and is dead weight: the

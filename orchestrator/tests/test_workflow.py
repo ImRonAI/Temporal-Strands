@@ -109,6 +109,26 @@ class ScriptedModel(Model):
             TRACKER.active -= 1
 
 
+"""Event lists for the SECOND registered model factory, so a per-turn model
+switch is observable: replies scripted here can only come from "fake/alt"."""
+ALT_SCRIPTS: deque[list[dict[str, Any]]] = deque()
+
+
+class AltScriptedModel(ScriptedModel):
+    """Same scripted contract, separate script deque — the switch target."""
+
+    async def stream(
+        self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        if not ALT_SCRIPTS:
+            raise ApplicationError(
+                "alt test script exhausted: a model call arrived with no scripted reply",
+                non_retryable=True,
+            )
+        for event in ALT_SCRIPTS.popleft():
+            yield event
+
+
 class BrokenModel(ScriptedModel):
     """Fails every call, non-retryably, so the failure surfaces immediately."""
 
@@ -153,6 +173,7 @@ class ThinkModel(Model):
 async def client() -> AsyncGenerator[Client, None]:
     model_factories = {
         "fake/text": lambda: ScriptedModel(),
+        "fake/alt": lambda: AltScriptedModel(),
         "fake/broken": lambda: BrokenModel(),
     }
     env = await WorkflowEnvironment.start_local(
@@ -191,6 +212,7 @@ async def client() -> AsyncGenerator[Client, None]:
 @pytest.fixture(autouse=True)
 def reset_scripts() -> None:
     SCRIPTS.clear()
+    ALT_SCRIPTS.clear()
     TRACKER.reset()
 
 
@@ -323,6 +345,52 @@ async def test_disconnected_caller_does_not_cancel_the_turn(client: Client) -> N
         return "finished alone" in assistant_texts(messages)
 
     await poll(turn_completed)
+
+    await handle.signal(ChatWorkflow.end_chat)
+    await handle.result()
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_turn_model_id_switches_the_factory_for_the_next_turn(
+    client: Client,
+) -> None:
+    """A turn carrying a different model_id rebuilds the agent on the new
+    registered factory, the reply comes from that model, the model_id query
+    reflects the switch, and the conversation is carried across the rebuild."""
+    handle = await start_session(client, "chat-model-switch")
+
+    SCRIPTS.append(text_events("from the first model"))
+    reply_one = await handle.execute_update(
+        ChatWorkflow.turn, TurnInput(prompt="one")
+    )
+    assert reply_one == "from the first model"
+    assert await handle.query(ChatWorkflow.model_id) == "fake/text"
+
+    # Second turn switches models: only ALT_SCRIPTS is loaded, so the reply
+    # can only have come from the "fake/alt" factory.
+    ALT_SCRIPTS.append(text_events("from the second model"))
+    reply_two = await handle.execute_update(
+        ChatWorkflow.turn, TurnInput(prompt="two", model_id="fake/alt")
+    )
+    assert reply_two == "from the second model"
+    # think_activity resolves its model through this query; it must reflect
+    # the new value.
+    assert await handle.query(ChatWorkflow.model_id) == "fake/alt"
+
+    # The rebuild carried the conversation: four alternating messages.
+    messages = await handle.query(ChatWorkflow.messages)
+    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"]
+    texts = assistant_texts(messages)
+    assert "from the first model" in texts
+    assert "from the second model" in texts
+
+    # A third turn with model_id omitted stays on the switched model.
+    ALT_SCRIPTS.append(text_events("still the second model"))
+    reply_three = await handle.execute_update(
+        ChatWorkflow.turn, TurnInput(prompt="three")
+    )
+    assert reply_three == "still the second model"
+    assert await handle.query(ChatWorkflow.model_id) == "fake/alt"
 
     await handle.signal(ChatWorkflow.end_chat)
     await handle.result()

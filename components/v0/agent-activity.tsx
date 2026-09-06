@@ -9,7 +9,32 @@ import {
 import { type ReactNode, createElement, useEffect, useState } from "react"
 import type { BundledLanguage } from "shiki"
 import {
+  BotIcon,
+  BrainIcon,
+  ChevronDownIcon,
+  ClockIcon,
+  CodeIcon,
+  CreditCardIcon,
+  DownloadIcon,
   FileIcon,
+  FileEditIcon,
+  FilePlusIcon,
+  FileSearchIcon,
+  FileTextIcon,
+  FilesIcon,
+  FolderSearchIcon,
+  GlobeIcon,
+  ImageIcon,
+  LinkIcon,
+  ListIcon,
+  Loader2Icon,
+  MapPinIcon,
+  MonitorIcon,
+  PackageIcon,
+  SearchIcon,
+  TerminalSquareIcon,
+  UsersIcon,
+  WrenchIcon,
 } from "lucide-react"
 
 import { Image } from "@/components/ai-elements/image"
@@ -85,6 +110,7 @@ import {
   Task,
   TaskContent,
   TaskItem,
+  TaskItemFile,
   TaskTrigger,
 } from "@/components/ai-elements/task"
 import {
@@ -375,7 +401,13 @@ function AgentChainCard({
           <Task className="border-white/10 bg-white/[0.02]" defaultOpen={false}>
             <TaskTrigger
               title={`${chain.polls.length + chain.downloads.length} lifecycle call(s)`}
-            />
+            >
+              <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
+                {stepIcon("download")}
+                <p className="text-sm">{`${chain.polls.length + chain.downloads.length} lifecycle call(s)`}</p>
+                <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+              </div>
+            </TaskTrigger>
             <TaskContent>
               {[...chain.polls, ...chain.downloads].map((part) => (
                 <GenericTool
@@ -403,7 +435,13 @@ function RunTask({ run, running }: { run: AgentRunSnapshot; running: boolean }) 
     <Task className="border-white/10 bg-white/[0.02]" defaultOpen>
       <TaskTrigger
         title={`Run ${run.responseId ?? run.activityId} · ${run.events.length} event(s)`}
-      />
+      >
+        <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
+          {stepIcon("agent", { active: running })}
+          <p className="text-sm">{`Run ${run.responseId ?? run.activityId} · ${run.events.length} event(s)`}</p>
+          <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+        </div>
+      </TaskTrigger>
       <TaskContent>
         <ChainOfThought defaultOpen>
           <ChainOfThoughtHeader>
@@ -412,6 +450,7 @@ function RunTask({ run, running }: { run: AgentRunSnapshot; running: boolean }) 
           <ChainOfThoughtContent>
             {run.attempt > 1 && (
               <ChainOfThoughtStep
+                icon={ClockIcon}
                 label={`Reconnected · attempt ${run.attempt}`}
                 status="complete"
               />
@@ -420,6 +459,7 @@ function RunTask({ run, running }: { run: AgentRunSnapshot; running: boolean }) 
               if (entry.kind === "reasoning") {
                 return (
                   <ChainOfThoughtStep
+                    icon={BrainIcon}
                     key={entry.key}
                     label="Thinking"
                     status={running ? "active" : "complete"}
@@ -521,26 +561,156 @@ function ResultBadges({ items }: { items: Array<{ title: string; url?: string }>
   )
 }
 
+// Dynamic iconography: every TaskTrigger and ChainOfThoughtStep gets the icon
+// of the step being done, not the default search glyph. `active` spins the
+// loader; `failed` keeps the step icon but marks the row destructive.
+export type StepIconKind =
+  | "active"
+  | "agent"
+  | "code"
+  | "download"
+  | "edit"
+  | "fetch"
+  | "file"
+  | "files"
+  | "finance"
+  | "folder"
+  | "globe"
+  | "image"
+  | "maps"
+  | "monitor"
+  | "patch"
+  | "people"
+  | "read"
+  | "retry"
+  | "search"
+  | "skill"
+  | "terminal"
+  | "think"
+  | "write"
+
+export function stepIcon(
+  kind: StepIconKind,
+  opts?: { active?: boolean; failed?: boolean }
+) {
+  const cls = cn("size-4", opts?.failed && "text-destructive")
+  if (opts?.active) {
+    return <Loader2Icon className={cn(cls, "animate-spin")} />
+  }
+  switch (kind) {
+    case "agent":
+      return <BotIcon className={cls} />
+    case "code":
+      return <CodeIcon className={cls} />
+    case "download":
+      return <DownloadIcon className={cls} />
+    case "edit":
+      return <FileEditIcon className={cls} />
+    case "fetch":
+      return <LinkIcon className={cls} />
+    case "file":
+      return <FileTextIcon className={cls} />
+    case "files":
+      return <FilesIcon className={cls} />
+    case "finance":
+      return <CreditCardIcon className={cls} />
+    case "folder":
+      return <FolderSearchIcon className={cls} />
+    case "globe":
+      return <GlobeIcon className={cls} />
+    case "image":
+      return <ImageIcon className={cls} />
+    case "maps":
+      return <MapPinIcon className={cls} />
+    case "monitor":
+      return <MonitorIcon className={cls} />
+    case "patch":
+      return <ListIcon className={cls} />
+    case "people":
+      return <UsersIcon className={cls} />
+    case "read":
+      return <FileSearchIcon className={cls} />
+    case "retry":
+      return <ClockIcon className={cls} />
+    case "search":
+      return <SearchIcon className={cls} />
+    case "skill":
+      return <PackageIcon className={cls} />
+    case "terminal":
+      return <TerminalSquareIcon className={cls} />
+    case "think":
+      return <BrainIcon className={cls} />
+    case "write":
+      return <FilePlusIcon className={cls} />
+  }
+}
+
+// TaskItem renders text exactly as given; the docs' Task pattern parses file
+// mentions into TaskItemFile chips with the file's icon. A fresh regex per
+// call keeps the match immutable (no shared lastIndex).
+function TaskItemBody({ text }: { text: string }) {
+  const matches = [...text.matchAll(/[\w.@/-]+\.[a-z0-9]{1,10}/gi)].filter(
+    (m) => m[0].includes("/") || m[0].split(".").length === 2
+  )
+  if (matches.length === 0) return <>{text}</>
+  const out: ReactNode[] = []
+  let cursor = 0
+  matches.forEach((m, i) => {
+    const token = m[0]
+    const index = m.index ?? 0
+    if (index > cursor) out.push(text.slice(cursor, index))
+    out.push(
+      <TaskItemFile key={`${token}-${i}`}>
+        <FileIcon className="size-3.5" />
+        <span>{token}</span>
+      </TaskItemFile>
+    )
+    cursor = index + token.length
+  })
+  if (cursor < text.length) out.push(text.slice(cursor))
+  return <>{out}</>
+}
+
 // A search call in flight — the queries or URLs the model asked for, before
 // any results come back. Task streams the high-level "what's being searched";
-// TaskTrigger's built-in SearchIcon is the visual cue.
+// the trigger carries the step's own icon (docs: TaskTrigger children
+// override the built-in SearchIcon row).
 function CallTask({
   title,
   items = [],
   children,
+  icon,
+  active = false,
+  failed = false,
 }: {
   title: string
   items?: string[]
   children?: ReactNode
+  icon?: StepIconKind
+  active?: boolean
+  failed?: boolean
 }) {
   const hasBody = items.length > 0 || children != null
   return (
     <Task className="border-white/10 bg-white/[0.02]">
-      <TaskTrigger title={title} />
+      <TaskTrigger title={title}>
+        <div
+          className={cn(
+            "flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground",
+            failed && "text-destructive hover:text-destructive"
+          )}
+        >
+          {stepIcon(icon ?? "search", { active, failed })}
+          <p className="text-sm">{title}</p>
+          <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+        </div>
+      </TaskTrigger>
       {hasBody ? (
         <TaskContent>
           {items.map((item, i) => (
-            <TaskItem key={`${item}-${i}`}>{item}</TaskItem>
+            <TaskItem key={`${item}-${i}`}>
+              <TaskItemBody text={item} />
+            </TaskItem>
           ))}
           {children}
         </TaskContent>
@@ -592,7 +762,13 @@ function ComputerUseTask({
       open={open}
       onOpenChange={setOpen}
     >
-      <TaskTrigger title="Computer use" />
+      <TaskTrigger title="Computer use">
+        <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
+          {stepIcon("monitor", { active })}
+          <p className="text-sm">Computer use</p>
+          <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+        </div>
+      </TaskTrigger>
       <TaskContent>
         {parts.map((part) => {
           const { screenshot } = computerUseFields(part)
@@ -663,14 +839,24 @@ function SearchResultsTask({
   title,
   items,
   children,
+  icon = "search",
+  active = false,
 }: {
   title: string
   items: Array<{ title: string; url?: string }>
   children?: ReactNode
+  icon?: StepIconKind
+  active?: boolean
 }) {
   return (
     <Task className="border-white/10 bg-white/[0.02]">
-      <TaskTrigger title={title} />
+      <TaskTrigger title={title}>
+        <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
+          {stepIcon(icon, { active })}
+          <p className="text-sm">{title}</p>
+          <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+        </div>
+      </TaskTrigger>
       <TaskContent>
         <ResultBadges items={items} />
         {children}
@@ -1149,7 +1335,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
         url: place.uri,
       }))
       return (
-        <SearchResultsTask title="Google Maps" items={items}>
+        <SearchResultsTask icon="maps" title="Google Maps" items={items}>
           {token ? (
             <JSXPreview
               className="min-h-80 overflow-hidden p-4"
@@ -1173,6 +1359,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
       }))
       return (
         <SearchResultsTask
+          icon="search"
           title={
             queries.length === 1
               ? `Google Search · ${queries[0]}`
@@ -1192,6 +1379,8 @@ function NativeToolStep({ native }: { native: NativeTool }) {
     case "response.reasoning.search_queries":
       return (
         <CallTask
+          active
+          icon="search"
           title={`Searching the web · ${native.queries.length} quer${native.queries.length === 1 ? "y" : "ies"}`}
           items={native.queries}
         />
@@ -1200,6 +1389,8 @@ function NativeToolStep({ native }: { native: NativeTool }) {
     case "response.reasoning.fetch_url_queries":
       return (
         <CallTask
+          active
+          icon="fetch"
           title={`Fetching pages · ${native.urls.length} URL${native.urls.length === 1 ? "" : "s"}`}
           items={native.urls}
         />
@@ -1211,6 +1402,8 @@ function NativeToolStep({ native }: { native: NativeTool }) {
     case "response.reasoning.finance_search_queries":
       return (
         <CallTask
+          active
+          icon="finance"
           title={`Looking up markets · ${(native.categories ?? ["quote"]).join(", ")}`}
           items={native.tickers ?? []}
         />
@@ -1219,6 +1412,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
     case "response.reasoning.finance_search_results":
       return (
         <SearchResultsTask
+          icon="finance"
           title="Market data"
           items={native.results.flatMap((r) =>
             (r.sources ?? []).map((url) => ({ title: r.category, url }))
@@ -1234,6 +1428,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
     case "search_results":
       return (
         <SearchResultsTask
+          icon="search"
           title="Web results"
           items={native.results.map((r) => ({ title: r.title || r.url, url: r.url }))}
         />
@@ -1242,6 +1437,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
     case "people_search_results":
       return (
         <SearchResultsTask
+          icon="people"
           title="People"
           items={native.results.map((r) => ({ title: r.title || r.url, url: r.url }))}
         />
@@ -1250,6 +1446,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
     case "finance_results":
       return (
         <SearchResultsTask
+          icon="finance"
           title={native.tickers?.length ? `Finance · ${native.tickers.join(", ")}` : "Finance"}
           items={native.results.flatMap((r) =>
             (r.sources ?? []).map((url) => ({ title: r.category, url }))
@@ -1265,6 +1462,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
     case "fetch_url_results":
       return (
         <SearchResultsTask
+          icon="fetch"
           title="Fetched pages"
           items={native.contents.map((c) => ({ title: c.title || c.url, url: c.url }))}
         />
@@ -1272,7 +1470,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
 
     case "mcp_list_tools":
       return (
-        <CallTask title={native.server_label}>
+        <CallTask failed={Boolean(native.error)} icon="folder" title={native.server_label}>
           {native.error ? (
             <p className="text-destructive text-xs">{native.error}</p>
           ) : (
@@ -1283,11 +1481,17 @@ function NativeToolStep({ native }: { native: NativeTool }) {
 
     case "mcp_call":
       return (
-        <CallTask title={`${native.server_label} · ${native.name}`}>
+        <CallTask
+          failed={Boolean(native.error)}
+          icon="terminal"
+          title={`${native.server_label} · ${native.name}`}
+        >
           {native.error ? (
             <p className="text-destructive text-xs">{native.error}</p>
           ) : (
-            <TaskItem>{native.output ?? native.arguments}</TaskItem>
+            <TaskItem>
+              <TaskItemBody text={native.output ?? native.arguments} />
+            </TaskItem>
           )}
         </CallTask>
       )
@@ -1312,7 +1516,13 @@ function NativeToolStep({ native }: { native: NativeTool }) {
           const links = extractLinks(native.results.map((r) => r.stdout).join("\n"))
           return (
             <Task className="border-white/10 bg-white/[0.02]">
-              <TaskTrigger title={`Searching the ${kind || "web"} · ${query}`} />
+              <TaskTrigger title={`Searching the ${kind || "web"} · ${query}`}>
+                <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
+                  {stepIcon("search", { active: native.status === "in_progress" })}
+                  <p className="text-sm">{`Searching the ${kind || "web"} · ${query}`}</p>
+                  <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+                </div>
+              </TaskTrigger>
               <TaskContent>
                 {links.length > 0 ? (
                   <ResultBadges items={links} />
@@ -1330,7 +1540,12 @@ function NativeToolStep({ native }: { native: NativeTool }) {
           `\u001B[36m$\u001B[0m ${native.code}\n${output}` +
           (failed ? `\n\u001B[31m✗\u001B[0m exit ${exitCode ?? 1}` : "")
         return (
-          <CallTask title="Running commands">
+          <CallTask
+            active={native.status === "in_progress"}
+            failed={failed}
+            icon="terminal"
+            title="Running commands"
+          >
             <Terminal
               className="h-64 rounded-none border-0"
               output={ansi}
@@ -1344,7 +1559,12 @@ function NativeToolStep({ native }: { native: NativeTool }) {
 
       // Python code execution is the one thing Sandbox is for.
       return (
-        <CallTask title="Ran code">
+        <CallTask
+          active={native.status === "in_progress"}
+          failed={failed}
+          icon="code"
+          title="Ran code"
+        >
           <SandboxPanel
             failed={failed}
             className="border-white/10 bg-white/[0.03]"
@@ -1383,7 +1603,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
       const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(name)
       if (!native.error && isImage && native.url) {
         return (
-          <CallTask title={name}>
+          <CallTask icon="image" title={name}>
             <ChainOfThoughtImage caption={name}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={native.url} alt={name} className="h-auto max-w-full" />
@@ -1392,7 +1612,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
         )
       }
       return (
-        <CallTask title={name}>
+        <CallTask failed={Boolean(native.error)} icon="file" title={name}>
           {native.error ? (
             <p className="text-destructive text-xs">{native.error}</p>
           ) : (
@@ -1407,7 +1627,11 @@ function NativeToolStep({ native }: { native: NativeTool }) {
       const kind = native.type === "sandbox_glob" ? "Finding files" : "Searching files"
       const files = native.files ?? []
       return (
-        <CallTask title={`${kind} · ${native.count ?? files.length} match${(native.count ?? files.length) === 1 ? "" : "es"}`}>
+        <CallTask
+          failed={Boolean(native.error)}
+          icon="folder"
+          title={`${kind} · ${native.count ?? files.length} match${(native.count ?? files.length) === 1 ? "" : "es"}`}
+        >
           {native.error ? (
             <p className="text-destructive text-xs">{native.error}</p>
           ) : files.length > 0 ? (
@@ -1419,26 +1643,46 @@ function NativeToolStep({ native }: { native: NativeTool }) {
 
     case "sandbox_read_file":
       return (
-        <CallTask title={`Read ${native.file_path}`}>
-          {native.error && <p className="text-destructive text-xs">{native.error}</p>}
+        <CallTask failed={Boolean(native.error)} icon="read" title={`Read ${native.file_path}`}>
+          {native.error ? (
+            <p className="text-destructive text-xs">{native.error}</p>
+          ) : (
+            <TaskItem>
+              <TaskItemBody text={native.file_path} />
+            </TaskItem>
+          )}
         </CallTask>
       )
 
     case "sandbox_write_file":
       return (
-        <CallTask title={`Wrote ${native.file_path}`}>
-          {native.error && <p className="text-destructive text-xs">{native.error}</p>}
+        <CallTask failed={Boolean(native.error)} icon="write" title={`Wrote ${native.file_path}`}>
+          {native.error ? (
+            <p className="text-destructive text-xs">{native.error}</p>
+          ) : (
+            <TaskItem>
+              <TaskItemBody text={native.file_path} />
+            </TaskItem>
+          )}
         </CallTask>
       )
 
     case "sandbox_edit_file":
       return (
-        <CallTask title={`Edited ${native.file_path ?? "file"}`}>
+        <CallTask
+          failed={Boolean(native.error)}
+          icon="edit"
+          title={`Edited ${native.file_path ?? "file"}`}
+        >
           {native.error ? (
             <p className="text-destructive text-xs">{native.error}</p>
-          ) : native.message ? (
-            <p className="text-muted-foreground text-xs">{native.message}</p>
-          ) : null}
+          ) : (
+            <TaskItem>
+              <TaskItemBody
+                text={native.message ?? native.file_path ?? "file"}
+              />
+            </TaskItem>
+          )}
         </CallTask>
       )
 
@@ -1449,11 +1693,27 @@ function NativeToolStep({ native }: { native: NativeTool }) {
         ...(native.deleted ?? []),
       ]
       return (
-        <CallTask title={`Applied patch · ${touched.length} file${touched.length === 1 ? "" : "s"}`}>
+        <CallTask
+          failed={Boolean(native.error)}
+          icon="patch"
+          title={`Applied patch · ${touched.length} file${touched.length === 1 ? "" : "s"}`}
+        >
           {native.error ? (
             <p className="text-destructive text-xs">{native.error}</p>
           ) : touched.length > 0 ? (
-            <ResultBadges items={touched.map((f) => ({ title: f }))} />
+            <>
+              <ResultBadges items={touched.map((f) => ({ title: f }))} />
+              <TaskItem>
+                <span className="inline-flex flex-wrap items-center gap-1">
+                  {touched.map((f) => (
+                    <TaskItemFile key={f}>
+                      <FileIcon className="size-3.5" />
+                      <span>{f}</span>
+                    </TaskItemFile>
+                  ))}
+                </span>
+              </TaskItem>
+            </>
           ) : null}
         </CallTask>
       )
@@ -1461,14 +1721,14 @@ function NativeToolStep({ native }: { native: NativeTool }) {
 
     case "response.skill.loaded":
     case "skill_loaded":
-      return <CallTask title={`Loaded ${native.name}`} />
+      return <CallTask icon="skill" title={`Loaded ${native.name}`} />
 
     case "response.reasoning.started":
     case "response.reasoning.stopped": {
       const thought = native.thought?.trim()
       if (!thought) return null
       return (
-        <ChainOfThoughtStep label="Thinking" status="complete">
+        <ChainOfThoughtStep icon={BrainIcon} label="Thinking" status="complete">
           <MessageResponse>{thought}</MessageResponse>
         </ChainOfThoughtStep>
       )
@@ -1582,7 +1842,7 @@ export function AgentActivity({
       >
         <ChainOfThoughtHeader>Thinking…</ChainOfThoughtHeader>
         <ChainOfThoughtContent>
-          <ChainOfThoughtStep label="Working" status="active" />
+          <ChainOfThoughtStep icon={Loader2Icon} label="Working" status="active" />
         </ChainOfThoughtContent>
       </ChainOfThought>
     )
@@ -1630,6 +1890,7 @@ export function AgentActivity({
             const attempt = (part as { data?: { attempt?: number } }).data?.attempt
             return (
               <ChainOfThoughtStep
+                icon={ClockIcon}
                 key="retry"
                 label={`Retrying${typeof attempt === "number" ? ` · attempt ${attempt}` : ""}`}
                 status="complete"
@@ -1651,7 +1912,11 @@ export function AgentActivity({
             const run = (part as AgentRunPart).data
             if (boundRuns.has(run.activityId)) return null
             return (
-              <ChainOfThoughtStep key={`agent-run-${run.activityId}`} label={run.activity}>
+              <ChainOfThoughtStep
+                icon={BotIcon}
+                key={`agent-run-${run.activityId}`}
+                label={run.activity}
+              >
                 <UnboundRunCard run={run} />
               </ChainOfThoughtStep>
             )
@@ -1662,6 +1927,7 @@ export function AgentActivity({
             const streaming = part.state === "streaming"
             return (
               <ChainOfThoughtStep
+                icon={BrainIcon}
                 key={`reasoning-${i}`}
                 label="Thinking"
                 status={streaming && isThinking ? "active" : "complete"}
@@ -1677,7 +1943,12 @@ export function AgentActivity({
             if (part.toolName === "think") {
               if (part.state === "output-error") {
                 return (
-                  <ChainOfThoughtStep key={part.toolCallId} label="Thinking" status="pending">
+                  <ChainOfThoughtStep
+                    icon={BrainIcon}
+                    key={part.toolCallId}
+                    label="Thinking"
+                    status="pending"
+                  >
                     <p className="text-destructive text-xs">{part.errorText}</p>
                   </ChainOfThoughtStep>
                 )
@@ -1690,6 +1961,7 @@ export function AgentActivity({
               const run = runByChainKey.get(chain.key)
               return (
                 <ChainOfThoughtStep
+                  icon={BotIcon}
                   key={chain.key}
                   label={chain.toolName}
                   status={dynamicToolStatus(part, isThinking)}
@@ -1702,6 +1974,7 @@ export function AgentActivity({
 
             return (
               <ChainOfThoughtStep
+                icon={WrenchIcon}
                 key={part.toolCallId}
                 label={part.toolName}
                 status={dynamicToolStatus(part, isThinking)}

@@ -17,7 +17,10 @@ export type GraphNodeStatus = "pending" | "running" | "streaming" | "done" | "fa
 export type GraphRunSnapshot = {
   toolUseId: string
   status: "running" | "done" | "failed"
-  nodes: Record<string, { status: GraphNodeStatus; kind: string; text: string }>
+  nodes: Record<
+    string,
+    { status: GraphNodeStatus; kind: string; text: string; model?: string }
+  >
   handoffs: Array<{ from: string[]; to: string[] }>
   resultText: string | null
 }
@@ -27,6 +30,7 @@ export type GraphNodeState = {
   kind: string
   status: GraphNodeStatus
   text: string
+  model?: string
 }
 
 export type GraphEdgeState = {
@@ -84,6 +88,7 @@ export function buildGraphRuns(
       kind: n.kind,
       status: n.status,
       text: n.text,
+      model: n.model,
     }))
     const nodeStatus = new Map(nodes.map((n) => [n.id, n.status]))
 
@@ -158,6 +163,7 @@ export type FlowNode = {
     kind: string
     status: GraphNodeStatus
     text: string
+    model?: string
     handles: { target: boolean; source: boolean }
   }
 }
@@ -189,6 +195,7 @@ export function toFlowElements(run: GraphRunState): {
           kind: node.kind,
           status: node.status,
           text: node.text,
+          model: node.model,
           handles: {
             target: incoming.has(node.id),
             source: isolated || outgoing.has(node.id),

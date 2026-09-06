@@ -8,6 +8,12 @@ import {
   NodeHeader,
   NodeTitle,
 } from "@/components/ai-elements/node"
+import {
+  Agent,
+  AgentContent,
+  AgentHeader,
+  AgentInstructions,
+} from "@/components/ai-elements/agent"
 import { MessageResponse } from "@/components/ai-elements/message"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { getStatusBadge } from "@/components/ai-elements/tool"
@@ -32,14 +38,16 @@ export type FormationNodeData = {
   kind: string
   status: GraphNodeStatus
   text: string
+  model?: string
   handles: { target: boolean; source: boolean }
 }
 
 /**
  * Custom Canvas node type (GWEN-32). Composition is the official workflow
  * Node stack (ai-sdk.dev/elements/components/node): Node > NodeHeader /
- * Title / Description / Action + NodeContent, with Toolbar for hover
- * inspection. Status uses vendored getStatusBadge.
+ * Title / Description / Action + NodeContent, with the hover Toolbar wired
+ * to the AI Elements Agent component so the formation member behind the node
+ * is inspectable in place. Status uses vendored getStatusBadge.
  */
 export function FormationNode({ data }: { data: FormationNodeData }) {
   const streaming = data.status === "streaming"
@@ -69,10 +77,21 @@ export function FormationNode({ data }: { data: FormationNodeData }) {
           <p className="text-muted-foreground text-xs">No output yet</p>
         )}
       </NodeContent>
-      <Toolbar>
-        <p className="max-w-64 truncate px-1 text-muted-foreground text-xs">
-          {kindLabel(data.kind)} · {data.status}
-        </p>
+      {/* Hover inspection: the node's formation member as the native Agent
+          component (Agent > AgentHeader + AgentContent > AgentInstructions),
+          rendered by NodeToolbar on hover. */}
+      <Toolbar className="w-80 border-white/10 bg-background/95 p-0 backdrop-blur-md">
+        <Agent className="rounded-sm border-0">
+          <AgentHeader
+            model={data.model ?? kindLabel(data.kind)}
+            name={`${data.label} · ${data.status}`}
+          />
+          <AgentContent className="max-h-64 overflow-y-auto">
+            <AgentInstructions>
+              {data.text || "No output streamed yet."}
+            </AgentInstructions>
+          </AgentContent>
+        </Agent>
       </Toolbar>
     </Node>
   )

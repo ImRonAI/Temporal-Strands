@@ -1,6 +1,7 @@
 "use client"
 
 import type { ChatStatus } from "ai"
+import type { ReactNode } from "react"
 import { AppWindowIcon, PaperclipIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -55,13 +56,29 @@ type ComposerProps = {
   text: string
   onTextChange: (value: string) => void
   onSubmit: (message: PromptInputMessage) => void
-  model: string
-  onModelChange: (value: string) => void
+  model?: string
+  onModelChange?: (value: string) => void
+  modelControls?: ReactNode
+  reasoningEffort?: string
+  onReasoningEffortChange?: (value: string) => void
   status?: ChatStatus
   onStop?: () => void
   placeholder?: string
   onPreview?: () => void
   previewActive?: boolean
+  globalDrop?: boolean
+}
+
+function ComposerSubmit({ text, status, onStop }: Pick<ComposerProps, "text" | "status" | "onStop">) {
+  const attachments = usePromptInputAttachments()
+  return (
+    <PromptInputSubmit
+      disabled={status === "submitted" || (!text.trim() && attachments.files.length === 0 && status !== "streaming")}
+      status={status}
+      onStop={onStop}
+      className="rounded-full transition-all duration-300 enabled:hover:shadow-[0_0_20px_-2px_oklch(0.62_0.205_277/0.7)] active:scale-90"
+    />
+  )
 }
 
 // Gemini multimodal inputs: image, document, and video formats that
@@ -101,12 +118,16 @@ export function Composer({
   placeholder,
   onPreview,
   previewActive,
+  modelControls,
+  reasoningEffort = "default",
+  onReasoningEffortChange,
+  globalDrop = true,
 }: ComposerProps) {
   return (
     <PromptInput
       onSubmit={onSubmit}
       accept={ACCEPTED_FILE_TYPES}
-      globalDrop
+      globalDrop={globalDrop}
       multiple
       className="group/composer overflow-hidden rounded-3xl border border-white/10 bg-card/70 shadow-[0_8px_40px_-12px_oklch(0.4_0.2_277/0.5)] backdrop-blur-xl transition-[border-color,box-shadow] duration-500 focus-within:border-blurple/40 focus-within:shadow-[0_12px_56px_-12px_oklch(0.55_0.22_277/0.65)]"
     >
@@ -129,7 +150,7 @@ export function Composer({
         />
       </PromptInputBody>
       <PromptInputFooter className="border-0 px-2 pb-2">
-        <PromptInputTools>
+        <PromptInputTools className="min-w-0 flex-wrap">
           <PromptInputActionMenu>
             <PromptInputActionMenuTrigger>
               <PaperclipIcon size={16} />
@@ -138,7 +159,14 @@ export function Composer({
               <PromptInputActionAddAttachments />
             </PromptInputActionMenuContent>
           </PromptInputActionMenu>
-          <ModelPicker value={model} onValueChange={onModelChange} />
+          {modelControls ?? (model && onModelChange ? (
+            <ModelPicker
+              value={model}
+              onValueChange={onModelChange}
+              reasoningEffort={reasoningEffort}
+              onReasoningEffortChange={onReasoningEffortChange}
+            />
+          ) : null)}
           {onPreview ? (
             <Button
               aria-pressed={previewActive}
@@ -158,11 +186,10 @@ export function Composer({
             when idle, spinner on submitted, stop square while streaming (which
             calls onStop), X on error. onStop is what makes the stop state real
             rather than decorative. */}
-        <PromptInputSubmit
-          disabled={!text.trim() && status !== "streaming"}
+        <ComposerSubmit
+          text={text}
           status={status}
           onStop={onStop}
-          className="rounded-full transition-all duration-300 enabled:hover:shadow-[0_0_20px_-2px_oklch(0.62_0.205_277/0.7)] active:scale-90"
         />
       </PromptInputFooter>
     </PromptInput>

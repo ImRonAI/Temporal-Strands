@@ -17,7 +17,7 @@ const nextConfig = {
   // Allowing the private ranges restores dev access from another device on
   // the network (phone, tablet, second machine). Dev-only setting; it has no
   // effect on a production build.
-  allowedDevOrigins: ["192.168.1.197", "127.0.0.1", "localhost"],
+  allowedDevOrigins: ["10.11.7.65", "192.168.1.197", "127.0.0.1", "localhost"],
   typescript: {
     ignoreBuildErrors: true,
   },

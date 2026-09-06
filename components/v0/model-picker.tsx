@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { CheckIcon, ChevronDownIcon } from "lucide-react"
+import { ArrowLeftIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 
 import {
   PromptInputCommand,
@@ -18,6 +18,20 @@ import {
 } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { useModels } from "./use-models"
+import levels from "@/lib/reasoning-levels.json"
+
+// Provider-documented levels intersected with the Agent API enum (no "none").
+// Sources: platform.claude.com/docs/en/build-with-claude/effort,
+// developers.openai.com model pages, docs.x.ai, api-docs.deepseek.com,
+// docs.z.ai/guides/capabilities/thinking, and ai.google.dev/gemini-api/docs/thinking.
+// Unknown models retain provider defaults instead of inheriting guessed levels.
+export function reasoningLevels(model: string): string[] {
+  return (levels as Record<string, string[]>)[model] ?? []
+}
+
+function effortLabel(value: string) {
+  return value === "xhigh" ? "Extra high" : value[0].toUpperCase() + value.slice(1)
+}
 
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: "Anthropic",
@@ -55,15 +69,20 @@ export type ModelPickerProps = {
   value: string
   onValueChange: (value: string) => void
   triggerClassName?: string
+  reasoningEffort?: string
+  onReasoningEffortChange?: (value: string) => void
 }
 
 export function ModelPicker({
   value,
   onValueChange,
   triggerClassName,
+  reasoningEffort = "default",
+  onReasoningEffortChange,
 }: ModelPickerProps) {
   const { models, status } = useModels()
   const [open, setOpen] = useState(false)
+  const [choosingEffort, setChoosingEffort] = useState(false)
 
   // Grouped by provider so the searchable list still reads as organized —
   // CommandList (below) already caps height and scrolls natively.
@@ -83,7 +102,7 @@ export function ModelPicker({
       : (modelLabel(value) || "Select a model")
 
   return (
-    <Popover onOpenChange={setOpen} open={open}>
+    <Popover onOpenChange={(next) => { setOpen(next); setChoosingEffort(false) }} open={open}>
       <PopoverTrigger
         className={cn(
           "flex items-center gap-1.5 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm text-muted-foreground transition-colors outline-none select-none hover:bg-accent hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-expanded:bg-accent aria-expanded:text-foreground",
@@ -91,10 +110,36 @@ export function ModelPicker({
         )}
       >
         <span className="max-w-40 truncate">{triggerLabel}</span>
+        {onReasoningEffortChange && reasoningEffort !== "default" ? (
+          <span className="text-xs opacity-70">/ {effortLabel(reasoningEffort)}</span>
+        ) : null}
         <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
       </PopoverTrigger>
       <PopoverContent align="start" className="p-0">
-        <PromptInputCommand>
+        {choosingEffort && onReasoningEffortChange ? (
+          <PromptInputCommand key={`effort-${value}`}>
+            <PromptInputCommandList aria-label={`Reasoning effort for ${modelLabel(value)}`}>
+              <PromptInputCommandItem onSelect={() => setChoosingEffort(false)}>
+                <ArrowLeftIcon className="size-4" /> Back to models
+              </PromptInputCommandItem>
+              <PromptInputCommandGroup heading={`${modelLabel(value)} / Reasoning effort`}>
+                {["default", ...reasoningLevels(value)].map((effort) => (
+                  <PromptInputCommandItem key={effort} value={effort} onSelect={() => {
+                    onReasoningEffortChange(effort)
+                    setOpen(false)
+                    setChoosingEffort(false)
+                  }}>
+                    <CheckIcon className={cn("size-4", reasoningEffort === effort ? "opacity-100" : "opacity-0")} />
+                    {effortLabel(effort)}
+                  </PromptInputCommandItem>
+                ))}
+              </PromptInputCommandGroup>
+            </PromptInputCommandList>
+            {!reasoningLevels(value).length ? (
+              <p className="px-3 pb-3 text-xs text-muted-foreground">Only the provider default is verified for this model.</p>
+            ) : null}
+          </PromptInputCommand>
+        ) : <PromptInputCommand key="models">
           <PromptInputCommandInput placeholder="Search models…" />
           <PromptInputCommandList className="max-h-80">
             <PromptInputCommandEmpty>No models found.</PromptInputCommandEmpty>
@@ -108,7 +153,8 @@ export function ModelPicker({
                     key={model.id}
                     onSelect={(next) => {
                       onValueChange(next)
-                      setOpen(false)
+                      if (onReasoningEffortChange) setChoosingEffort(true)
+                      else setOpen(false)
                     }}
                     value={model.id}
                   >
@@ -119,12 +165,13 @@ export function ModelPicker({
                       )}
                     />
                     {modelLabel(model.id)}
+                    {onReasoningEffortChange ? <ChevronRightIcon className="ml-auto size-3.5 shrink-0" /> : null}
                   </PromptInputCommandItem>
                 ))}
               </PromptInputCommandGroup>
             ))}
           </PromptInputCommandList>
-        </PromptInputCommand>
+        </PromptInputCommand>}
       </PopoverContent>
     </Popover>
   )

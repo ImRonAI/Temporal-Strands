@@ -446,12 +446,6 @@ class _ToolResultHook(HookProvider):
         result = event.result
         if not result:
             return
-        payload = _tool_result_payload(result)
-        if payload and isinstance(payload, dict) and "status" in payload:
-            event.result["status"] = payload["status"]
-            if "content" in payload:
-                event.result["content"] = payload["content"]
-            result = event.result
         self._publish(
             {
                 "tool_use_id": result.get("toolUseId", event.tool_use["toolUseId"]),

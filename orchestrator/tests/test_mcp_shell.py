@@ -15,7 +15,7 @@ import os
 
 from strands.tools.mcp import MCPClient
 from strands.tools.registry import ToolRegistry
-from strands_tools.mcp_client import mcp_client as mcp_client_tool
+from strands_tools.mcp_client import mcp_client
 
 from load_tool import (
     STRANDS_TOOLS_DIR,
@@ -94,7 +94,7 @@ def test_mcp_client_connects_shell_and_accepts_another_connection() -> None:
     assert binary.is_file()
     command = str(binary.resolve())
     try:
-        shell = mcp_client_tool(
+        shell = mcp_client(
             action="connect",
             connection_id="shell",
             transport="stdio",
@@ -102,7 +102,7 @@ def test_mcp_client_connects_shell_and_accepts_another_connection() -> None:
             args=["--mcp"],
         )
         assert shell["status"] == "success"
-        extra = mcp_client_tool(
+        extra = mcp_client(
             action="connect",
             connection_id="shell-extra",
             transport="stdio",
@@ -110,7 +110,7 @@ def test_mcp_client_connects_shell_and_accepts_another_connection() -> None:
             args=["--mcp"],
         )
         assert extra["status"] == "success"
-        listed = mcp_client_tool(action="list_connections")
+        listed = mcp_client(action="list_connections")
         ids = {
             conn["connection_id"]
             for conn in listed["content"][1]["json"]["connections"]
@@ -120,8 +120,8 @@ def test_mcp_client_connects_shell_and_accepts_another_connection() -> None:
         assert "datacommons" not in ids
         assert "pophive" not in ids
     finally:
-        mcp_client_tool(action="disconnect", connection_id="shell-extra")
-        mcp_client_tool(action="disconnect", connection_id="shell")
+        mcp_client(action="disconnect", connection_id="shell-extra")
+        mcp_client(action="disconnect", connection_id="shell")
 
 
 class _Agent:

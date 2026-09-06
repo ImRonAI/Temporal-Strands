@@ -338,6 +338,57 @@ def clear_readiness() -> None:
     READINESS_PATH.unlink(missing_ok=True)
 
 
+def connect_included_mcp_servers() -> list[str]:
+    """Start and connect included MCP servers to strands_tools.mcp_client."""
+    from strands_tools.mcp_client import mcp_client
+
+    if not MCP_CONFIG_PATH.is_file():
+        return []
+    raw = json.loads(MCP_CONFIG_PATH.read_text())
+    servers = raw.get("mcpServers", {})
+    connected: list[str] = []
+    shell_bin = _ROOT / ".venv/bin/strands-shell"
+
+    for name, cfg in servers.items():
+        if "command" in cfg:
+            command = cfg["command"]
+            if command == ".venv/bin/strands-shell" and shell_bin.is_file():
+                command = str(shell_bin.resolve())
+            args = cfg.get("args", [])
+            env = cfg.get("env")
+            res = mcp_client(
+                action="connect",
+                connection_id=name,
+                transport="stdio",
+                command=command,
+                args=args,
+                env=env,
+            )
+            if res.get("status") == "success":
+                connected.append(name)
+                logger.info("Connected stdio MCP server '%s' (%s)", name, command)
+            else:
+                logger.warning("Could not connect MCP server '%s': %s", name, res)
+        elif "url" in cfg:
+            url = os.path.expandvars(cfg["url"])
+            if not url or url.startswith("${"):
+                continue
+            headers = {k: os.path.expandvars(v) for k, v in cfg.get("headers", {}).items()}
+            res = mcp_client(
+                action="connect",
+                connection_id=name,
+                transport="streamable_http",
+                server_url=url,
+                headers=headers or None,
+            )
+            if res.get("status") == "success":
+                connected.append(name)
+                logger.info("Connected HTTP MCP server '%s' (%s)", name, url)
+            else:
+                logger.warning("Could not connect MCP server '%s': %s", name, res)
+    return connected
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
@@ -345,6 +396,7 @@ async def main() -> None:
     model_factories, default_model = await assemble_model_factories()
     tools_dir = ensure_strands_tools_dir()
     mcp_clients = mcp_client_factories()
+    connected_mcp_servers = connect_included_mcp_servers()
 
     client = await Client.connect(
         os.environ.get("TEMPORAL_ADDRESS", "localhost:7233"),
@@ -398,6 +450,12 @@ async def main() -> None:
     try:
         await worker.run()
     finally:
+        for name in connected_mcp_servers:
+            try:
+                from strands_tools.mcp_client import mcp_client
+                mcp_client(action="disconnect", connection_id=name)
+            except Exception:
+                pass
         clear_readiness()
 
 

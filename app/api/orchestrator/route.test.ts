@@ -640,6 +640,29 @@ describe("POST per-turn model switching", () => {
     vi.unstubAllGlobals()
   })
 
+  it.each(["low", "high", "max", undefined])("forwards per-turn reasoning effort %s without losing it at the bridge", async (effort) => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(`data: ${JSON.stringify({ done: true, reply: "ok" })}\n\n`, {
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const response = await POST(new Request("http://localhost/api/orchestrator", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "session-1",
+        model: "perplexity/kimi-k3",
+        reasoningEffort: effort,
+        messages: [{ id: "message-1", role: "user", parts: [{ type: "text", text: "hello" }] }],
+      }),
+    }))
+    await response.text()
+    const turnCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/turns/stream"))
+    const body = JSON.parse((turnCall?.[1] as RequestInit).body as string)
+    expect(body.reasoning_effort).toBe(effort)
+  })
+
   // Compatibility test for per-turn model switching: the orchestrator's
   // /turns/stream endpoint accepts an optional model_id (validated against
   // the readiness catalog, forwarded to the workflow which rebuilds its agent

@@ -181,3 +181,111 @@ async def test_graph_activity_publishes_terminal_error_frame_on_failure() -> Non
     assert published[-1]["data"]["status"] == "error"
     assert published[-1]["tool_use"]["toolUseId"] == tool_use_id
     assert "Unable to serialize" in published[-1]["data"]["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_graph_activity_validation_errors() -> None:
+    activity_info = MagicMock()
+    activity_info.workflow_id = "chat-test"
+    activity_info.activity_id = "val-1"
+
+    with patch("graph_activity.activity.info", return_value=activity_info):
+        # Create without topology
+        res1 = await graph_activity(action="create", graph_id="g1")
+        assert res1["status"] == "error"
+        assert "topology with a non-empty 'nodes' list is required" in res1["content"][0]["text"]
+
+        # Create with empty topology
+        res2 = await graph_activity(action="create", graph_id="g1", topology={"nodes": []})
+        assert res2["status"] == "error"
+        assert "topology with a non-empty 'nodes' list is required" in res2["content"][0]["text"]
+
+        # Execute without task
+        res3 = await graph_activity(action="execute", graph_id="g1")
+        assert res3["status"] == "error"
+        assert "task prompt is required" in res3["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_graph_activity_single_turn_create_and_execute() -> None:
+    tool_use_id = "act-single-1"
+    calls: list[str] = []
+
+    async def mock_stream(
+        tool_use: dict[str, Any], invocation_state: dict[str, Any]
+    ) -> AsyncIterator[Any]:
+        action = tool_use["input"]["action"]
+        calls.append(action)
+        if action == "create":
+            yield ToolResultEvent({"status": "success", "content": [{"text": "created"}]})
+        elif action == "execute":
+            yield ToolResultEvent({"status": "success", "content": [{"text": "executed"}]})
+
+    fake_client = MagicMock()
+    fake_client.topic.return_value = MagicMock()
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=None)
+
+    activity_info = MagicMock()
+    activity_info.workflow_id = "chat-test"
+    activity_info.activity_id = tool_use_id
+
+    with (
+        patch("graph_activity.activity.info", return_value=activity_info),
+        patch("graph_activity._session_model", new=AsyncMock(return_value=object())),
+        patch("graph_activity.Agent"),
+        patch(
+            "graph_activity.WorkflowStreamClient.from_within_activity",
+            return_value=fake_client,
+        ),
+        patch("graph_activity.official_graph.stream", side_effect=mock_stream),
+    ):
+        result = await graph_activity(
+            action="execute",
+            task="do work",
+            topology={"nodes": [{"id": "n1", "type": "agent", "system_prompt": "test"}]},
+        )
+
+    assert result["status"] == "success"
+    assert result["content"] == [{"text": "executed"}]
+    # Both create and execute were invoked in sequence
+    assert calls == ["create", "execute"]
+
+
+def test_after_tool_call_unwraps_serialized_error() -> None:
+    from strands.hooks.events import AfterToolCallEvent
+    from workflow import _ToolResultHook
+
+    published: list[dict[str, Any]] = []
+    hook = _ToolResultHook(publish=published.append)
+
+    event = AfterToolCallEvent(
+        agent=MagicMock(),
+        selected_tool=None,
+        tool_use={"name": "graph", "toolUseId": "u1", "input": {}},
+        invocation_state={},
+        result={
+            "toolUseId": "u1",
+            "status": "success",
+            "content": [
+                {
+                    "text": json.dumps(
+                        {
+                            "status": "error",
+                            "content": [{"text": "graph_id and topology are required"}],
+                        }
+                    )
+                }
+            ],
+        },
+    )
+
+    hook._record(event)
+
+    # event.result is updated with real error status and clean content
+    assert event.result["status"] == "error"
+    assert event.result["content"] == [{"text": "graph_id and topology are required"}]
+    # The published stream also receives the error status
+    assert len(published) == 1
+    assert published[0]["status"] == "error"
+    assert published[0]["content"] == [{"text": "graph_id and topology are required"}]

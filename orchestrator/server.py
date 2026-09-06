@@ -75,6 +75,10 @@ from workflow import (
     TurnVideo,
 )
 
+REASONING_LEVELS = json.loads(
+    (Path(__file__).resolve().parent.parent / "lib" / "reasoning-levels.json").read_text()
+)
+
 _ROOT = Path(__file__).resolve().parent
 load_dotenv(_ROOT.parent / ".env.local", override=False)
 
@@ -171,6 +175,7 @@ class TurnRequest(BaseModel):
     # new factory name before running the turn. Omitted -> keep the session's
     # current model.
     model_id: str | None = None
+    reasoning_effort: str | None = None
 
 
 class ApproveRequest(BaseModel):
@@ -260,6 +265,10 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
             )
     client = temporal()
     handle = client.get_workflow_handle(session_id)
+    if body.reasoning_effort is not None:
+        model_id = body.model_id or await handle.query(ChatWorkflow.model_id)
+        if body.reasoning_effort not in REASONING_LEVELS.get(model_id, []):
+            raise HTTPException(422, f"Unsupported reasoning effort for {model_id}: {body.reasoning_effort}")
 
     # Start reading where the stream currently ends, so this turn's frames are
     # not preceded by every earlier turn's replay.
@@ -324,6 +333,7 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
                     for video in body.videos
                 ],
                 model_id=body.model_id,
+                reasoning_effort=body.reasoning_effort,
             ),
             wait_for_stage=WorkflowUpdateStage.ACCEPTED,
         )

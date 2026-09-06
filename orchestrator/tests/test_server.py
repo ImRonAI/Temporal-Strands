@@ -204,6 +204,15 @@ def test_turn_unknown_model_id_is_400_listing_available(
     assert "model-b" in detail
 
 
+def test_turn_rejects_unverified_reasoning_effort(client, monkeypatch):
+    monkeypatch.setattr(server, "readiness", AsyncMock(return_value={"models": ["gemini-3.8-flash"]}))
+    monkeypatch.setitem(server._state, "client", MagicMock())
+    response = client.post("/sessions/chat-1/turns/stream", json={
+        "prompt": "hi", "model_id": "gemini-3.8-flash", "reasoning_effort": "minimal",
+    })
+    assert response.status_code == 422
+
+
 def test_turn_valid_model_id_is_accepted_and_forwarded(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

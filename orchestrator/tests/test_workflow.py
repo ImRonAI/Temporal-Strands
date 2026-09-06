@@ -43,6 +43,7 @@ TASK_QUEUE = "test-chat-workflow"
 # Event lists consumed one per Model.stream() call, in call order. Turns run
 # under the workflow lock, so call order is deterministic within a test.
 SCRIPTS: deque[list[dict[str, Any]]] = deque()
+REASONING_STATES: list[dict[str, Any]] = []
 
 
 class Tracker:
@@ -94,6 +95,7 @@ class ScriptedModel(Model):
         self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
         TRACKER.active += 1
+        REASONING_STATES.append(dict(kwargs.get("invocation_state") or {}))
         TRACKER.max_active = max(TRACKER.max_active, TRACKER.active)
         try:
             # Long enough that two truly concurrent turns would overlap here.
@@ -397,6 +399,18 @@ async def test_turn_model_id_switches_the_factory_for_the_next_turn(
 
 
 @pytest.mark.asyncio(loop_scope="module")
+async def test_reasoning_effort_is_per_turn(client: Client) -> None:
+    handle = await start_session(client, "chat-reasoning")
+    REASONING_STATES.clear()
+    for effort in ["low", "high", None]:
+        SCRIPTS.append(text_events("reply"))
+        await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="hi", reasoning_effort=effort))
+    assert [state.get("reasoning_effort") for state in REASONING_STATES] == ["low", "high", None]
+    await handle.signal(ChatWorkflow.end_chat)
+    await handle.result()
+
+
+@pytest.mark.asyncio(loop_scope="module")
 async def test_continue_as_new_preserves_the_session(client: Client) -> None:
     """Rollover carries model, messages, session, and offsets; no duplicate frames."""
     session_id = "chat-rollover"
@@ -471,4 +485,3 @@ async def test_continue_as_new_preserves_the_session(client: Client) -> None:
 
     await latest.signal(ChatWorkflow.end_chat)
     await latest.result()
-

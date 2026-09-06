@@ -14,6 +14,7 @@ https://developers.google.com/maps/documentation/javascript/reference/places-wid
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import mimetypes
 from collections.abc import AsyncGenerator
@@ -261,7 +262,14 @@ class GeminiModel(_GeminiModel):
         # on candidates[0].grounding_metadata.grounding_chunks[].maps
         # (title, uri, placeId) — the last stream event is often usage-only.
         # https://ai.google.dev/gemini-api/docs/generate-content/maps-grounding
-        request = self._format_request(messages, tool_specs, system_prompt, self.config.get("params"))
+        params = copy.deepcopy(self.config.get("params") or {})
+        effort = (kwargs.get("invocation_state") or {}).get("reasoning_effort")
+        if effort is not None:
+            thinking = params.get("thinking_config") or {}
+            if isinstance(thinking, genai.types.ThinkingConfig):
+                thinking = thinking.model_dump(exclude_none=True)
+            params["thinking_config"] = {**thinking, "thinking_level": effort}
+        request = self._format_request(messages, tool_specs, system_prompt, params)
         client = self._get_client().aio
         try:
             response = await client.models.generate_content_stream(**request)

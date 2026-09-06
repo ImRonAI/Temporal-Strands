@@ -340,6 +340,7 @@ class TurnInput:
     documents: list[TurnDocument] = field(default_factory=list)
     videos: list[TurnVideo] = field(default_factory=list)
     model_id: str | None = None
+    reasoning_effort: str | None = None
 
 
 @dataclass
@@ -445,6 +446,12 @@ class _ToolResultHook(HookProvider):
         result = event.result
         if not result:
             return
+        payload = _tool_result_payload(result)
+        if payload and isinstance(payload, dict) and "status" in payload:
+            event.result["status"] = payload["status"]
+            if "content" in payload:
+                event.result["content"] = payload["content"]
+            result = event.result
         self._publish(
             {
                 "tool_use_id": result.get("toolUseId", event.tool_use["toolUseId"]),
@@ -950,7 +957,11 @@ class ChatWorkflow:
             # matching how a failed model activity already reaches the caller
             # (tests/test_workflow.py::test_failed_model_activity_surfaces_to_the_caller).
             try:
-                result = await agent.invoke_async(blocks)
+                invocation_state = (
+                    {"reasoning_effort": turn.reasoning_effort}
+                    if turn.reasoning_effort is not None else {}
+                )
+                result = await agent.invoke_async(blocks, invocation_state=invocation_state)
             except EventLoopException as error:
                 raise ApplicationError(
                     f"Turn failed: {error.__cause__ or error}",
@@ -984,7 +995,7 @@ class ChatWorkflow:
                 # Clear the prompt so the UI's reconciled data-approval part
                 # stops showing an answered question.
                 self._approvals.publish({"reason": None})
-                result = await agent.invoke_async(responses)
+                result = await agent.invoke_async(responses, invocation_state=invocation_state)
 
             # A load_tools this turn recorded a new extra MCP server. Only
             # TemporalAgent's constructor installs the Temporal refresh for

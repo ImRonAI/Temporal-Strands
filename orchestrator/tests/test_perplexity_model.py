@@ -55,6 +55,18 @@ async def collect(model, messages=None, **kwargs):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("effort", ["minimal", "low", "medium", "high", "xhigh", "max"])
+async def test_per_turn_reasoning_does_not_change_shared_model_defaults(effort):
+    client = FakeClient([completed()])
+    model = PerplexityModel(model_id="perplexity/kimi-k3", client=client)
+    await collect(model, invocation_state={"reasoning_effort": effort})
+    assert client.responses.request["reasoning"] == {"effort": effort}
+    await collect(model)
+    assert "reasoning" not in client.responses.request
+    assert model.get_config()["params"] == {}
+
+
+@pytest.mark.asyncio
 async def test_message_start_has_no_attempt_outside_activity_context() -> None:
     """Outside a Temporal activity the frame stays byte-identical to before."""
     events = await collect(

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import base64
 import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from gemini_model import GeminiModel, maps_from_grounding, search_from_grounding
 from workflow import (
@@ -13,6 +17,29 @@ from workflow import (
     TurnVideo,
     turn_content_blocks,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effort", ["low", "medium", "high"])
+async def test_reasoning_effort_maps_to_thinking_level_without_mutating_defaults(monkeypatch, effort):
+    model = GeminiModel(
+        client_args={"api_key": "test"}, model_id="gemini-3.8-flash",
+        params={"thinking_config": {"thinking_level": "high", "include_thoughts": True}},
+    )
+
+    async def empty_stream():
+        return
+        yield
+
+    generate = AsyncMock(side_effect=lambda **kwargs: empty_stream())
+    monkeypatch.setattr(model, "_get_client", lambda: SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(generate_content_stream=generate))
+    ))
+    _ = [event async for event in model.stream([], invocation_state={"reasoning_effort": effort})]
+    thinking = generate.call_args.kwargs["config"]["thinking_config"]
+    assert thinking["thinking_level"].lower() == effort
+    assert thinking["include_thoughts"] is True
+    assert model.config["params"]["thinking_config"]["thinking_level"] == "high"
 
 
 def test_turn_content_blocks_match_strands_gemini_docs() -> None:

@@ -300,7 +300,7 @@ class PerplexityModel(Model):
         model_state: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterable[StreamEvent]:
-        del invocation_state, model_state
+        del model_state
         unsupported = []
         if tool_choice is not None:
             unsupported.append("tool_choice")
@@ -317,6 +317,9 @@ class PerplexityModel(Model):
                     block["text"] for block in system_prompt_content if "text" in block
                 ) or None
             request = self._format_request(messages, tool_specs, effective_system_prompt)
+            effort = (invocation_state or {}).get("reasoning_effort")
+            if effort is not None:
+                request["reasoning"] = {"effort": effort}
             provider_stream = await self.client.responses.create(**request)
         except ApplicationError:
             raise

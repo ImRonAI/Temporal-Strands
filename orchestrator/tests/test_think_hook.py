@@ -204,6 +204,7 @@ def test_tool_composition() -> None:
         "list_agent_response_files",
         "download_agent_response_file",
         "list_agent_models",
+        "cancel_agent_response",
     ]
 
 

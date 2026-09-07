@@ -41,6 +41,7 @@ from perplexity_operations import (
     list_agent_models,
     list_agent_response_files,
     retrieve_agent_response,
+    cancel_agent_response,
 )
 
 
@@ -107,14 +108,17 @@ class FakeResponses:
         events: list[Any] | None = None,
         error: Exception | None = None,
         retrieved: Any = None,
+        cancelled: Any = None,
         files: FakeFiles | None = None,
     ) -> None:
         self.events = events or []
         self.error = error
         self.retrieved = retrieved
+        self.cancelled = cancelled
         self.files = files or FakeFiles()
         self.request: dict[str, Any] | None = None
         self.retrieve_calls: list[str] = []
+        self.cancel_calls: list[str] = []
 
     async def create(self, **request: Any) -> Any:
         self.request = request
@@ -132,6 +136,12 @@ class FakeResponses:
         if self.error:
             raise self.error
         return self.retrieved
+
+    async def cancel(self, response_id: str) -> Any:
+        self.cancel_calls.append(response_id)
+        if self.error:
+            raise self.error
+        return self.cancelled or SimpleNamespace(response_id=response_id, status="cancelling")
 
 
 class FakeClient:
@@ -567,6 +577,50 @@ async def test_input_is_required_and_nonempty() -> None:
     assert caught.value.non_retryable is True
 
 
+@pytest.mark.asyncio
+async def test_create_maps_images_json_to_multimodal_input() -> None:
+    client = FakeClient(events=[completed()])
+    images_json = json.dumps([
+        "https://example.com/chart.png",
+        {"image_url": "data:image/png;base64,abc"},
+        {"source": {"url": "https://example.com/photo.jpg"}},
+        {"source": {"bytes": "fake_bytes"}},
+    ])
+    await run_activity(
+        create_fast_agent_response,
+        client,
+        input="Analyze these images",
+        images_json=images_json,
+    )
+    request = client.responses.request
+    assert request is not None
+    assert request["input"] == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Analyze these images"},
+                {"type": "input_image", "image_url": "https://example.com/chart.png"},
+                {"type": "input_image", "image_url": "data:image/png;base64,abc"},
+                {"type": "input_image", "image_url": "https://example.com/photo.jpg"},
+                {"type": "input_image", "image_url": "data:application/octet-stream;base64,fake_bytes"},
+            ],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_invalid_images_json() -> None:
+    client = FakeClient()
+    with pytest.raises(ApplicationError) as caught:
+        await run_activity(
+            create_fast_agent_response,
+            client,
+            input="Analyze",
+            images_json="not-json",
+        )
+    assert caught.value.non_retryable is True
+
+
 # --- streaming, envelopes, heartbeats --------------------------------------
 
 
@@ -736,6 +790,47 @@ async def test_retrieve_not_found_is_nonretryable() -> None:
     with pytest.raises(ApplicationError) as caught:
         await run_activity(retrieve_agent_response, client, response_id="resp_x")
     assert caught.value.non_retryable is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_calls_sdk_and_returns_data() -> None:
+    cancelled = SimpleNamespace(response_id="resp_cancel", status="cancelling")
+    client = FakeClient(cancelled=cancelled)
+
+    result, _, _ = await run_activity(cancel_agent_response, client, response_id="resp_cancel")
+
+    assert client.responses.cancel_calls == ["resp_cancel"]
+    assert result == {"response_id": "resp_cancel", "status": "cancelling"}
+    json.dumps(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_id", ["../etc", "resp/1", "", "../../bad"])
+async def test_cancel_rejects_unsafe_identifiers(bad_id: str) -> None:
+    client = FakeClient()
+    with pytest.raises(ApplicationError) as caught:
+        await run_activity(cancel_agent_response, client, response_id=bad_id)
+    assert caught.value.non_retryable is True
+    assert client.responses.cancel_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error_type", "status_code", "non_retryable"),
+    [
+        (AuthenticationError, 401, True),
+        (BadRequestError, 400, True),
+        (RateLimitError, 429, False),
+        (InternalServerError, 500, False),
+    ],
+)
+async def test_cancel_error_classification(error_type, status_code, non_retryable) -> None:
+    request = httpx.Request("POST", "https://api.perplexity.ai/v1/agent/resp_x/cancel")
+    response = httpx.Response(status_code, request=request)
+    client = FakeClient(error=error_type("failure", response=response, body=None))
+    with pytest.raises(ApplicationError) as caught:
+        await run_activity(cancel_agent_response, client, response_id="resp_x")
+    assert caught.value.non_retryable is non_retryable
 
 
 @pytest.mark.asyncio

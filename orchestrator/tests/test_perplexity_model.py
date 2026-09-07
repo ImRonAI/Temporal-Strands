@@ -155,6 +155,38 @@ async def test_request_maps_messages_images_tools_and_exact_params_without_mutat
     assert model.get_config() == {"model_id": "sonar/test", "params": original}
 
 
+def test_image_part_supports_urls_and_normalizes_jpg() -> None:
+    # direct image_url
+    assert PerplexityModel._image_part({"image_url": "https://example.com/photo.png"}) == {
+        "type": "input_image",
+        "image_url": "https://example.com/photo.png",
+    }
+    # source url
+    assert PerplexityModel._image_part({"source": {"url": "https://example.com/photo.jpg"}}) == {
+        "type": "input_image",
+        "image_url": "https://example.com/photo.jpg",
+    }
+    # source image_url
+    assert PerplexityModel._image_part({"source": {"image_url": "https://example.com/photo2.webp"}}) == {
+        "type": "input_image",
+        "image_url": "https://example.com/photo2.webp",
+    }
+    # format jpg mapped to jpeg
+    assert PerplexityModel._image_part({"format": "jpg", "source": {"bytes": b"test_jpg"}}) == {
+        "type": "input_image",
+        "image_url": "data:image/jpeg;base64,dGVzdF9qcGc=",
+    }
+    # format webp
+    assert PerplexityModel._image_part({"format": "webp", "source": {"bytes": b"test_webp"}}) == {
+        "type": "input_image",
+        "image_url": "data:image/webp;base64,dGVzdF93ZWJw",
+    }
+    # unsupported source raises ApplicationError non-retryable
+    with pytest.raises(ApplicationError) as caught:
+        PerplexityModel._image_part({"source": {}})
+    assert caught.value.non_retryable is True
+
+
 def test_format_request_exposes_the_provider_request_contract() -> None:
     model = PerplexityModel(model_id="sonar/test", client=FakeClient())
 

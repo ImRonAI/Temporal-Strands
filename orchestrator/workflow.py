@@ -216,6 +216,7 @@ _AGENT_READ_ACTIVITIES = (
     perplexity_operations.list_agent_response_files,
     perplexity_operations.download_agent_response_file,
     perplexity_operations.list_agent_models,
+    perplexity_operations.cancel_agent_response,
 )
 
 AGENT_API_TOOLS = (
@@ -443,7 +444,7 @@ class ChatInput:
 
 # Formats from the Strands Gemini multimodal docs (image / document / video).
 # Anything else is dropped rather than sent as a guessed MIME type.
-_SUPPORTED_IMAGE_FORMATS = frozenset({"png", "jpeg", "gif", "webp"})
+_SUPPORTED_IMAGE_FORMATS = frozenset({"png", "jpeg", "jpg", "gif", "webp"})
 _SUPPORTED_DOCUMENT_FORMATS = frozenset(
     {"pdf", "txt", "html", "csv", "md", "json"}
 )

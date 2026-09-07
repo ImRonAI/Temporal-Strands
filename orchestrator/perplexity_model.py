@@ -134,12 +134,23 @@ class PerplexityModel(Model):
 
     @staticmethod
     def _image_part(image: dict[str, Any]) -> dict[str, str]:
+        image_url = image.get("image_url")
+        if isinstance(image_url, str) and image_url:
+            return {"type": "input_image", "image_url": image_url}
         source = image.get("source", {})
-        if "bytes" not in source:
-            raise _application_error("Unsupported image source", non_retryable=True)
-        mime = mimetypes.types_map.get(f".{image.get('format', '')}", "application/octet-stream")
-        encoded = base64.b64encode(source["bytes"]).decode("ascii")
-        return {"type": "input_image", "image_url": f"data:{mime};base64,{encoded}"}
+        if "url" in source and isinstance(source["url"], str):
+            return {"type": "input_image", "image_url": source["url"]}
+        if "image_url" in source and isinstance(source["image_url"], str):
+            return {"type": "input_image", "image_url": source["image_url"]}
+        if "bytes" in source:
+            fmt = str(image.get("format", "")).lower().lstrip(".")
+            if fmt == "jpg":
+                fmt = "jpeg"
+            mime = f"image/{fmt}" if fmt in {"png", "jpeg", "gif", "webp"} else mimetypes.types_map.get(f".{fmt}", "application/octet-stream")
+            raw_bytes = source["bytes"]
+            encoded = base64.b64encode(raw_bytes).decode("ascii") if isinstance(raw_bytes, bytes) else str(raw_bytes)
+            return {"type": "input_image", "image_url": f"data:{mime};base64,{encoded}"}
+        raise _application_error("Unsupported image source", non_retryable=True)
 
     @classmethod
     def _message_items(cls, messages: Messages) -> list[dict[str, Any]]:

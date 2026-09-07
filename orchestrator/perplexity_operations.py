@@ -42,6 +42,7 @@ the only retry mechanism.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import re
@@ -440,7 +441,37 @@ def _decode_fields(fields: dict[str, Any]) -> dict[str, Any]:
     decoded["skills"] = _decode_json_param(
         "skills_json", decoded.pop("skills_json", None)
     )
+    decoded["images"] = _decode_json_param(
+        "images_json", decoded.pop("images_json", None)
+    )
     return decoded
+
+
+def _format_image_item(img: Any) -> dict[str, str]:
+    if isinstance(img, str):
+        if img.startswith("data:image/") or img.startswith("http://") or img.startswith("https://"):
+            return {"type": "input_image", "image_url": img}
+        raise _invalid("invalid image string format: must be data URI or http(s) URL")
+    if isinstance(img, Mapping):
+        url = img.get("image_url") or img.get("url")
+        if isinstance(url, str) and url:
+            return {"type": "input_image", "image_url": url}
+        source = img.get("source")
+        if isinstance(source, Mapping):
+            if "url" in source and isinstance(source["url"], str):
+                return {"type": "input_image", "image_url": source["url"]}
+            if "bytes" in source:
+                fmt = str(img.get("format", "")).lower().lstrip(".")
+                if fmt == "jpg":
+                    fmt = "jpeg"
+                mime = f"image/{fmt}" if fmt in {"png", "jpeg", "gif", "webp"} else "application/octet-stream"
+                raw_bytes = source["bytes"]
+                b64 = base64.b64encode(raw_bytes).decode("ascii") if isinstance(raw_bytes, bytes) else str(raw_bytes)
+                return {"type": "input_image", "image_url": f"data:{mime};base64,{b64}"}
+            raise _invalid(f"unsupported image source {source!r}")
+        if img.get("type") == "input_image" and isinstance(img.get("image_url"), str):
+            return {"type": "input_image", "image_url": img["image_url"]}
+    raise _invalid(f"unsupported image item {img!r}")
 
 
 def _build_request(preset: str, fields: dict[str, Any]) -> dict[str, Any]:
@@ -458,6 +489,33 @@ def _build_request(preset: str, fields: dict[str, Any]) -> dict[str, Any]:
         or (isinstance(input_value, list) and not input_value)
     ):
         raise _invalid("input is required and must be non-empty")
+
+    images = fields.get("images")
+    if images is not None:
+        image_list = images if isinstance(images, list) else [images]
+        formatted_images = [_format_image_item(img) for img in image_list]
+        if formatted_images:
+            if isinstance(input_value, str):
+                input_value = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": input_value},
+                            *formatted_images,
+                        ],
+                    }
+                ]
+            elif isinstance(input_value, list):
+                if input_value and isinstance(input_value[-1], Mapping) and "role" in input_value[-1]:
+                    last_msg = dict(input_value[-1])
+                    content = last_msg.get("content")
+                    if isinstance(content, str):
+                        last_msg["content"] = [{"type": "input_text", "text": content}, *formatted_images]
+                    elif isinstance(content, list):
+                        last_msg["content"] = [*content, *formatted_images]
+                    input_value = [*input_value[:-1], last_msg]
+                else:
+                    input_value = [*input_value, *formatted_images]
 
     models = fields.get("models")
     if models is not None and not (
@@ -687,10 +745,14 @@ _CREATE_DOC = """Run a Perplexity Agent API research sub-agent using the {preset
         tools_json: Optional native Agent API tools, as a JSON string of the
             tools array, e.g. '[{{"type": "web_search"}}, {{"type": "sandbox"}}]'.
             Valid types: web_search, finance_search, people_search, fetch_url,
-            function, sandbox, mcp.
+            function, sandbox, mcp, connector.
         skills_json: Optional Agent API skills, as a JSON string of the skills
             array, e.g. '[{{"type": "builtin", "name": "office/pdf"}}]' or
             inline skills with name/description/instructions.
+        images_json: Optional image attachments for multimodal vision analysis,
+            as a JSON string of URLs, data URIs, or image objects, e.g.
+            '["https://example.com/chart.png"]' or
+            '[{{"image_url": "data:image/png;base64,..."}}]'.
 
     Returns:
         Bounded serializable result with response_id, model, status,
@@ -715,6 +777,7 @@ async def create_fast_agent_response(
     top_p: float | None = None,
     tools_json: str | None = None,
     skills_json: str | None = None,
+    images_json: str | None = None,
 ) -> dict[str, Any]:
     fields = dict(locals())
     return await _run_create("fast", "create_fast_agent_response", fields)
@@ -737,6 +800,7 @@ async def create_low_agent_response(
     top_p: float | None = None,
     tools_json: str | None = None,
     skills_json: str | None = None,
+    images_json: str | None = None,
 ) -> dict[str, Any]:
     fields = dict(locals())
     return await _run_create("low", "create_low_agent_response", fields)
@@ -759,6 +823,7 @@ async def create_medium_agent_response(
     top_p: float | None = None,
     tools_json: str | None = None,
     skills_json: str | None = None,
+    images_json: str | None = None,
 ) -> dict[str, Any]:
     fields = dict(locals())
     return await _run_create("medium", "create_medium_agent_response", fields)
@@ -781,6 +846,7 @@ async def create_high_agent_response(
     top_p: float | None = None,
     tools_json: str | None = None,
     skills_json: str | None = None,
+    images_json: str | None = None,
 ) -> dict[str, Any]:
     fields = dict(locals())
     return await _run_create("high", "create_high_agent_response", fields)
@@ -803,6 +869,7 @@ async def create_xhigh_agent_response(
     top_p: float | None = None,
     tools_json: str | None = None,
     skills_json: str | None = None,
+    images_json: str | None = None,
 ) -> dict[str, Any]:
     fields = dict(locals())
     return await _run_create("xhigh", "create_xhigh_agent_response", fields)
@@ -825,6 +892,7 @@ async def create_wide_research_agent_response(
     top_p: float | None = None,
     tools_json: str | None = None,
     skills_json: str | None = None,
+    images_json: str | None = None,
 ) -> dict[str, Any]:
     fields = dict(locals())
     return await _run_create(
@@ -863,6 +931,34 @@ async def retrieve_agent_response(response_id: str) -> dict[str, Any]:
     except perplexity.APIError as error:
         _raise_sdk_error(error)
     return _project_response(response)
+
+
+@activity.defn(name="cancel_agent_response")
+async def cancel_agent_response(response_id: str) -> dict[str, Any]:
+    """Cancel a running Agent API response by id (POST /v1/agent/{id}/cancel).
+
+    Transitions a background response's status to 'cancelling' and then
+    'cancelled'. Safe to call on responses that have already completed or
+    failed (returns the existing status or raises 404).
+
+    Args:
+        response_id: The Agent API response id to cancel.
+
+    Returns:
+        The cancellation status response (e.g. {"response_id": ..., "status": "cancelling"}).
+    """
+    if not isinstance(response_id, str) or not _SAFE_IDENTIFIER_RE.match(response_id):
+        raise _invalid(f"unsafe response_id {response_id!r}")
+
+    client = _get_client()
+    try:
+        res = await client.responses.cancel(response_id)
+    except perplexity.APIError as error:
+        _raise_sdk_error(error)
+    data = _to_data(res)
+    if not isinstance(data, dict):
+        data = {"response_id": response_id, "status": str(data)}
+    return data
 
 
 @activity.defn(name="list_agent_response_files")

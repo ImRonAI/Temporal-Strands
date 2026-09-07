@@ -479,6 +479,50 @@ async def test_model_inheritance_all_nodes_use_session_model() -> None:
 
 
 @pytest.mark.asyncio
+async def test_node_model_id_selects_a_registered_model() -> None:
+    from strands_graph_tool import configure_models
+
+    session = ScriptedModel()
+    alt = ScriptedModel()
+    stream = FakeStreamClient()
+    configure_models({"fake/text": lambda: session, "fake/alt": lambda: alt})
+    topo = {
+        "nodes": [
+            {"id": "a", "system_prompt": "sa"},
+            {"id": "b", "system_prompt": "sb", "model_id": "fake/alt"},
+        ],
+        "edges": [{"from": "a", "to": "b"}],
+    }
+    a_, b_, c_ = run_graph(session, stream)
+    try:
+        with a_, b_, c_:
+            result = await graph_activity(action="execute", topology=topo, task="go")
+    finally:
+        configure_models({})
+    assert result["status"] == "success"
+    assert session.calls == 1 and alt.calls == 1
+    planned = frames(stream)[0]["data"]
+    assert next(n for n in planned["nodes"] if n["node_id"] == "b")["model"] == "fake/alt"
+
+
+@pytest.mark.asyncio
+async def test_unknown_node_model_id_fails_at_create() -> None:
+    model = ScriptedModel()
+    stream = FakeStreamClient()
+    a_, b_, c_ = run_graph(model, stream)
+    with a_, b_, c_:
+        with pytest.raises(ApplicationError, match="Unknown model_id"):
+            await graph_activity(
+                action="execute",
+                topology={"nodes": [{"id": "x", "system_prompt": "s", "model_id": "nope"}]},
+                task="go",
+            )
+    from strands_graph_tool.graph import _manager
+
+    assert _manager.graphs == {}
+
+
+@pytest.mark.asyncio
 async def test_node_error_yields_error_terminal_state() -> None:
     class ExplodingModel(ScriptedModel):
         async def stream(self, *args: Any, **kwargs: Any):  # type: ignore[override]
@@ -635,7 +679,7 @@ def test_activity_as_tool_spec_is_flat_and_documented() -> None:
     schema = spec["inputSchema"]["json"]
     props = schema["properties"]
     assert set(props) == {
-        "action", "graph_id", "topology", "task", "model_provider", "tools",
+        "action", "graph_id", "topology", "task", "tools",
     }
     for name, prop in props.items():
         assert prop.get("description"), f"{name} lacks a description"
@@ -647,8 +691,13 @@ def test_activity_as_tool_spec_is_flat_and_documented() -> None:
     assert set(topology["properties"]) == {"nodes", "edges", "entry_points"}
     assert topology["required"] == ["nodes"]
     node = schema["$defs"]["GraphNode"]
-    assert {"id", "type", "system_prompt", "skill", "tools", "agents", "nodes",
-            "edges", "tasks"} <= set(node["properties"])
+    assert {"id", "type", "system_prompt", "skill", "tools", "model_id", "agents",
+            "nodes", "edges", "tasks"} <= set(node["properties"])
+    # No provider knob anywhere: the agent selects a registered model id only.
+    import json as _json
+
+    assert "model_provider" not in _json.dumps(schema)
+    assert "model_settings" not in _json.dumps(schema)
     assert schema["$defs"]["GraphEdge"]["required"] == ["from", "to"]
     # No untyped object anywhere in the outbound schema.
     def bare_objects(node: Any) -> list[Any]:

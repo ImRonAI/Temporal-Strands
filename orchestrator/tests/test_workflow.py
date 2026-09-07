@@ -58,7 +58,6 @@ async def stub_failing_graph(
     graph_id: Any = None,
     topology: Any = None,
     task: Any = None,
-    model_provider: Any = None,
     tools: Any = None,
 ) -> dict[str, Any]:
     """Stands in for graph_activity's failure path: raise, never return an error dict."""

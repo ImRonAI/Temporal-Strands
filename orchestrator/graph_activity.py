@@ -21,7 +21,7 @@ Frame contract (published on ``THINKING_TOPIC``, one frame per event):
    ``label`` (the raw declared id), ``parent_id`` (containing formation's
    path or null), ``node_type`` (``agent`` | ``skill_agent`` | ``swarm`` |
    ``graph`` | ``workflow`` | ``parallel``), plus optional ``skill`` and
-   ``model`` (declared model_provider). Edges are the declared structural
+   ``model`` (declared model_id). Edges are the declared structural
    edges (nested graph edges and workflow dependencies included), all
    path-qualified. Structural containment is ``parent_id``, never an edge.
 2. Flattened native events. Nested executors wrap inner ``multiagent_*``
@@ -108,7 +108,7 @@ class GraphEdge(BaseModel):
 class GraphTask(BaseModel):
     """One task of a ``workflow`` node."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     task_id: str = Field(description="Unique task id within the workflow.")
     description: Optional[str] = Field(
@@ -121,14 +121,17 @@ class GraphTask(BaseModel):
     skill: Optional[str] = Field(
         default=None, description="Registered skill name; runs that skill's sub-agent."
     )
-    model_provider: Optional[str] = None
+    model_id: Optional[str] = Field(
+        default=None,
+        description="Registered model id for this task's agent; omit to inherit.",
+    )
     tools: Optional[list[str]] = None
 
 
 class GraphNode(BaseModel):
     """One formation node; ``type`` selects which other fields apply."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     id: str = Field(description="Unique node id within its formation.")
     type: str = Field(
@@ -144,8 +147,12 @@ class GraphNode(BaseModel):
     tools: Optional[list[str]] = Field(
         default=None, description="agent nodes: tool names; omit to inherit all."
     )
-    model_provider: Optional[str] = Field(
-        default=None, description="Override model provider; omit to inherit the session model."
+    model_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Registered model id for this node's agent (see <agent_api_models>); "
+            "omit to inherit the formation's model."
+        ),
     )
     agents: Optional[list["GraphNode"]] = Field(
         default=None, description="swarm / parallel nodes: member agent nodes."
@@ -221,8 +228,8 @@ def planned_topology(topology: dict[str, Any], graph_id: str) -> dict[str, Any]:
         }
         if node_def.get("skill"):
             entry["skill"] = node_def["skill"]
-        if node_def.get("model_provider"):
-            entry["model"] = node_def["model_provider"]
+        if node_def.get("model_id"):
+            entry["model"] = node_def["model_id"]
         nodes.append(entry)
         if kind == "graph":
             for child in node_def.get("nodes") or []:
@@ -243,8 +250,8 @@ def planned_topology(topology: dict[str, Any], graph_id: str) -> dict[str, Any]:
                 }
                 if task_def.get("skill"):
                     task_entry["skill"] = task_def["skill"]
-                if task_def.get("model_provider"):
-                    task_entry["model"] = task_def["model_provider"]
+                if task_def.get("model_id"):
+                    task_entry["model"] = task_def["model_id"]
                 nodes.append(task_entry)
                 for dep in task_def.get("dependencies") or []:
                     edges.append({"from": _qualify(full, dep), "to": task_full})
@@ -403,7 +410,6 @@ async def graph_activity(
     graph_id: Optional[str] = None,
     topology: Optional[GraphTopology] = None,
     task: Optional[str] = None,
-    model_provider: Optional[str] = None,
     tools: Optional[list[str]] = None,
 ) -> dict:
     """Create and execute multi-agent formations with live streaming.
@@ -413,13 +419,15 @@ async def graph_activity(
     and cleaned up in one call, and every node's progress streams live.
 
     Node "type" values (default "agent"): "agent" (one specialist:
-    id, system_prompt, optional model_provider/tools), "skill_agent" (a
+    id, system_prompt, optional model_id/tools), "skill_agent" (a
     registered skill's isolated sub-agent: id, skill), "swarm" (dynamic
     handoffs between 2-5 agents: id, agents), "graph" (a nested pipeline as
     one node, recursive: id, nodes, edges), "workflow" (task list with
     dependencies: id, tasks -- each task has task_id, description, optional
-    dependencies/skill/system_prompt), and "parallel" (independent fan-out:
-    id, agents). Nodes that omit model_provider inherit the session's model.
+    dependencies/skill/system_prompt/model_id), and "parallel" (independent
+    fan-out: id, agents). Every node runs on this application's model
+    provider; a node's model_id only selects WHICH registered model. Nodes
+    that omit model_id inherit the session's model.
 
     Args:
         action: "execute" (default), "create", "list", or "delete". "create",
@@ -431,8 +439,6 @@ async def graph_activity(
             type-specific fields above), edges ({"from", "to"} pairs between
             node ids), and optional entry_points. Required for create and for
             single-call execute.
-        model_provider: Optional default model provider override for nodes;
-            omit to inherit the session model everywhere.
         tools: Optional tool names available to formation agents, resolved from
             the built-ins (use_skill, file_read, file_write) plus community
             modules under orchestrator/tools/. Unknown names fail the call with
@@ -482,7 +488,7 @@ async def graph_activity(
         for frame in flatten_native_event(data, "", meta):
             publish(frame)
 
-    common = _tool_input(model_provider=model_provider, tools=tools)
+    common = _tool_input(tools=tools)
 
     ticker = asyncio.create_task(_heartbeat_ticker())
     try:

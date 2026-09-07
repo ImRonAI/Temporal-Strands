@@ -72,6 +72,7 @@ from perplexity_model import PRESET_PREFIX, PerplexityModel
 import computer_use_activity
 import subagent_support
 from graph_activity import graph_activity
+from strands_graph_tool import configure_models
 from load_tool import mcp_client_activity, run_loaded_tool
 from skills_config import ensure_skills_configured, skills_dir
 from telemetry import telemetry_plugins
@@ -531,6 +532,7 @@ async def main() -> None:
             perplexity_operations.list_agent_response_files,
             perplexity_operations.download_agent_response_file,
             perplexity_operations.list_agent_models,
+            perplexity_operations.cancel_agent_response,
         ],
         workflow_runner=UnsandboxedWorkflowRunner(),
     )
@@ -539,6 +541,9 @@ async def main() -> None:
     # use_skill); think keeps its own pinned copy.
     subagent_support.configure(model_factories)
     think_activity.configure(model_factories)
+    # Formation nodes select a model by registered id only -- the same
+    # factories StrandsPlugin serves -- never by provider name.
+    configure_models(model_factories)
     # No base model pinned at startup: strands_graph_tool.build_skill_agent
     # prefers the configured base model over the parent agent's, and pinning
     # the worker default here would stop skill_agent nodes from inheriting

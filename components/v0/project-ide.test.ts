@@ -103,6 +103,49 @@ describe("projectIdePreview", () => {
     expect(preview.files[0].contents).toBe("<h1>Hi</h1>")
   })
 
+  it("brings edited and patched files into the tree, dropping deletions", () => {
+    const preview = projectIdePreview(
+      [
+        native({
+          type: "sandbox_write_file",
+          call_id: "w1",
+          file_path: "src/app.tsx",
+        }),
+        native({
+          type: "sandbox_edit_file",
+          call_id: "e1",
+          file_path: "src/lib/util.ts",
+        }),
+        native({
+          type: "sandbox_apply_patch",
+          call_id: "p1",
+          added: ["README.md"],
+          modified: ["src/app.tsx"],
+          deleted: ["src/old.ts"],
+        }),
+        // A path that was only ever deleted must not appear.
+        native({
+          type: "sandbox_apply_patch",
+          call_id: "p2",
+          deleted: ["src/ghost.ts"],
+        }),
+      ],
+      false
+    )
+    expect(preview.open).toBe(true)
+    expect(preview.files.map((f) => f.path)).toEqual([
+      "src/app.tsx",
+      "src/lib/util.ts",
+      "README.md",
+    ])
+    expect(preview.files.map((f) => f.path)).not.toContain("src/old.ts")
+    expect(preview.files.map((f) => f.path)).not.toContain("src/ghost.ts")
+    // The edit and patch keep any prior contents rather than clobbering.
+    expect(
+      preview.files.find((f) => f.path === "src/app.tsx")?.source
+    ).toBe("sandbox_apply_patch")
+  })
+
   it("opens preview from share_file html and sandbox writes", () => {
     const preview = projectIdePreview(
       [

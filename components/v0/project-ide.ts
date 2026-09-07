@@ -8,7 +8,14 @@ export type ProjectIdeFile = {
   path: string
   contents: string
   url: string
-  source: "sandbox_write_file" | "sandbox_read_file" | "share_file" | "file_write" | "editor"
+  source:
+    | "sandbox_write_file"
+    | "sandbox_read_file"
+    | "sandbox_edit_file"
+    | "sandbox_apply_patch"
+    | "share_file"
+    | "file_write"
+    | "editor"
 }
 
 export type ProjectIdePreview = {
@@ -277,6 +284,43 @@ export function projectIdePreview(
             url: "",
             source: "sandbox_read_file",
           })
+        }
+      } else if (type === "sandbox_edit_file") {
+        // Edits report only the path (content lives on disk in the sandbox);
+        // upsert so the file joins the tree and a following read/share fills
+        // in contents. Preserve any contents we already hold for it.
+        const path = stringField(native, "file_path")
+        if (path) {
+          upsertFile(files, {
+            path,
+            contents: "",
+            url: "",
+            source: "sandbox_edit_file",
+          })
+        }
+      } else if (type === "sandbox_apply_patch") {
+        // apply_patch touches added/modified/deleted path lists. Added and
+        // modified files join the tree; deleted paths drop out so the IDE
+        // never shows a file that no longer exists.
+        for (const key of ["added", "modified"] as const) {
+          const list = native[key]
+          if (!Array.isArray(list)) continue
+          for (const item of list) {
+            if (typeof item === "string" && item) {
+              upsertFile(files, {
+                path: item,
+                contents: "",
+                url: "",
+                source: "sandbox_apply_patch",
+              })
+            }
+          }
+        }
+        const deleted = native.deleted
+        if (Array.isArray(deleted)) {
+          for (const item of deleted) {
+            if (typeof item === "string") files.delete(item)
+          }
         }
       } else if (type === "share_file") {
         const path = stringField(native, "filename")

@@ -114,15 +114,24 @@ function ViewButton({
     <button
       aria-pressed={active}
       className={cn(
-        "flex w-full cursor-pointer flex-col items-center gap-1.5 rounded-lg px-2 py-2.5 text-[10px] font-medium tracking-wide transition-colors",
+        "group flex w-full cursor-pointer flex-col items-center gap-1.5 rounded-xl px-2 py-3 text-[10px] font-medium tracking-wide transition-all duration-200",
         active
-          ? "bg-blurple/15 text-blurple-bright"
-          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          ? "bg-blurple/25 text-blurple-bright shadow-[0_0_20px_-2px_oklch(0.62_0.205_277/0.5),inset_0_1px_0_0_oklch(0.85_0.1_285/0.25)]"
+          : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
       )}
       onClick={() => onSelect(view.id)}
       type="button"
     >
-      <Icon className="size-4" />
+      <span
+        className={cn(
+          "flex size-8 items-center justify-center rounded-lg transition-all duration-200",
+          active
+            ? "bg-blurple/30 shadow-[inset_0_1px_0_0_oklch(0.85_0.1_285/0.3)]"
+            : "bg-white/[0.04] group-hover:bg-white/[0.08]"
+        )}
+      >
+        <Icon className="size-4" />
+      </span>
       {view.label}
     </button>
   )
@@ -137,7 +146,9 @@ function StatusDot({ active }: { active: boolean }) {
       <span
         className={cn(
           "relative inline-flex size-2 rounded-full",
-          active ? "bg-emerald-400" : "bg-zinc-500"
+          active
+            ? "bg-emerald-400 shadow-[0_0_8px_2px_oklch(0.7_0.19_160/0.6)]"
+            : "bg-zinc-500"
         )}
       />
     </span>
@@ -153,7 +164,7 @@ export type ProjectIdePanelProps = {
 
 function Frame({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-white/10 bg-white/[0.02] backdrop-blur-sm">
+    <div className="ide-glass-inset flex h-full min-h-0 flex-col overflow-hidden rounded-xl border backdrop-blur-md">
       {children}
     </div>
   )
@@ -235,24 +246,26 @@ export function ProjectIdePanel({
     <Artifact
       data-testid="project-ide"
       className={cn(
-        "@container/ide flex h-full min-h-0 flex-col border-white/10 bg-white/[0.02] shadow-[0_24px_80px_-32px_oklch(0.55_0.22_277/0.35)] backdrop-blur-md",
+        "@container/ide ide-glass flex h-full min-h-0 flex-col overflow-hidden rounded-xl",
         className
       )}
     >
-      <ArtifactHeader className="border-white/10 bg-white/[0.03] px-3 py-2">
+      <ArtifactHeader className="ide-glass-edge border-b bg-white/[0.03] px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="flex size-6 items-center justify-center rounded-md bg-blurple/20">
-            <FolderIcon className="size-3.5 text-blurple-bright" />
+          <span className="flex size-7 items-center justify-center rounded-lg bg-blurple/30 shadow-[0_0_16px_-2px_oklch(0.62_0.205_277/0.6),inset_0_1px_0_0_oklch(0.85_0.1_285/0.3)]">
+            <FolderIcon className="size-4 text-blurple-bright" />
           </span>
-          <ArtifactTitle className="truncate">Project</ArtifactTitle>
+          <ArtifactTitle className="truncate font-medium tracking-tight">
+            Project
+          </ArtifactTitle>
           {fileCount > 0 ? (
-            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+            <span className="rounded-full border border-blurple/25 bg-blurple/15 px-2.5 py-0.5 font-mono text-[10px] font-medium text-blurple-bright">
               {fileCount} file{fileCount === 1 ? "" : "s"}
             </span>
           ) : null}
         </div>
         <ArtifactActions>
-          <div className="mr-1 flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.03] p-0.5">
+          <div className="mr-1 flex items-center gap-0.5 rounded-full border border-white/10 bg-black/20 p-1 shadow-[inset_0_1px_2px_0_rgba(0,0,0,0.3)]">
             {VIEWS.map((v) => {
               const Icon = v.icon
               const active = view === v.id
@@ -260,9 +273,9 @@ export function ProjectIdePanel({
                 <button
                   aria-pressed={active}
                   className={cn(
-                    "flex cursor-pointer items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
+                    "flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition-all duration-200",
                     active
-                      ? "bg-blurple/25 text-blurple-bright"
+                      ? "bg-blurple/40 text-white shadow-[0_0_16px_-2px_oklch(0.62_0.205_277/0.7),inset_0_1px_0_0_oklch(0.9_0.08_285/0.4)]"
                       : "text-muted-foreground hover:text-foreground"
                   )}
                   data-testid={`ide-view-${v.id}`}
@@ -271,7 +284,9 @@ export function ProjectIdePanel({
                   type="button"
                 >
                   <Icon className="size-3.5" />
-                  <span className="hidden @min-[48rem]/ide:inline">{v.label}</span>
+                  <span className="hidden @min-[48rem]/ide:inline">
+                    {v.label}
+                  </span>
                 </button>
               )
             })}
@@ -288,9 +303,9 @@ export function ProjectIdePanel({
         </ArtifactActions>
       </ArtifactHeader>
       <ArtifactContent className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
-        <div className="flex h-full min-h-0 w-full bg-background/60">
+        <div className="flex h-full min-h-0 w-full">
           {/* Activity rail: the whole switcher UI. */}
-          <div className="flex w-14 shrink-0 flex-col items-center gap-1 border-white/10 border-r bg-white/[0.02] px-1.5 py-2">
+          <div className="ide-glass-edge flex w-16 shrink-0 flex-col items-center gap-1.5 border-r bg-black/20 px-2 py-3">
             {VIEWS.map((v) => (
               <ViewButton
                 active={view === v.id}
@@ -305,14 +320,14 @@ export function ProjectIdePanel({
           </div>
 
           {view !== "preview" ? (
-            <div className="flex w-40 shrink-0 flex-col border-white/10 border-r @min-[48rem]/ide:w-60">
-              <div className="flex h-8 shrink-0 items-center gap-1.5 border-white/10 border-b px-3">
-                <FileIcon className="size-3.5 text-muted-foreground" />
-                <span className="font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
+            <div className="ide-glass-edge flex w-44 shrink-0 flex-col border-r @min-[48rem]/ide:w-64">
+              <div className="flex h-9 shrink-0 items-center gap-2 border-white/10 border-b bg-white/[0.02] px-3.5">
+                <FileIcon className="size-3.5 text-blurple-bright/70" />
+                <span className="font-semibold text-[11px] text-foreground/80 tracking-wider">
                   Files
                 </span>
               </div>
-              <div className="flex-1 overflow-auto p-1">
+              <div className="flex-1 overflow-auto p-1.5">
                 <FileTree
                   className="border-none bg-transparent"
                   expanded={expandedPaths}
@@ -336,7 +351,7 @@ export function ProjectIdePanel({
                 defaultUrl={previewSrc}
                 key={previewSrc || "html-doc"}
               >
-                <WebPreviewNavigation className="border-white/10">
+                <WebPreviewNavigation className="ide-glass-edge border-b bg-white/[0.02]">
                   <WebPreviewUrl />
                 </WebPreviewNavigation>
                 <WebPreviewBody
@@ -345,44 +360,48 @@ export function ProjectIdePanel({
                 />
               </WebPreview>
             ) : view === "terminal" ? (
-              <Terminal
-                className="min-h-0 flex-1 rounded-none border-0"
-                isStreaming={ide.isStreaming}
-                key={terminalKey}
-                onClear={() => setTerminalKey((k) => k + 1)}
-                output={output}
-              >
-                <TerminalHeader className="border-white/10">
-                  <TerminalTitle />
-                  <TerminalActions>
-                    <TerminalStatus>
-                      <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
-                      streaming
-                    </TerminalStatus>
-                    <TerminalCopyButton />
-                    <TerminalClearButton />
-                  </TerminalActions>
-                </TerminalHeader>
-                <TerminalContent className="max-h-full flex-1" />
-              </Terminal>
+              <div className="flex min-h-0 flex-1 flex-col p-3">
+                <Terminal
+                  className="ide-glass-inset min-h-0 flex-1 overflow-hidden rounded-xl border"
+                  isStreaming={ide.isStreaming}
+                  key={terminalKey}
+                  onClear={() => setTerminalKey((k) => k + 1)}
+                  output={output}
+                >
+                  <TerminalHeader className="ide-glass-edge border-b bg-black/30">
+                    <TerminalTitle />
+                    <TerminalActions>
+                      <TerminalStatus>
+                        <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
+                        streaming
+                      </TerminalStatus>
+                      <TerminalCopyButton />
+                      <TerminalClearButton />
+                    </TerminalActions>
+                  </TerminalHeader>
+                  <TerminalContent className="max-h-full flex-1" />
+                </Terminal>
+              </div>
             ) : (
-              <Frame>
-                <div className="flex h-8 shrink-0 items-center gap-2 border-white/10 border-b px-3">
-                  <FileIcon className="size-3.5 text-muted-foreground" />
-                  <span className="truncate font-mono text-[11px] text-muted-foreground">
-                    {selected?.path ?? "No file selected"}
-                  </span>
-                  <span className="ml-auto rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
-                    {languageForPath(selected?.path ?? "")}
-                  </span>
-                </div>
-                <CodeBlock
-                  className="min-h-0 flex-1 overflow-auto rounded-none border-0"
-                  code={source}
-                  language={languageForPath(selected?.path ?? "")}
-                  showLineNumbers
-                />
-              </Frame>
+              <div className="flex min-h-0 flex-1 flex-col p-3">
+                <Frame>
+                  <div className="ide-glass-edge flex h-9 shrink-0 items-center gap-2 border-b bg-black/30 px-3.5">
+                    <FileIcon className="size-3.5 text-blurple-bright/70" />
+                    <span className="truncate font-mono text-[11px] text-foreground/80">
+                      {selected?.path ?? "No file selected"}
+                    </span>
+                    <span className="ml-auto rounded-full border border-blurple/25 bg-blurple/15 px-2.5 py-0.5 font-mono text-[10px] font-medium text-blurple-bright">
+                      {languageForPath(selected?.path ?? "")}
+                    </span>
+                  </div>
+                  <CodeBlock
+                    className="ide-code-surface min-h-0 flex-1 overflow-auto rounded-none border-0"
+                    code={source}
+                    language={languageForPath(selected?.path ?? "")}
+                    showLineNumbers
+                  />
+                </Frame>
+              </div>
             )}
           </div>
         </div>

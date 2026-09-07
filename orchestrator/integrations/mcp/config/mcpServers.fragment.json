@@ -1,0 +1,137 @@
+{
+  "_comment": "Discoverable MCP server config fragment. Parent integrates selected entries; none are startup-eager. All entries verified 2026-09-07 (see docs/integrations/mcp.md for the per-tool test matrix). Credentials are referenced via ${ENV_VAR}, never inlined. Paths under integrations/mcp/venvs are isolated per-server lanes owned by this integration; source paths point at the user-supplied server sources.",
+  "mcpServers": {
+    "workshop-calculator": {
+      "command": "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/integrations/mcp/venvs/workshop/bin/python",
+      "args": ["/Users/tims-stuff/Desktop/strands-tools/src/mcp/mcp_servers/calculator_server.py"],
+      "transport": "stdio",
+      "disabled": true,
+      "_verified": "4/4 tools listed; add, multiply invoked OK"
+    },
+    "workshop-weather": {
+      "command": "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/integrations/mcp/venvs/workshop/bin/python",
+      "args": ["/Users/tims-stuff/Desktop/strands-tools/src/mcp/mcp_servers/weather/weather_server.py"],
+      "transport": "stdio",
+      "disabled": true,
+      "_verified": "3/3 tools listed; get_alerts, get_current_weather invoked OK against live NWS API"
+    },
+    "workshop-calendar": {
+      "command": "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/integrations/mcp/venvs/workshop/bin/python",
+      "args": ["/Users/tims-stuff/Desktop/strands-tools/src/mcp/mcp_servers/calendar/calendar_server.py"],
+      "cwd": "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/integrations/mcp/runtime/scratch",
+      "transport": "stdio",
+      "disabled": true,
+      "_verified": "7/7 tools listed; get_current_datetime, list_events, weekday_to_date invoked OK. Writes calendar_events.json to cwd - keep cwd pointed at scratch."
+    },
+    "workshop-email-history": {
+      "command": "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/integrations/mcp/venvs/workshop/bin/python",
+      "args": ["/Users/tims-stuff/Desktop/strands-tools/src/mcp/mcp_servers/email_history/email_history_server.py"],
+      "cwd": "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/integrations/mcp/runtime/scratch",
+      "transport": "stdio",
+      "disabled": true,
+      "_verified": "2/2 tools listed; get_emails, get_email_by_id invoked OK (empty store - reads email_history.json from cwd)"
+    },
+    "workshop-static": {
+      "command": "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/integrations/mcp/venvs/workshop/bin/python",
+      "args": ["/Users/tims-stuff/Desktop/strands-tools/src/mcp/mcp_servers/static/static.py"],
+      "transport": "stdio",
+      "disabled": true,
+      "_verified": "2/2 tools listed; read_some_value invoked OK"
+    },
+    "workshop-task-manager": {
+      "command": "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/integrations/mcp/venvs/workshop/bin/mcp",
+      "args": ["run", "/Users/tims-stuff/Desktop/strands-tools/src/mcp/mcp_servers/task_manager_server.py", "--transport", "streamable-http"],
+      "cwd": "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/integrations/mcp/runtime/scratch",
+      "transport": "streamable-http",
+      "url": "http://localhost:8000/mcp/",
+      "disabled": true,
+      "_verified": "4/4 tools listed; list_tasks invoked OK. NOTE: source hardcodes mcp.run(port=8001) which current mcp SDK rejects; launched via `mcp run ... --transport streamable-http` per upstream SDK, binds 8000. Port 8000 collides with the healthcare HTTP mode and common dev ports - launch on demand only."
+    },
+    "healthcare": {
+      "command": "node",
+      "args": ["/Users/tims-stuff/Desktop/strands-tools/src/mcp/healthcare-mcp-public/server/index.js"],
+      "cwd": "/Users/tims-stuff/Desktop/strands-tools/src/mcp/healthcare-mcp-public/server",
+      "transport": "stdio",
+      "env": {
+        "PUBMED_API_KEY": "${PUBMED_API_KEY}",
+        "FDA_API_KEY": "${FDA_API_KEY}"
+      },
+      "continue_on_error": true,
+      "disabled": true,
+      "_verified": "11 tools listed; 9 invoked OK without API keys (calculate_bmi, fda_drug_lookup, pubmed_search, lookup_icd_code, health_topics, clinical_trials_search, ncbi_bookshelf_search, medrxiv_search, get_usage_stats). API keys optional - raise rate limits only. Do NOT copy keys from the repo .env.example; supply your own via env."
+    },
+    "cms-coverage": {
+      "command": "uvx",
+      "args": [
+        "awslabs.openapi-mcp-server@latest",
+        "--api-name", "cms-coverage",
+        "--api-url", "https://api.coverage.cms.gov",
+        "--spec-path", "/Users/tims-stuff/Desktop/strands-tools/src/mcp/cms-coverage-mcp-server/coverageapi.json"
+      ],
+      "transport": "stdio",
+      "continue_on_error": true,
+      "disabled": true,
+      "_verified": "93 tools generated from OpenAPI spec; getMetadataStateId, getMetadataContractType invoked OK. NOTE: repo README base URL https://api.cms.gov/mcd does not resolve (DNS failure); correct host is https://api.coverage.cms.gov. /v1/data/* endpoints return 401 without a CMS Coverage API license token (MCD license agreement) - metadata/reports endpoints are public."
+    },
+    "strands-docs": {
+      "command": "uvx",
+      "args": ["strands-agents-mcp-server"],
+      "transport": "stdio",
+      "disabled": true,
+      "_verified": "2/2 tools listed; search_docs invoked OK. Package archived upstream 2026-07 (moved to strands-agents/harness-sdk) but PyPI artifact still functional."
+    },
+    "strands-tools-mcp": {
+      "command": "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/integrations/mcp/venvs/strands-tools-mcp/bin/python",
+      "args": ["-m", "strands_tools_mcp.server"],
+      "transport": "stdio",
+      "env": {
+        "PYTHONPATH": "/Users/tims-stuff/Desktop/strands-tools/src/mcp/tools_mcp",
+        "STRANDS_TOOLS": "current_time,calculator"
+      },
+      "disabled": true,
+      "_verified": "Exposes strands-agents-tools modules per STRANDS_TOOLS env; current_time + calculator invoked OK. Sets BYPASS_TOOL_CONSENT=true internally - only list safe read-only tool modules in STRANDS_TOOLS."
+    },
+    "strands-mcp-server-cagatay": {
+      "command": "uvx",
+      "args": [
+        "strands-mcp-server",
+        "--no-agent-invocation",
+        "--cwd", "/Users/tims-stuff/Desktop/strands-tools/src/mcp/cagatay_mcp_server"
+      ],
+      "transport": "stdio",
+      "continue_on_error": true,
+      "disabled": true,
+      "_verified": "PARTIAL: initialize + list_tools OK (mcp_client, greet from tools/ hot-reload). Tool invocation blocked by upstream bug: strands ConcurrencyException 'Direct tool call cannot be made while the agent is in the middle of an invocation' - the package holds its Agent mid-invocation while serving; needs upstream fix (record_direct_tool_call=False)."
+    },
+    "strands-agent-realestate": {
+      "command": "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/integrations/mcp/venvs/strands-tools-mcp/bin/python",
+      "args": ["/Users/tims-stuff/Desktop/strands-tools/src/mcp/mcp_servers/strands/strands_agent.py"],
+      "transport": "stdio",
+      "env": {
+        "AWS_PROFILE": "${AWS_PROFILE}"
+      },
+      "continue_on_error": true,
+      "disabled": true,
+      "_verified": "PARTIAL: initialize + list_tools OK (real_estate_expert). Tool NOT invoked: it spins an Agent on Bedrock model us.amazon.nova-pro-v1:0 - requires AWS credentials with Bedrock access; invoking without them fails and with them incurs model spend."
+    },
+    "electron-playwright-mcp": {
+      "command": "/Users/tims-stuff/RonBrowserRebuild/venv/bin/electron-playwright-mcp",
+      "transport": "stdio",
+      "env": {
+        "ELECTRON_PLAYWRIGHT_MCP_ELECTRON_URL": "http://localhost:3000/electron",
+        "ELECTRON_PLAYWRIGHT_MCP_PLAYWRIGHT_URL": "http://localhost:8931/mcp",
+        "ELECTRON_PLAYWRIGHT_MCP_CDP_URL": "http://localhost:9222"
+      },
+      "continue_on_error": true,
+      "disabled": true,
+      "_verified": "PARTIAL: initialize + list_tools OK (37 tools: cdp_*, electron_*, playwright_*, request_approval). Read-only calls failed: backend Electron runtime not running (localhost:3000/electron responded 404 from an unrelated Next dev server; :9222 and :8931 closed). Requires an Electron app with `import 'electron-playwright-mcp/register'` running to expose the three OpenAPI surfaces."
+    },
+    "mcp-installer": {
+      "command": "npx",
+      "args": ["-y", "@anaisbetts/mcp-installer"],
+      "transport": "stdio",
+      "disabled": true,
+      "_verified": "initialize + list_tools OK (install_repo_mcp_server, install_local_mcp_server). Both tools MUTATE (install packages / emit config) - no read-only tool exists, so none were invoked by policy. Enable only when deliberate installs are wanted."
+    }
+  }
+}

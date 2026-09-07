@@ -131,11 +131,16 @@ import {
   downloadFileMeta,
   groupToolParts,
   isTerminalRunStatus,
-  parseJson,
   partInput,
   partOutputJson,
   projectRunTimeline,
 } from "./agent-run"
+import {
+  type DataObservation,
+  inferMcpServer,
+  parseDataObservation,
+} from "./data-observation"
+import { DataObservationPanel } from "./data-observation-panel"
 import {
   COMPUTER_USE_TOOL_NAMES,
   computerUseFields,
@@ -355,7 +360,7 @@ function AgentChainCard({
   const runLabel = run?.preset ? `Sub-agent · ${run.preset}` : "Sub-agent"
 
   return (
-    <Agent className="border-white/10 bg-white/[0.02] backdrop-blur-sm">
+    <Agent className="app-glass app-glass-edge">
       <AgentHeader model={modelLabel} name={`${runLabel} · ${status}`} />
       {/* Bounded: the nested timeline/output scrolls inside the card; page
           scrolling stays with the outer native Conversation. */}
@@ -398,7 +403,7 @@ function AgentChainCard({
         )}
 
         {(chain.polls.length > 0 || chain.downloads.length > 0) && (
-          <Task className="border-white/10 bg-white/[0.02]" defaultOpen={false}>
+          <Task className="app-glass app-glass-edge" defaultOpen={false}>
             <TaskTrigger
               title={`${chain.polls.length + chain.downloads.length} lifecycle call(s)`}
             >
@@ -432,7 +437,7 @@ function AgentChainCard({
 function RunTask({ run, running }: { run: AgentRunSnapshot; running: boolean }) {
   const timeline = projectRunTimeline(run.events)
   return (
-    <Task className="border-white/10 bg-white/[0.02]" defaultOpen>
+    <Task className="app-glass app-glass-edge" defaultOpen>
       <TaskTrigger
         title={`Run ${run.responseId ?? run.activityId} · ${run.events.length} event(s)`}
       >
@@ -488,7 +493,7 @@ function RunTask({ run, running }: { run: AgentRunSnapshot; running: boolean }) 
 function UnboundRunCard({ run }: { run: AgentRunSnapshot }) {
   const running = !isTerminalRunStatus(run.status)
   return (
-    <Agent className="border-white/10 bg-white/[0.02] backdrop-blur-sm">
+    <Agent className="app-glass app-glass-edge">
       <AgentHeader
         model={run.model ?? run.preset}
         name={`Sub-agent · ${run.preset} · ${run.status}`}
@@ -516,7 +521,7 @@ function ListFilesArtifacts({ part }: { part: DynamicToolUIPart }) {
       {files.map((file, i) => (
         <Artifact
           key={`${file.filename}-${i}`}
-          className="border-white/10 bg-white/[0.02] backdrop-blur-sm"
+          className="app-glass app-glass-edge"
         >
           <ArtifactHeader>
             <div className="flex items-center gap-2">
@@ -692,7 +697,7 @@ function CallTask({
 }) {
   const hasBody = items.length > 0 || children != null
   return (
-    <Task className="border-white/10 bg-white/[0.02]">
+    <Task className="app-glass app-glass-edge">
       <TaskTrigger title={title}>
         <div
           className={cn(
@@ -717,6 +722,55 @@ function CallTask({
       ) : null}
     </Task>
   )
+}
+
+// The verbatim tool payload behind a collapsed disclosure. Rendered under
+// every DataObservationPanel so the projection never becomes the only copy of
+// the data — metadata the panel does not chart (schema blocks, reproduce_with
+// snippets, resolved filters) stays one click away, in full.
+function RawPayload({ output }: { output: unknown }) {
+  if (output === undefined || output === null) return null
+  const text =
+    typeof output === "string" ? output : JSON.stringify(output, null, 2)
+  if (!text) return null
+  return (
+    <details className="ide-glass-inset rounded-lg border px-3 py-1.5">
+      <summary className="cursor-pointer select-none text-[11px] text-muted-foreground transition-colors hover:text-foreground">
+        Raw payload ({text.length.toLocaleString()} chars)
+      </summary>
+      <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all text-[10px] text-foreground/80">
+        {text}
+      </pre>
+    </details>
+  )
+}
+
+// A completed dynamic tool call that carried a DataCommons / PopHIVE
+// observation payload: the dynamic `mcp_client` tool (action call_tool with
+// connection_id + tool_name) and direct MCP tools registered under the remote
+// tool's own name (get_observations, get_data, …). parseDataObservation is
+// strict — anything unrecognized returns null and the call renders through
+// the normal GenericTool card, so no output is ever hidden.
+function observationFromDynamicTool(
+  part: DynamicToolUIPart
+): DataObservation | null {
+  if (part.state !== "output-available") return null
+  const output = "output" in part ? part.output : undefined
+
+  if (part.toolName === "mcp_client") {
+    const input = partInput(part)
+    if (input?.action !== "call_tool") return null
+    const toolName = typeof input.tool_name === "string" ? input.tool_name : ""
+    const connectionId =
+      typeof input.connection_id === "string" ? input.connection_id : ""
+    const server = connectionId || (toolName ? inferMcpServer(toolName) : null)
+    if (!server) return null
+    return parseDataObservation(server, toolName || part.toolName, output)
+  }
+
+  const server = inferMcpServer(part.toolName)
+  if (!server) return null
+  return parseDataObservation(server, part.toolName, output)
 }
 
 function dynamicToolStatus(
@@ -758,7 +812,7 @@ function ComputerUseTask({
   }
   return (
     <Task
-      className="border-white/10 bg-white/[0.02]"
+      className="app-glass app-glass-edge"
       open={open}
       onOpenChange={setOpen}
     >
@@ -849,7 +903,7 @@ function SearchResultsTask({
   active?: boolean
 }) {
   return (
-    <Task className="border-white/10 bg-white/[0.02]">
+    <Task className="app-glass app-glass-edge">
       <TaskTrigger title={title}>
         <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
           {stepIcon(icon, { active })}
@@ -986,7 +1040,7 @@ function ShareFileArtifact({ name, url }: { name: string; url: string | null }) 
   const preview = url && PREVIEWABLE.test(name)
 
   return (
-    <Artifact className="border-white/10 bg-white/[0.02] backdrop-blur-sm">
+    <Artifact className="app-glass app-glass-edge">
       <ArtifactHeader>
         <div className="flex items-center gap-2">
           <FileIcon className="size-4 text-muted-foreground" />
@@ -997,7 +1051,7 @@ function ShareFileArtifact({ name, url }: { name: string; url: string | null }) 
         {codeLanguage && (
           <>
             <FileTree
-              className="border-white/10 bg-white/[0.02]"
+              className="app-glass app-glass-edge"
               selectedPath={name}
             >
               <FileTreeFile name={name} path={name} />
@@ -1010,7 +1064,7 @@ function ShareFileArtifact({ name, url }: { name: string; url: string | null }) 
         {preview && (
           // Documented composition (ai-sdk.dev/elements/components/web-preview):
           // WebPreview defaultUrl + Navigation>Url + Body src.
-          <WebPreview defaultUrl={url} className="h-80 border-white/10 bg-white/[0.02]">
+          <WebPreview defaultUrl={url} className="app-glass app-glass-edge h-80">
             <WebPreviewNavigation>
               <WebPreviewUrl />
             </WebPreviewNavigation>
@@ -1479,7 +1533,14 @@ function NativeToolStep({ native }: { native: NativeTool }) {
         </CallTask>
       )
 
-    case "mcp_call":
+    case "mcp_call": {
+      // DataCommons / PopHIVE observation payloads render as the blue-glass
+      // data panel; anything unrecognized (other servers, malformed or
+      // truncated JSON, unexpected shapes) falls back to the raw output so
+      // nothing is ever hidden.
+      const observation = native.error
+        ? null
+        : parseDataObservation(native.server_label, native.name, native.output)
       return (
         <CallTask
           failed={Boolean(native.error)}
@@ -1488,6 +1549,11 @@ function NativeToolStep({ native }: { native: NativeTool }) {
         >
           {native.error ? (
             <p className="text-destructive text-xs">{native.error}</p>
+          ) : observation ? (
+            <>
+              <DataObservationPanel observation={observation} />
+              <RawPayload output={native.output} />
+            </>
           ) : (
             <TaskItem>
               <TaskItemBody text={native.output ?? native.arguments} />
@@ -1495,6 +1561,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
           )}
         </CallTask>
       )
+    }
 
     case "sandbox_results": {
       const output = native.results
@@ -1515,7 +1582,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
           const [, kind, query] = search
           const links = extractLinks(native.results.map((r) => r.stdout).join("\n"))
           return (
-            <Task className="border-white/10 bg-white/[0.02]">
+            <Task className="app-glass app-glass-edge">
               <TaskTrigger title={`Searching the ${kind || "web"} · ${query}`}>
                 <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
                   {stepIcon("search", { active: native.status === "in_progress" })}
@@ -1838,7 +1905,7 @@ export function AgentActivity({
     return (
       <ChainOfThought
         defaultOpen
-        className="rounded-xl border border-white/10 bg-white/[0.02] p-4 backdrop-blur-md"
+        className="app-glass rounded-xl border p-4"
       >
         <ChainOfThoughtHeader>Thinking…</ChainOfThoughtHeader>
         <ChainOfThoughtContent>
@@ -1866,7 +1933,7 @@ export function AgentActivity({
       // controlled `open={userOpen ?? isThinking}` auto-collapsed the block
       // at turn end and hid the entire chain of thought behind a 70px stub.
       defaultOpen
-      className="rounded-xl border border-white/10 bg-white/[0.02] p-4 backdrop-blur-md"
+      className="app-glass rounded-xl border p-4"
     >
       <ChainOfThoughtHeader>{isThinking ? "Thinking…" : "Chain of Thought"}</ChainOfThoughtHeader>
       <ChainOfThoughtContent>
@@ -1971,6 +2038,26 @@ export function AgentActivity({
               )
             }
             if (absorbedIds.has(part.toolCallId)) return null
+
+            // DataCommons / PopHIVE observations arriving through the dynamic
+            // mcp_client tool or a direct MCP tool render as the data panel;
+            // everything else keeps the generic Tool card.
+            const dynamicObservation = observationFromDynamicTool(part)
+            if (dynamicObservation) {
+              return (
+                <ChainOfThoughtStep
+                  icon={TerminalSquareIcon}
+                  key={part.toolCallId}
+                  label={`${dynamicObservation.server} · ${dynamicObservation.tool}`}
+                  status={dynamicToolStatus(part, isThinking)}
+                >
+                  <DataObservationPanel observation={dynamicObservation} />
+                  <RawPayload
+                    output={"output" in part ? part.output : undefined}
+                  />
+                </ChainOfThoughtStep>
+              )
+            }
 
             return (
               <ChainOfThoughtStep

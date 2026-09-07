@@ -32,26 +32,24 @@ from workflow import PERMANENT_COMMUNITY_TOOLS, mcp_client_factories, temporal_m
 def test_permanent_registry_includes_skills_and_graph() -> None:
     registry = ToolRegistry()
     names = registry.process_tools(list(PERMANENT_COMMUNITY_TOOLS))
-    assert names == ["load_tool", "mcp_client", "graph", "use_skill"]
-    assert sorted(registry.registry) == ["graph", "load_tool", "mcp_client", "use_skill"]
+    assert names == ["load_tool", "browser", "mcp_client", "graph", "use_agent", "use_skill"]
+    assert sorted(registry.registry) == [
+        "browser", "graph", "load_tool", "mcp_client", "use_agent", "use_skill",
+    ]
     assert registry.registry["load_tool"].tool_type != "temporal_activity"
     assert registry.registry["use_skill"].tool_type == "temporal_activity"
+    assert registry.registry["use_agent"].tool_type == "temporal_activity"
     assert registry.registry["mcp_client"].tool_type == "temporal_activity"
 
 
-def test_graph_tool_exposes_official_community_schema() -> None:
-    from strands_tools.graph import graph as community_graph
-
+def test_graph_tool_exposes_formation_schema() -> None:
     graph_tool = next(tool for tool in PERMANENT_COMMUNITY_TOOLS if tool.tool_name == "graph")
-    official = community_graph.tool_spec["inputSchema"]["json"]["properties"]
     spec = graph_tool.tool_spec["inputSchema"]["json"]["properties"]
-    assert spec["graph_id"]["description"] == official["graph_id"]["description"]
-    assert spec["topology"]["description"] == official["topology"]["description"]
-    assert spec["task"]["description"] == official["task"]["description"]
-    assert "Unique identifier" in spec["graph_id"]["description"]
+    for kind in ("agent", "skill_agent", "swarm", "graph", "workflow", "parallel"):
+        assert kind in graph_tool.tool_spec["description"] or kind in spec["topology"]["description"]
+    assert "required for execute" in spec["task"]["description"]
     assert "nodes" in spec["topology"]["description"]
     assert "edges" in spec["topology"]["description"]
-    assert "required for execute" in spec["task"]["description"]
 
 
 def test_mcp_json_servers_use_temporal_mcp_client() -> None:

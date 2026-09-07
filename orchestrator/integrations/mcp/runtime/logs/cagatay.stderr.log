@@ -1,0 +1,45 @@
+Installed 48 packages in 978ms
+2026-09-07 00:01:55,974 - strands_mcp_server.cli - INFO - Starting Strands MCP Server in stdio mode
+2026-09-07 00:01:55,975 - strands_mcp_server.cli - INFO - Changing working directory to: /Users/tims-stuff/Desktop/strands-tools/src/mcp/cagatay_mcp_server
+2026-09-07 00:01:55,975 - strands_mcp_server.cli - INFO - CWD now: /Users/tims-stuff/Desktop/strands-tools/src/mcp/cagatay_mcp_server
+2026-09-07 00:01:55,975 - strands_mcp_server.cli - INFO - Local mode: Loading tools from directory
+2026-09-07 00:01:55,975 - strands_mcp_server.cli - INFO -   CWD: /Users/tims-stuff/Desktop/strands-tools/src/mcp/cagatay_mcp_server
+2026-09-07 00:01:55,975 - strands_mcp_server.cli - INFO -   Tools dir: /Users/tims-stuff/Desktop/strands-tools/src/mcp/cagatay_mcp_server/tools
+2026-09-07 00:01:55,975 - strands_mcp_server.cli - INFO -   Tools dir exists: True
+2026-09-07 00:01:55,976 - strands_mcp_server.cli - INFO -   Found 1 .py files: ['greet.py']
+2026-09-07 00:01:58,648 - strands_mcp_server.cli - INFO - Agent created with 3 tools: ['mcp_server', 'mcp_client', 'greet']
+2026-09-07 00:01:58,648 - strands_mcp_server.cli - INFO - Starting MCP server in stdio mode (foreground, blocking)...
+2026-09-07 00:01:58,675 - strands_mcp_server.mcp_server - INFO - Starting MCP server 'default' in stdio mode (foreground, blocking)
+2026-09-07 00:01:59,026 - mcp.server.lowlevel.server - INFO - Processing request of type ListToolsRequest
+2026-09-07 00:01:59,033 - mcp.server.lowlevel.server - INFO - Processing request of type CallToolRequest
+2026-09-07 00:01:59,040 - strands_mcp_server.mcp_server - ERROR - Error calling tool 'greet'
+Traceback (most recent call last):
+  File "/Users/tims-stuff/.cache/uv/archive-v0/aKG-TStzGUb_Z3Yt/lib/python3.14/site-packages/strands_mcp_server/mcp_server.py", line 388, in call_tool
+    result = tool_caller(**arguments, non_interactive=True)
+  File "/Users/tims-stuff/.cache/uv/archive-v0/aKG-TStzGUb_Z3Yt/lib/python3.14/site-packages/strands/tools/_caller.py", line 102, in caller
+    raise ConcurrencyException(
+    ...<2 lines>...
+    )
+strands.types.exceptions.ConcurrencyException: Direct tool call cannot be made while the agent is in the middle of an invocation. Set record_direct_tool_call=False to allow direct tool calls during agent invocation.
+2026-09-07 00:02:33,394 - strands_mcp_server.cli - INFO - Starting Strands MCP Server in stdio mode
+2026-09-07 00:02:33,394 - strands_mcp_server.cli - INFO - Changing working directory to: /Users/tims-stuff/Desktop/strands-tools/src/mcp/cagatay_mcp_server
+2026-09-07 00:02:33,394 - strands_mcp_server.cli - INFO - CWD now: /Users/tims-stuff/Desktop/strands-tools/src/mcp/cagatay_mcp_server
+2026-09-07 00:02:33,395 - strands_mcp_server.cli - INFO - Local mode: Loading tools from directory
+2026-09-07 00:02:33,395 - strands_mcp_server.cli - INFO -   CWD: /Users/tims-stuff/Desktop/strands-tools/src/mcp/cagatay_mcp_server
+2026-09-07 00:02:33,399 - strands_mcp_server.cli - INFO -   Tools dir: /Users/tims-stuff/Desktop/strands-tools/src/mcp/cagatay_mcp_server/tools
+2026-09-07 00:02:33,399 - strands_mcp_server.cli - INFO -   Tools dir exists: True
+2026-09-07 00:02:33,399 - strands_mcp_server.cli - INFO -   Found 1 .py files: ['greet.py']
+2026-09-07 00:02:36,716 - strands_mcp_server.cli - INFO - Agent created with 3 tools: ['mcp_server', 'mcp_client', 'greet']
+2026-09-07 00:02:36,716 - strands_mcp_server.cli - INFO - Starting MCP server in stdio mode (foreground, blocking)...
+2026-09-07 00:02:36,751 - strands_mcp_server.mcp_server - INFO - Starting MCP server 'default' in stdio mode (foreground, blocking)
+2026-09-07 00:02:39,939 - mcp.server.lowlevel.server - INFO - Processing request of type CallToolRequest
+2026-09-07 00:02:39,952 - strands_mcp_server.mcp_server - ERROR - Error calling tool 'greet'
+Traceback (most recent call last):
+  File "/Users/tims-stuff/.cache/uv/archive-v0/aKG-TStzGUb_Z3Yt/lib/python3.14/site-packages/strands_mcp_server/mcp_server.py", line 388, in call_tool
+    result = tool_caller(**arguments, non_interactive=True)
+  File "/Users/tims-stuff/.cache/uv/archive-v0/aKG-TStzGUb_Z3Yt/lib/python3.14/site-packages/strands/tools/_caller.py", line 102, in caller
+    raise ConcurrencyException(
+    ...<2 lines>...
+    )
+strands.types.exceptions.ConcurrencyException: Direct tool call cannot be made while the agent is in the middle of an invocation. Set record_direct_tool_call=False to allow direct tool calls during agent invocation.
+2026-09-07 00:02:39,972 - mcp.server.lowlevel.server - INFO - Processing request of type ListToolsRequest

@@ -1,0 +1,4 @@
+{"event": "initialized", "server_name": "strands-agent-default", "server_version": "1.29.1", "protocol": "2025-06-18", "ts": "2026-09-07T07:01:59.018293+00:00"}
+{"event": "tools", "count": 2, "names": ["mcp_client", "greet"], "ts": "2026-09-07T07:01:59.031292+00:00"}
+{"event": "call", "tool": "greet", "args": {"name": "Probe", "style": "formal"}, "is_error": false, "content": ["\u274c Error: Direct tool call cannot be made while the agent is in the middle of an invocation. Set record_direct_tool_call=False to allow direct tool calls during agent invocation."], "ts": "2026-09-07T07:01:59.058630+00:00"}
+{"event": "call", "tool": "greet", "is_error": false, "content": ["\u274c Error: Direct tool call cannot be made while the agent is in the middle of an invocation. Set record_direct_tool_call=False to allow direct tool calls during agent invocation."], "ts": "2026-09-07T07:02:39.977837+00:00"}

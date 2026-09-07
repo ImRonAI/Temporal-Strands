@@ -1,0 +1,8 @@
+{
+  "name": "openapi-integration-lane",
+  "private": true,
+  "description": "Isolated lane: converts supplied OpenAPI specs to MCP servers via @ivotoby/openapi-mcp-server (native converter, no wrappers)",
+  "dependencies": {
+    "@ivotoby/openapi-mcp-server": "1.16.1"
+  }
+}

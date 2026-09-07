@@ -1,0 +1,289 @@
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.0                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                🖥  Server:      electron-playwright-mcp, 3.4.0                │
+│                🚀 Deploy free: https://horizon.prefect.io                    │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                          🎉 Update available: 4.0.3                          │
+│                      Run: pip install --upgrade fastmcp                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[09/07/26 00:04:35] INFO     Starting MCP server                transport.py:210
+                             'electron-playwright-mcp' with                     
+                             transport 'stdio'                                  
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.0                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                🖥  Server:      electron-playwright-mcp, 3.4.0                │
+│                🚀 Deploy free: https://horizon.prefect.io                    │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                          🎉 Update available: 4.0.3                          │
+│                      Run: pip install --upgrade fastmcp                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[09/07/26 00:05:46] INFO     Starting MCP server                transport.py:210
+                             'electron-playwright-mcp' with                     
+                             transport 'stdio'                                  
+[09/07/26 00:05:52] Error calling tool 'Check_if_the_Electron_app_is_ready'     
+                    ╭─────────── Traceback (most recent call last) ────────────╮
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/httpx/_transports/default.py:101 in        │
+                    │ map_httpcore_exceptions                                  │
+                    │                                                          │
+                    │    98 │   if len(HTTPCORE_EXC_MAP) == 0:                 │
+                    │    99 │   │   HTTPCORE_EXC_MAP = _load_httpcore_exceptio │
+                    │   100 │   try:                                           │
+                    │ ❱ 101 │   │   yield                                      │
+                    │   102 │   except Exception as exc:                       │
+                    │   103 │   │   mapped_exc = None                          │
+                    │   104                                                    │
+                    │                                                          │
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/httpx/_transports/default.py:394 in        │
+                    │ handle_async_request                                     │
+                    │                                                          │
+                    │   391 │   │   │   extensions=request.extensions,         │
+                    │   392 │   │   )                                          │
+                    │   393 │   │   with map_httpcore_exceptions():            │
+                    │ ❱ 394 │   │   │   resp = await self._pool.handle_async_r │
+                    │   395 │   │                                              │
+                    │   396 │   │   assert isinstance(resp.stream, typing.Asyn │
+                    │   397                                                    │
+                    │                                                          │
+                    │                 ... 8 frames hidden ...                  │
+                    │                                                          │
+                    │ /Users/tims-stuff/.local/share/uv/python/cpython-3.14.5- │
+                    │ macos-aarch64-none/lib/python3.14/contextlib.py:162 in   │
+                    │ __exit__                                                 │
+                    │                                                          │
+                    │   159 │   │   │   │   # tell if we get the same exceptio │
+                    │   160 │   │   │   │   value = typ()                      │
+                    │   161 │   │   │   try:                                   │
+                    │ ❱ 162 │   │   │   │   self.gen.throw(value)              │
+                    │   163 │   │   │   except StopIteration as exc:           │
+                    │   164 │   │   │   │   # Suppress StopIteration *unless*  │
+                    │   165 │   │   │   │   # was passed to throw().  This pre │
+                    │                                                          │
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/httpcore/_exceptions.py:14 in              │
+                    │ map_exceptions                                           │
+                    │                                                          │
+                    │   11 │   except Exception as exc:  # noqa: PIE786        │
+                    │   12 │   │   for from_exc, to_exc in map.items():        │
+                    │   13 │   │   │   if isinstance(exc, from_exc):           │
+                    │ ❱ 14 │   │   │   │   raise to_exc(exc) from exc          │
+                    │   15 │   │   raise  # pragma: nocover                    │
+                    │   16                                                     │
+                    │   17                                                     │
+                    ╰──────────────────────────────────────────────────────────╯
+                    ReadTimeout                                                 
+                                                                                
+                    The above exception was the direct cause of the following   
+                    exception:                                                  
+                                                                                
+                    ╭─────────── Traceback (most recent call last) ────────────╮
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/fastmcp/server/providers/openapi/component │
+                    │ s.py:210 in run                                          │
+                    │                                                          │
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/httpx/_client.py:1629 in send              │
+                    │                                                          │
+                    │   1626 │   │                                             │
+                    │   1627 │   │   auth = self._build_request_auth(request,  │
+                    │   1628 │   │                                             │
+                    │ ❱ 1629 │   │   response = await self._send_handling_auth │
+                    │   1630 │   │   │   request,                              │
+                    │   1631 │   │   │   auth=auth,                            │
+                    │   1632 │   │   │   follow_redirects=follow_redirects,    │
+                    │                                                          │
+                    │                 ... 4 frames hidden ...                  │
+                    │                                                          │
+                    │ /Users/tims-stuff/.local/share/uv/python/cpython-3.14.5- │
+                    │ macos-aarch64-none/lib/python3.14/contextlib.py:162 in   │
+                    │ __exit__                                                 │
+                    │                                                          │
+                    │   159 │   │   │   │   # tell if we get the same exceptio │
+                    │   160 │   │   │   │   value = typ()                      │
+                    │   161 │   │   │   try:                                   │
+                    │ ❱ 162 │   │   │   │   self.gen.throw(value)              │
+                    │   163 │   │   │   except StopIteration as exc:           │
+                    │   164 │   │   │   │   # Suppress StopIteration *unless*  │
+                    │   165 │   │   │   │   # was passed to throw().  This pre │
+                    │                                                          │
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/httpx/_transports/default.py:118 in        │
+                    │ map_httpcore_exceptions                                  │
+                    │                                                          │
+                    │   115 │   │   │   raise                                  │
+                    │   116 │   │                                              │
+                    │   117 │   │   message = str(exc)                         │
+                    │ ❱ 118 │   │   raise mapped_exc(message) from exc         │
+                    │   119                                                    │
+                    │   120                                                    │
+                    │   121 class ResponseStream(SyncByteStream):              │
+                    ╰──────────────────────────────────────────────────────────╯
+                    ReadTimeout                                                 
+                                                                                
+                    The above exception was the direct cause of the following   
+                    exception:                                                  
+                                                                                
+                    ╭─────────── Traceback (most recent call last) ────────────╮
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/fastmcp/server/server.py:1282 in call_tool │
+                    │                                                          │
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/fastmcp/tools/base.py:392 in _run          │
+                    │                                                          │
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/fastmcp/server/providers/openapi/component │
+                    │ s.py:251 in run                                          │
+                    ╰──────────────────────────────────────────────────────────╯
+                    ValueError: HTTP request timed out (ReadTimeout)            
+[09/07/26 00:05:54] Error calling tool                                          
+                    'electron_Check_if_the_Electron_app_is_ready'               
+[09/07/26 00:05:55] Error calling tool                                          
+                    'Get_browser_version_metadata_and_WebSocket_URL'            
+                    ╭─────────── Traceback (most recent call last) ────────────╮
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/httpx/_transports/default.py:101 in        │
+                    │ map_httpcore_exceptions                                  │
+                    │                                                          │
+                    │    98 │   if len(HTTPCORE_EXC_MAP) == 0:                 │
+                    │    99 │   │   HTTPCORE_EXC_MAP = _load_httpcore_exceptio │
+                    │   100 │   try:                                           │
+                    │ ❱ 101 │   │   yield                                      │
+                    │   102 │   except Exception as exc:                       │
+                    │   103 │   │   mapped_exc = None                          │
+                    │   104                                                    │
+                    │                                                          │
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/httpx/_transports/default.py:394 in        │
+                    │ handle_async_request                                     │
+                    │                                                          │
+                    │   391 │   │   │   extensions=request.extensions,         │
+                    │   392 │   │   )                                          │
+                    │   393 │   │   with map_httpcore_exceptions():            │
+                    │ ❱ 394 │   │   │   resp = await self._pool.handle_async_r │
+                    │   395 │   │                                              │
+                    │   396 │   │   assert isinstance(resp.stream, typing.Asyn │
+                    │   397                                                    │
+                    │                                                          │
+                    │                 ... 7 frames hidden ...                  │
+                    │                                                          │
+                    │ /Users/tims-stuff/.local/share/uv/python/cpython-3.14.5- │
+                    │ macos-aarch64-none/lib/python3.14/contextlib.py:162 in   │
+                    │ __exit__                                                 │
+                    │                                                          │
+                    │   159 │   │   │   │   # tell if we get the same exceptio │
+                    │   160 │   │   │   │   value = typ()                      │
+                    │   161 │   │   │   try:                                   │
+                    │ ❱ 162 │   │   │   │   self.gen.throw(value)              │
+                    │   163 │   │   │   except StopIteration as exc:           │
+                    │   164 │   │   │   │   # Suppress StopIteration *unless*  │
+                    │   165 │   │   │   │   # was passed to throw().  This pre │
+                    │                                                          │
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/httpcore/_exceptions.py:14 in              │
+                    │ map_exceptions                                           │
+                    │                                                          │
+                    │   11 │   except Exception as exc:  # noqa: PIE786        │
+                    │   12 │   │   for from_exc, to_exc in map.items():        │
+                    │   13 │   │   │   if isinstance(exc, from_exc):           │
+                    │ ❱ 14 │   │   │   │   raise to_exc(exc) from exc          │
+                    │   15 │   │   raise  # pragma: nocover                    │
+                    │   16                                                     │
+                    │   17                                                     │
+                    ╰──────────────────────────────────────────────────────────╯
+                    ConnectError: All connection attempts failed                
+                                                                                
+                    The above exception was the direct cause of the following   
+                    exception:                                                  
+                                                                                
+                    ╭─────────── Traceback (most recent call last) ────────────╮
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/fastmcp/server/providers/openapi/component │
+                    │ s.py:210 in run                                          │
+                    │                                                          │
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/httpx/_client.py:1629 in send              │
+                    │                                                          │
+                    │   1626 │   │                                             │
+                    │   1627 │   │   auth = self._build_request_auth(request,  │
+                    │   1628 │   │                                             │
+                    │ ❱ 1629 │   │   response = await self._send_handling_auth │
+                    │   1630 │   │   │   request,                              │
+                    │   1631 │   │   │   auth=auth,                            │
+                    │   1632 │   │   │   follow_redirects=follow_redirects,    │
+                    │                                                          │
+                    │                 ... 4 frames hidden ...                  │
+                    │                                                          │
+                    │ /Users/tims-stuff/.local/share/uv/python/cpython-3.14.5- │
+                    │ macos-aarch64-none/lib/python3.14/contextlib.py:162 in   │
+                    │ __exit__                                                 │
+                    │                                                          │
+                    │   159 │   │   │   │   # tell if we get the same exceptio │
+                    │   160 │   │   │   │   value = typ()                      │
+                    │   161 │   │   │   try:                                   │
+                    │ ❱ 162 │   │   │   │   self.gen.throw(value)              │
+                    │   163 │   │   │   except StopIteration as exc:           │
+                    │   164 │   │   │   │   # Suppress StopIteration *unless*  │
+                    │   165 │   │   │   │   # was passed to throw().  This pre │
+                    │                                                          │
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/httpx/_transports/default.py:118 in        │
+                    │ map_httpcore_exceptions                                  │
+                    │                                                          │
+                    │   115 │   │   │   raise                                  │
+                    │   116 │   │                                              │
+                    │   117 │   │   message = str(exc)                         │
+                    │ ❱ 118 │   │   raise mapped_exc(message) from exc         │
+                    │   119                                                    │
+                    │   120                                                    │
+                    │   121 class ResponseStream(SyncByteStream):              │
+                    ╰──────────────────────────────────────────────────────────╯
+                    ConnectError: All connection attempts failed                
+                                                                                
+                    The above exception was the direct cause of the following   
+                    exception:                                                  
+                                                                                
+                    ╭─────────── Traceback (most recent call last) ────────────╮
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/fastmcp/server/server.py:1282 in call_tool │
+                    │                                                          │
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/fastmcp/tools/base.py:392 in _run          │
+                    │                                                          │
+                    │ /Users/tims-stuff/RonBrowserRebuild/venv/lib/python3.14/ │
+                    │ site-packages/fastmcp/server/providers/openapi/component │
+                    │ s.py:254 in run                                          │
+                    ╰──────────────────────────────────────────────────────────╯
+                    ValueError: Request error (ConnectError): All connection    
+                    attempts failed                                             
+[09/07/26 00:05:56] Error calling tool                                          
+                    'cdp_Get_browser_version_metadata_and_WebSocket_URL'        
+Process group termination failed for PID 22774: [Errno 1] Operation not permitted, falling back to simple terminate

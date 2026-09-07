@@ -76,7 +76,7 @@ function ComposerSubmit({ text, status, onStop }: Pick<ComposerProps, "text" | "
       disabled={status === "submitted" || (!text.trim() && attachments.files.length === 0 && status !== "streaming")}
       status={status}
       onStop={onStop}
-      className="rounded-full transition-all duration-300 enabled:hover:shadow-[0_0_20px_-2px_oklch(0.62_0.205_277/0.7)] active:scale-90"
+      className="rounded-full transition-all duration-300 enabled:hover:shadow-[0_0_20px_-2px_oklch(0.62_0.17_250/0.7)] active:scale-90"
     />
   )
 }
@@ -129,9 +129,9 @@ export function Composer({
       accept={ACCEPTED_FILE_TYPES}
       globalDrop={globalDrop}
       multiple
-      className="group/composer overflow-hidden rounded-3xl border border-white/10 bg-card/70 shadow-[0_8px_40px_-12px_oklch(0.4_0.2_277/0.5)] backdrop-blur-xl transition-[border-color,box-shadow] duration-500 focus-within:border-blurple/40 focus-within:shadow-[0_12px_56px_-12px_oklch(0.55_0.22_277/0.65)]"
+      className="group/composer app-glass-edge overflow-hidden rounded-3xl border bg-card/70 shadow-[0_8px_40px_-12px_oklch(0.4_0.16_250/0.5)] backdrop-blur-xl transition-[border-color,box-shadow] duration-500 focus-within:border-blurple/50 focus-within:shadow-[0_12px_56px_-12px_oklch(0.55_0.17_250/0.65)]"
     >
-      {/* Focus hairline: a single thread of blurple light along the top edge.
+      {/* Focus hairline: a single thread of blue light along the top edge.
           Lives inside InputGroup (which is `relative`); the named group on the
           form above lets it respond to focus anywhere in the composer. */}
       <div

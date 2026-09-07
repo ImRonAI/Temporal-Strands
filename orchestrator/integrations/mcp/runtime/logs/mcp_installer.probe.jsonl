@@ -1,0 +1,2 @@
+{"event": "initialized", "server_name": "mcp-installer", "server_version": "0.5.0", "protocol": "2025-06-18", "ts": "2026-09-07T07:05:03.102486+00:00"}
+{"event": "tools", "count": 2, "names": ["install_repo_mcp_server", "install_local_mcp_server"], "ts": "2026-09-07T07:05:03.108806+00:00"}

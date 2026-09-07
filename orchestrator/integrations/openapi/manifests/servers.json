@@ -1,0 +1,109 @@
+{
+  "$comment": "Server manifests for the openapi integration lane. Converter: @ivotoby/openapi-mcp-server@1.16.1 (native OpenAPI->MCP, stdio transport). Specs referenced from the supplied source directory. Env placeholders (${VAR}) are references, never inlined secrets.",
+  "converter": {
+    "package": "@ivotoby/openapi-mcp-server",
+    "version": "1.16.1",
+    "registry": "https://registry.npmjs.org/@ivotoby/openapi-mcp-server/-/openapi-mcp-server-1.16.1.tgz",
+    "integrity": "sha512-PCgNRTSNQ5rf4dUsAgkB0slVJ4TkV3zLRrblT47Sp7EVjtNsbSfuY79cIl4h+hjVBMVs/1AyXEcTJ2rOtllrJQ==",
+    "repository": "https://github.com/ivo-toby/mcp-openapi-server",
+    "bin": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server"
+  },
+  "specDir": "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs",
+  "servers": {
+    "cms-coverage": {
+      "spec": "coverageapi.json",
+      "apiBaseUrl": "https://api.coverage.cms.gov",
+      "auth": "none for most GET endpoints; some endpoints need a license-agreement bearer token (COVERAGE_API_LICENSE_TOKEN)",
+      "headersEnv": null
+    },
+    "optum-claim-status": {
+      "spec": "Claim_Status_V2.json",
+      "apiBaseUrl": "https://sandbox-apigw.optum.com",
+      "auth": "bearer (OPTUM_SANDBOX_TOKEN)",
+      "headersEnv": "Authorization:Bearer ${OPTUM_SANDBOX_TOKEN}"
+    },
+    "optum-eligibility": {
+      "spec": "Eligibility.json",
+      "apiBaseUrl": "https://sandbox-apigw.optum.com",
+      "auth": "bearer (OPTUM_SANDBOX_TOKEN)",
+      "headersEnv": "Authorization:Bearer ${OPTUM_SANDBOX_TOKEN}"
+    },
+    "optum-enhanced-eligibility": {
+      "spec": "Enhanced_Eligibility_API_v1.json",
+      "apiBaseUrl": "https://sandbox-apigw.optum.com",
+      "auth": "oauth2 client credentials (OPTUM_SANDBOX_TOKEN)",
+      "headersEnv": "Authorization:Bearer ${OPTUM_SANDBOX_TOKEN}"
+    },
+    "optum-institutional-claims": {
+      "spec": "InstitutionalClaims.json",
+      "apiBaseUrl": "https://sandbox-apigw.optum.com",
+      "auth": "bearer (OPTUM_SANDBOX_TOKEN)",
+      "headersEnv": "Authorization:Bearer ${OPTUM_SANDBOX_TOKEN}"
+    },
+    "optum-professional-claims": {
+      "spec": "MedicalNetworkClaims.json",
+      "apiBaseUrl": "https://sandbox.apigw.optum.com",
+      "auth": "bearer (OPTUM_SANDBOX_TOKEN)",
+      "headersEnv": "Authorization:Bearer ${OPTUM_SANDBOX_TOKEN}"
+    },
+    "optum-prior-auth": {
+      "spec": "priorauthorizationv1.json",
+      "apiBaseUrl": "https://sandbox-apigw.optum.com",
+      "auth": "bearer (OPTUM_SANDBOX_TOKEN)",
+      "headersEnv": "Authorization:Bearer ${OPTUM_SANDBOX_TOKEN}"
+    },
+    "telnyx": {
+      "spec": "Telnyx.json",
+      "apiBaseUrl": "https://api.telnyx.com/v2",
+      "auth": "bearer (TELNYX_API_KEY)",
+      "headersEnv": "Authorization:Bearer ${TELNYX_API_KEY}"
+    },
+    "zoom-meetings": {
+      "spec": "zoom_meetings.json",
+      "apiBaseUrl": "https://api.zoom.us/v2",
+      "auth": "oauth2 access token (ZOOM_ACCESS_TOKEN)",
+      "headersEnv": "Authorization:Bearer ${ZOOM_ACCESS_TOKEN}"
+    },
+    "perplexity-chat": {
+      "spec": "chatCompletions.yml",
+      "apiBaseUrl": "https://api.perplexity.ai",
+      "auth": "bearer (PERPLEXITY_API_KEY)",
+      "headersEnv": "Authorization:Bearer ${PERPLEXITY_API_KEY}"
+    },
+    "perplexity-async-create": {
+      "spec": "asyncCompletions.yml",
+      "apiBaseUrl": "https://api.perplexity.ai",
+      "auth": "bearer (PERPLEXITY_API_KEY)",
+      "headersEnv": "Authorization:Bearer ${PERPLEXITY_API_KEY}"
+    },
+    "perplexity-async-get": {
+      "spec": "getasyncCompletions.yml",
+      "apiBaseUrl": "https://api.perplexity.ai",
+      "auth": "bearer (PERPLEXITY_API_KEY)",
+      "headersEnv": "Authorization:Bearer ${PERPLEXITY_API_KEY}"
+    },
+    "perplexity-async-list": {
+      "spec": "listasyncCompletions.yml",
+      "apiBaseUrl": "https://api.perplexity.ai",
+      "auth": "bearer (PERPLEXITY_API_KEY)",
+      "headersEnv": "Authorization:Bearer ${PERPLEXITY_API_KEY}"
+    },
+    "perplexity-agentic-research": {
+      "spec": "agenticResearch.yml",
+      "apiBaseUrl": "https://api.perplexity.ai",
+      "auth": "bearer (PERPLEXITY_API_KEY)",
+      "headersEnv": "Authorization:Bearer ${PERPLEXITY_API_KEY}"
+    },
+    "example": {
+      "spec": "example-spec.json",
+      "apiBaseUrl": "https://api.example.com",
+      "auth": "none (sample spec; api.example.com is not a live backend)",
+      "headersEnv": null
+    }
+  },
+  "excluded": {
+    "Authorization_v2.json": "NOT an OpenAPI document - the file is a saved Optum Developer Portal HTML page (starts with <!DOCTYPE html>). Re-download the raw JSON spec from the Optum portal to include it.",
+    "Telnyx.yml": "byte-for-byte same API as Telnyx.json (same title/version/838 operations); JSON variant used.",
+    "example-spec.yaml": "same sample API as example-spec.json; JSON variant used."
+  }
+}

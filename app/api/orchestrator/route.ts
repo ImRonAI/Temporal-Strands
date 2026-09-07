@@ -10,6 +10,11 @@ import {
 
 import { DEFAULT_MODEL } from "@/lib/perplexity"
 import { COMPUTER_USE_TOOL_NAMES } from "@/components/v0/computer-use"
+import {
+  createGraphRunSnapshot,
+  foldGraphEvent,
+  type GraphRunSnapshot,
+} from "@/components/v0/graph-run"
 
 // The orchestrator's frames are a discriminated union validated structurally
 // by the handlers below, so this only satisfies parseJsonEventStream's schema
@@ -296,56 +301,14 @@ type AgentRunState = {
 }
 
 // Cumulative snapshot re-emitted as ONE reconciled `data-graph-run` part per
-// graph tool call, folded from the tool's raw native multiagent_* events
-// (shapes live-captured in docs/evidence/GWEN-30/event-log.json). Consumed
-// by components/v0/graph-run.ts.
-type GraphRunSnapshot = {
-  toolUseId: string
-  status: "running" | "done" | "failed"
-  nodes: Record<
-    string,
-    { status: "running" | "streaming" | "done"; kind: string; text: string }
-  >
-  handoffs: Array<{ from: string[]; to: string[] }>
-  resultText: string | null
-}
-
-// Fold one native graph event into the snapshot. The tool yields flat
-// node_id-tagged events (verified live, GWEN-30): lifecycle start/stop,
-// per-node streams whose inner `event.data` is the model delta text, a
-// handoff between node sets, and a final {status, content} tool result.
-function foldGraphEvent(snap: GraphRunSnapshot, data: Record<string, unknown>) {
-  const type = typeof data.type === "string" ? data.type : ""
-  const nodeId = typeof data.node_id === "string" ? data.node_id : ""
-  const node = (id: string) =>
-    (snap.nodes[id] ??= { status: "running", kind: "agent", text: "" })
-
-  if (type === "multiagent_node_start" && nodeId) {
-    const n = node(nodeId)
-    n.status = "running"
-    if (typeof data.node_type === "string") n.kind = data.node_type
-  } else if (type === "multiagent_node_stream" && nodeId) {
-    const n = node(nodeId)
-    const inner = data.event as { data?: unknown } | undefined
-    if (typeof inner?.data === "string") {
-      n.status = "streaming"
-      n.text += inner.data
-    }
-  } else if (type === "multiagent_node_stop" && nodeId) {
-    node(nodeId).status = "done"
-  } else if (type === "multiagent_handoff") {
-    const from = Array.isArray(data.from_node_ids) ? (data.from_node_ids as string[]) : []
-    const to = Array.isArray(data.to_node_ids) ? (data.to_node_ids as string[]) : []
-    snap.handoffs.push({ from, to })
-  } else if (typeof data.status === "string" && Array.isArray(data.content)) {
-    // The tool's final yield: {status: "success"|"error", content: [{text}]}.
-    snap.status = data.status === "success" ? "done" : "failed"
-    snap.resultText = (data.content as Array<{ text?: string }>)
-      .map((block) => block.text ?? "")
-      .filter(Boolean)
-      .join("\n")
-  }
-}
+// graph tool call, folded from the frames orchestrator/graph_activity.py
+// publishes (initial graph_topology, flattened path-qualified multiagent_*
+// events with full leaf agent events, terminal {status, content}). The
+// snapshot type and fold live in components/v0/graph-run.ts so the route and
+// the canvas share one definition — the compatibility tests in route.test.ts
+// ("POST graph nested topology, tool actions, and cancellation") proved the
+// previous inline folding discarded topology, tool actions, NodeResult
+// failure states, and the cancelled terminal status the backend produces.
 
 type OrchestratorEvent =
   | AgentRunFrame
@@ -583,14 +546,21 @@ export async function POST(req: Request) {
               "topic" in event &&
               event.topic === "thinking" &&
               "tool_use" in event &&
-              event.tool_use?.name === "use_skill" &&
+              (event.tool_use?.name === "use_skill" ||
+                event.tool_use?.name === "use_agent") &&
               typeof event.tool_use.toolUseId === "string" &&
               "data" in event &&
               typeof event.data === "object" &&
               event.data !== null
             ) {
+              // use_skill and use_agent publish the same standalone frame
+              // shape (orchestrator/use_agent_activity.py): {skill_name |
+              // agent_name, text, event} with the sanitized native agent
+              // event retained. Both stream into Chain of Thought through
+              // the same generic path.
               const frame = event.data as {
                 skill_name?: string
+                agent_name?: string
                 text?: string
                 event?: Record<string, unknown>
               }
@@ -611,10 +581,13 @@ export async function POST(req: Request) {
               }
               if (delta) {
                 clearTurnPending()
-                const label =
+                const name =
                   typeof frame.skill_name === "string" && frame.skill_name
-                    ? `[${frame.skill_name}] `
-                    : ""
+                    ? frame.skill_name
+                    : typeof frame.agent_name === "string" && frame.agent_name
+                      ? frame.agent_name
+                      : ""
+                const label = name ? `[${name}] ` : ""
                 writer.write({
                   type: "reasoning-delta",
                   id: ensureReasoning(),
@@ -637,7 +610,7 @@ export async function POST(req: Request) {
               const toolUseId = event.tool_use.toolUseId
               let snap = graphRuns.get(toolUseId)
               if (!snap) {
-                snap = { toolUseId, status: "running", nodes: {}, handoffs: [], resultText: null }
+                snap = createGraphRunSnapshot(toolUseId)
                 graphRuns.set(toolUseId, snap)
               }
               foldGraphEvent(snap, event.data as Record<string, unknown>)

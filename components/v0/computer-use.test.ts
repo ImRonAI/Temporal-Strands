@@ -23,6 +23,17 @@ const tool = (
   }) as unknown as DynamicToolUIPart
 
 describe("computerUsePreview", () => {
+  it("opens native browser results using their separate viewer metadata", () => {
+    const preview = computerUsePreview([tool("browser", {
+      state: "output-available",
+      output: JSON.stringify({ status: "success", content: [{ text: "Navigated" }],
+        browserPreview: { url: "https://example.com", action: "navigate",
+          livePreviewUrl: "/computer-use-live.html?ws=ws%3A%2F%2Flocalhost%3A9222%2Fdevtools%2Fpage%2FABC" } }),
+    })], false)
+    expect(preview.open).toBe(true)
+    expect(preview.livePreviewUrl).toContain("/computer-use-live.html")
+    expect(preview.action).toBe("navigate")
+  })
   it("lists Gemini Computer Use action names", () => {
     expect(COMPUTER_USE_TOOL_NAMES.has("navigate")).toBe(true)
     expect(COMPUTER_USE_TOOL_NAMES.has("click")).toBe(true)

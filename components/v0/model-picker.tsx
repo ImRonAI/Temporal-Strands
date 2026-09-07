@@ -111,13 +111,18 @@ export function ModelPicker({
       >
         <span className="max-w-40 truncate">{triggerLabel}</span>
         {onReasoningEffortChange && reasoningEffort !== "default" ? (
-          <span className="text-xs opacity-70">/ {effortLabel(reasoningEffort)}</span>
+          <span className="text-xs">/ {effortLabel(reasoningEffort)}</span>
         ) : null}
         <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
       </PopoverTrigger>
-      <PopoverContent align="start" className="p-0">
+      {/* Real glass: the popup needs a translucent bg for backdrop-blur to
+          composite, and the inner Command must not repaint it opaque. */}
+      <PopoverContent
+        align="start"
+        className="app-glass-edge border bg-popover/80 p-0 backdrop-blur-xl"
+      >
         {choosingEffort && onReasoningEffortChange ? (
-          <PromptInputCommand key={`effort-${value}`}>
+          <PromptInputCommand className="bg-transparent" key={`effort-${value}`}>
             <PromptInputCommandList aria-label={`Reasoning effort for ${modelLabel(value)}`}>
               <PromptInputCommandItem onSelect={() => setChoosingEffort(false)}>
                 <ArrowLeftIcon className="size-4" /> Back to models
@@ -139,7 +144,17 @@ export function ModelPicker({
               <p className="px-3 pb-3 text-xs text-muted-foreground">Only the provider default is verified for this model.</p>
             ) : null}
           </PromptInputCommand>
-        ) : <PromptInputCommand key="models">
+        ) : <PromptInputCommand
+          className="bg-transparent"
+          // Open with the CURRENT model highlighted and scrolled into view
+          // (native cmdk defaultValue) instead of the first list item. With
+          // ~60 models the current one usually sits below the list's fold;
+          // starting there keeps the selection visible and clickable without
+          // manual scrolling (clicks on clipped items land outside the
+          // popover and dismiss it as an outside press).
+          defaultValue={value}
+          key="models"
+        >
           <PromptInputCommandInput placeholder="Search models…" />
           <PromptInputCommandList className="max-h-80">
             <PromptInputCommandEmpty>No models found.</PromptInputCommandEmpty>

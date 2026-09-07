@@ -124,6 +124,346 @@ describe("POST graph activity streaming", () => {
   })
 })
 
+// Compatibility tests for the implemented nested-graph backend contract
+// (orchestrator/graph_activity.py, 2026-09-07). The activity publishes:
+//   1. one initial {type:"graph_topology", graph_id, nodes, edges} frame with
+//      path-qualified node_id, label, parent_id, node_type, skill?, model?;
+//   2. flattened native events whose leaf multiagent_node_stream frames keep
+//      the WHOLE sanitized agent event (tool use + tool results, not text
+//      only) and whose node_stop frames carry a NodeResult status;
+//   3. a terminal {status:"success"|"error"|"cancelled", content, toolUseId}.
+// The existing folding discards the topology (nodes/edges/parent_id/skill/
+// model), discards leaf tool actions, marks every node_stop "done" even when
+// the NodeResult failed, and maps a cancelled terminal to "failed" — data the
+// backend already produces but the client never receives, so no backend-only
+// change can satisfy the frontend contract. These tests prove that loss.
+describe("POST graph nested topology, tool actions, and cancellation", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const graphFrame = (data: unknown) => ({
+    topic: "thinking",
+    tool_use: { name: "graph", toolUseId: "graph-tool-1" },
+    data,
+  })
+
+  async function postUpstream(frames: unknown[]): Promise<string> {
+    const upstream =
+      [
+        ...frames.map((frame) => `data: ${JSON.stringify(frame)}`),
+        `data: ${JSON.stringify({ done: true, reply: "Complete" })}`,
+      ].join("\n\n") + "\n\n"
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(upstream, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        })
+      )
+    )
+
+    const response = await POST(
+      new Request("http://localhost/api/orchestrator", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "session-1",
+          messages: [
+            {
+              id: "message-1",
+              role: "user",
+              parts: [{ type: "text", text: "Run the nested graph" }],
+            },
+          ],
+        }),
+      })
+    )
+    return response.text()
+  }
+
+  const lastGraphSnapshot = (body: string) => {
+    const parts = body
+      .split("\n")
+      .filter((line) => line.startsWith("data: ") && !line.includes("[DONE]"))
+      .map((line) => JSON.parse(line.slice("data: ".length)))
+      .filter((c) => c.type === "data-graph-run")
+    return parts.at(-1)?.data as
+      | {
+          status: string
+          graphId: string | null
+          nodes: Record<
+            string,
+            {
+              status: string
+              label: string
+              parentId: string | null
+              kind: string
+              skill?: string
+              model?: string
+              text: string
+              tools: Array<{
+                id: string
+                name: string
+                status: string
+                input: string
+                output: string
+              }>
+            }
+          >
+          edges: Array<{ from: string; to: string }>
+          handoffs: Array<{ from: string[]; to: string[] }>
+        }
+      | undefined
+  }
+
+  it("preserves the planned topology: containment, node types, skill/model, structural edges", async () => {
+    const body = await postUpstream([
+      graphFrame({
+        type: "graph_topology",
+        graph_id: "demo",
+        nodes: [
+          { node_id: "research", label: "research", parent_id: null, node_type: "agent" },
+          { node_id: "team", label: "team", parent_id: null, node_type: "swarm" },
+          {
+            node_id: "team/coder",
+            label: "coder",
+            parent_id: "team",
+            node_type: "agent",
+            model: "fake/text",
+          },
+          {
+            node_id: "team/writer",
+            label: "writer",
+            parent_id: "team",
+            node_type: "skill_agent",
+            skill: "wf-skill",
+          },
+        ],
+        edges: [{ from: "research", to: "team" }],
+      }),
+    ])
+
+    const snap = lastGraphSnapshot(body)
+    expect(snap).toBeDefined()
+    expect(snap!.graphId).toBe("demo")
+    // Declared-but-not-yet-started nodes are pending, not absent.
+    expect(snap!.nodes["research"]).toMatchObject({ status: "pending", kind: "agent" })
+    expect(snap!.nodes["team"]).toMatchObject({ status: "pending", kind: "swarm" })
+    // Containment travels as parent_id, and duplicate-safe full paths are keys.
+    expect(snap!.nodes["team/coder"]).toMatchObject({
+      label: "coder",
+      parentId: "team",
+      model: "fake/text",
+    })
+    expect(snap!.nodes["team/writer"]).toMatchObject({
+      kind: "skill_agent",
+      skill: "wf-skill",
+    })
+    // Declared structural edges are preserved distinctly from handoffs.
+    expect(snap!.edges).toEqual([{ from: "research", to: "team" }])
+  })
+
+  it("reconciles leaf tool actions (start, input fragments, result) by toolUseId", async () => {
+    const body = await postUpstream([
+      graphFrame({
+        type: "multiagent_node_start",
+        node_id: "research",
+        node_type: "agent",
+        label: "research",
+        parent_id: null,
+      }),
+      graphFrame({
+        type: "multiagent_node_stream",
+        node_id: "research",
+        label: "research",
+        parent_id: null,
+        event: {
+          event: {
+            contentBlockStart: {
+              start: { toolUse: { name: "file_write", toolUseId: "t1" } },
+            },
+          },
+        },
+      }),
+      graphFrame({
+        type: "multiagent_node_stream",
+        node_id: "research",
+        label: "research",
+        parent_id: null,
+        event: {
+          type: "tool_use_stream",
+          delta: { toolUse: { input: '{"path":' } },
+          current_tool_use: { toolUseId: "t1", name: "file_write", input: '{"path":' },
+        },
+      }),
+      graphFrame({
+        type: "multiagent_node_stream",
+        node_id: "research",
+        label: "research",
+        parent_id: null,
+        event: {
+          type: "tool_use_stream",
+          delta: { toolUse: { input: '"a.txt"}' } },
+          current_tool_use: {
+            toolUseId: "t1",
+            name: "file_write",
+            input: '{"path":"a.txt"}',
+          },
+        },
+      }),
+      graphFrame({
+        type: "multiagent_node_stream",
+        node_id: "research",
+        label: "research",
+        parent_id: null,
+        event: {
+          message: {
+            role: "assistant",
+            content: [
+              {
+                toolUse: {
+                  toolUseId: "t1",
+                  name: "file_write",
+                  input: { path: "a.txt" },
+                },
+              },
+            ],
+          },
+        },
+      }),
+      graphFrame({
+        type: "multiagent_node_stream",
+        node_id: "research",
+        label: "research",
+        parent_id: null,
+        event: {
+          message: {
+            role: "user",
+            content: [
+              {
+                toolResult: {
+                  toolUseId: "t1",
+                  status: "success",
+                  content: [{ text: "wrote a.txt" }],
+                },
+              },
+            ],
+          },
+        },
+      }),
+    ])
+
+    const snap = lastGraphSnapshot(body)
+    const tools = snap?.nodes["research"]?.tools ?? []
+    // One reconciled action per toolUseId — never one card per frame.
+    expect(tools).toHaveLength(1)
+    expect(tools[0]).toMatchObject({
+      id: "t1",
+      name: "file_write",
+      status: "output-available",
+      output: "wrote a.txt",
+    })
+    expect(tools[0].input).toContain("a.txt")
+  })
+
+  it("maps NodeResult failure and a cancelled terminal frame accurately", async () => {
+    const body = await postUpstream([
+      graphFrame({
+        type: "multiagent_node_start",
+        node_id: "solo",
+        node_type: "agent",
+        label: "solo",
+        parent_id: null,
+      }),
+      graphFrame({
+        type: "multiagent_node_stop",
+        node_id: "solo",
+        label: "solo",
+        parent_id: null,
+        node_result: {
+          __type__: "NodeResult",
+          status: "failed",
+          result: { __type__: "Exception", error: "model exploded" },
+        },
+      }),
+      graphFrame({
+        status: "cancelled",
+        content: [{ text: "Graph run cancelled." }],
+        toolUseId: "graph-tool-1",
+      }),
+    ])
+
+    const snap = lastGraphSnapshot(body)
+    expect(snap?.nodes["solo"]?.status).toBe("failed")
+    expect(snap?.status).toBe("cancelled")
+  })
+
+  it("surfaces the NodeResult final message as node text when nothing streamed", async () => {
+    const body = await postUpstream([
+      graphFrame({
+        type: "multiagent_node_start",
+        node_id: "quiet",
+        node_type: "agent",
+        label: "quiet",
+        parent_id: null,
+      }),
+      graphFrame({
+        type: "multiagent_node_stop",
+        node_id: "quiet",
+        label: "quiet",
+        parent_id: null,
+        node_result: {
+          __type__: "NodeResult",
+          status: "completed",
+          result: {
+            __type__: "AgentResult",
+            message: {
+              role: "assistant",
+              content: [{ text: "Final answer from quiet node." }],
+            },
+          },
+        },
+      }),
+      graphFrame({
+        status: "success",
+        content: [{ text: "Graph demo executed in 10ms (completed)." }],
+        toolUseId: "graph-tool-1",
+      }),
+    ])
+
+    const snap = lastGraphSnapshot(body)
+    expect(snap?.nodes["quiet"]).toMatchObject({
+      status: "done",
+      text: "Final answer from quiet node.",
+    })
+  })
+
+  it("maps standalone use_agent thinking frames to reasoning like use_skill", async () => {
+    const body = await postUpstream([
+      {
+        topic: "thinking",
+        tool_use: { name: "use_agent", toolUseId: "agent-run-1" },
+        data: {
+          agent_name: "analyst",
+          text: "Analyst chunk",
+          event: { data: "Analyst chunk", delta: { text: "Analyst chunk" } },
+        },
+      },
+    ])
+
+    const chunks = body
+      .split("\n")
+      .filter((line) => line.startsWith("data: ") && !line.includes("[DONE]"))
+      .map((line) => JSON.parse(line.slice("data: ".length)))
+    const reasoning = chunks.filter((c) => c.type === "reasoning-delta")
+    expect(reasoning.some((c) => String(c.delta).includes("analyst"))).toBe(true)
+    expect(reasoning.some((c) => String(c.delta).includes("Analyst chunk"))).toBe(true)
+  })
+})
+
 // Nested Agent API preset runs (agent_runs topic): the backend envelope
 // carries per-run correlation metadata and verbatim Agent API events that the
 // pre-existing events/thinking mapping cannot represent — the route must fold

@@ -4,7 +4,7 @@ Patterns from sample-strands-agents-agentskills:
 - Pattern 2: ``create_skill_tool`` → inline ``skill(skill_name)`` (progressive disclosure)
 - Pattern 3: ``create_skill_agent_tool`` → ``use_skill(skill_name, request)`` (isolated sub-agent)
 
-Skills directory defaults to sibling ``../../strands-tools/skills``; override with ``SKILLS_DIR``.
+Skills directory defaults to ``../../strands-tools/src/skills``; override with ``SKILLS_DIR``.
 ``configure_skills`` registers names for graph ``skill_agent`` nodes (``strands_graph_tool``).
 """
 
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from functools import lru_cache
 from pathlib import Path
@@ -25,9 +26,11 @@ _ROOT = Path(__file__).resolve().parent
 _REPO_ROOT = _ROOT.parent
 _STRANDS_TOOLS = _REPO_ROOT.parent / "strands-tools"
 
-# Intended catalog (AGENTS.md). ``src/skills`` is a skills-CLI dump — load_tool
-# can open a specific file there; discover_skills must not walk it at startup.
-_DEFAULT_SKILLS_DIRS = ((_STRANDS_TOOLS / "skills").resolve(),)
+# User-supplied catalog: the skills-CLI dump at ``src/skills`` IS the collection
+# (supersedes the earlier plan of a curated sibling ``skills`` root, which was
+# never created). discover_skills walks it once per process; entries missing
+# required metadata are logged and skipped by the agentskills validator.
+_DEFAULT_SKILLS_DIRS = ((_STRANDS_TOOLS / "src" / "skills").resolve(),)
 
 # Vendored agentskills (aws-samples/sample-strands-agents-agentskills layout).
 # Optional: when neither location is present the skills catalog is simply
@@ -65,6 +68,48 @@ def _import_agentskills() -> Any | None:
             )
             _import_agentskills._warned = True  # type: ignore[attr-defined]
         return None
+    # Imported SKILL.md headers include flow collections and free-text fields.
+    # Adapt the pinned SDK's parser for discovery AND instruction loading;
+    # never rewrite the installed Markdown or reject it for optional metadata.
+    from agentskills import parser
+
+    if not getattr(parser._parse_skill_md, "_supports_flow", False):
+        original = parser._parse_skill_md
+
+        def parse_skill_md(content: str) -> tuple[dict, str]:
+            try:
+                return original(content)
+            except parser.ParseError:
+                match = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", content, re.DOTALL)
+                if match is None:
+                    raise
+                try:
+                    data = parser.strictyaml.dirty_load(match[1], allow_flow_style=True).data
+                except parser.strictyaml.YAMLError:
+                    # Only these fields drive the skill loader. Other imported
+                    # metadata may be prose, duplicate keys, or vendor-specific.
+                    data = {}
+                    fields = list(re.finditer(r"^([\w-]+):", match[1], re.MULTILINE))
+                    for index, field in enumerate(fields):
+                        key = field[1]
+                        if key not in {"name", "description", "license", "compatibility", "allowed-tools", "metadata"}:
+                            continue
+                        end = fields[index + 1].start() if index + 1 < len(fields) else len(match[1])
+                        block = match[1][field.start():end]
+                        try:
+                            data.update(parser.strictyaml.dirty_load(block, allow_flow_style=True).data)
+                        except parser.strictyaml.YAMLError:
+                            text = block.split(":", 1)[1].strip()
+                            if key in {"name", "description"} and text and text[0] not in "[{|>\"'!&*":
+                                data[key] = text
+                if not isinstance(data, dict):
+                    raise parser.ParseError("SKILL.md frontmatter must be a mapping")
+                if isinstance(data.get("metadata"), dict):
+                    data["metadata"] = {str(k): str(v) for k, v in data["metadata"].items()}
+                return data, match[2].strip()
+
+        parse_skill_md._supports_flow = True
+        parser._parse_skill_md = parse_skill_md
     return agentskills
 
 
@@ -79,18 +124,22 @@ def skills_dir() -> Path:
 
 
 def _dedupe_skills(skills: list[Any]) -> list[Any]:
-    """Keep one entry per skill name (last discovery wins — log duplicates)."""
+    """Prefer canonical directory names, then stable path order, without spam."""
     by_name: dict[str, Any] = {}
-    for skill in skills:
+    for skill in sorted(skills, key=lambda s: (
+        Path(s.path).parent.name != s.name, str(s.path),
+    )):
         prior = by_name.get(skill.name)
         if prior is not None and prior.path != skill.path:
-            logger.warning(
+            logger.debug(
                 "duplicate skill name %r: keeping %s over %s",
                 skill.name,
-                skill.path,
                 prior.path,
+                skill.path,
             )
-        by_name[skill.name] = skill
+        by_name.setdefault(skill.name, skill)
+    if len(skills) != len(by_name):
+        logger.info("Resolved %d duplicate skill entries to canonical paths", len(skills) - len(by_name))
     return sorted(by_name.values(), key=lambda s: s.name)
 
 

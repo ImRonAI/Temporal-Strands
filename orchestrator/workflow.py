@@ -52,6 +52,7 @@ from strands.hooks import HookProvider, HookRegistry
 from strands.hooks.events import (
     AfterToolCallEvent,
     BeforeInvocationEvent,
+    BeforeModelCallEvent,
     BeforeToolCallEvent,
 )
 from strands.types.content import Messages
@@ -70,6 +71,13 @@ from config import (
     AGENT_OPERATION_RETRY_POLICY,
     AGENT_OPERATION_SCHEDULE_TO_CLOSE,
     AGENT_OPERATION_START_TO_CLOSE,
+    BROWSER_RETRY_POLICY,
+    GRAPH_HEARTBEAT_TIMEOUT,
+    GRAPH_RETRY_POLICY,
+    GRAPH_START_TO_CLOSE,
+    USE_AGENT_HEARTBEAT_TIMEOUT,
+    USE_AGENT_RETRY_POLICY,
+    USE_AGENT_START_TO_CLOSE,
     COMPUTER_USE_HEARTBEAT,
     COMPUTER_USE_SCHEDULE_TO_CLOSE,
     COMPUTER_USE_START_TO_CLOSE,
@@ -82,6 +90,7 @@ from config import (
 with workflow.unsafe.imports_passed_through():
     import perplexity_operations
     import think_activity
+    from browser_activity import browser_activity
     from computer_use_activity import COMPUTER_USE_ACTIVITIES, COMPUTER_USE_TOOL_NAMES
     from graph_activity import graph_activity
     from load_tool import (
@@ -90,12 +99,14 @@ with workflow.unsafe.imports_passed_through():
         tool_file_path,
         wrap_loaded_io_tool,
     )
+    from use_agent_activity import use_agent_activity
     from use_skill_activity import use_skill_activity
 
     from strands import tool
     from strands.tools.mcp import MCPClient
     from strands.vended_plugins.context_injector import ContextInjector
     from strands_tools.load_tool import load_tool
+    from strands_tools import stop as native_stop
 
     # Official load_tool is sync; Strands stream() uses asyncio.to_thread, which
     # Temporal workflows block. Not in PERMANENT — swap at execution via hook.
@@ -134,10 +145,33 @@ _MCP_ACTIVITY_OPTIONS = _closable(
     )
 )
 
+# Formation graph: whole-formation runs are billable and non-idempotent, so
+# exactly one automatic attempt (config.GRAPH_RETRY_POLICY), a real
+# start-to-close bound matching the activity's internal execution timeout,
+# and a tight heartbeat window (the activity beats per chunk plus a
+# quiet-period ticker).
+_GRAPH_ACTIVITY_OPTIONS = dict(
+    start_to_close_timeout=GRAPH_START_TO_CLOSE,
+    heartbeat_timeout=GRAPH_HEARTBEAT_TIMEOUT,
+    retry_policy=GRAPH_RETRY_POLICY,
+)
+
+# use_agent: one isolated sub-agent turn, same envelope class as think.
+_USE_AGENT_ACTIVITY_OPTIONS = dict(
+    start_to_close_timeout=USE_AGENT_START_TO_CLOSE,
+    heartbeat_timeout=USE_AGENT_HEARTBEAT_TIMEOUT,
+    retry_policy=USE_AGENT_RETRY_POLICY,
+)
+
 PERMANENT_COMMUNITY_TOOLS = (
     load_tool,
+    activity_as_tool(
+        browser_activity,
+        **{**_MCP_ACTIVITY_OPTIONS, "retry_policy": BROWSER_RETRY_POLICY},
+    ),
     activity_as_tool(mcp_client_activity, **_MCP_ACTIVITY_OPTIONS),
-    activity_as_tool(graph_activity, **_MCP_ACTIVITY_OPTIONS),
+    activity_as_tool(graph_activity, **_GRAPH_ACTIVITY_OPTIONS),
+    activity_as_tool(use_agent_activity, **_USE_AGENT_ACTIVITY_OPTIONS),
     activity_as_tool(use_skill_activity, **_MCP_ACTIVITY_OPTIONS),
 )
 
@@ -403,6 +437,8 @@ class ChatInput:
     loaded_tools: list[LoadedTool] = field(default_factory=list)
     extra_mcp_servers: list[str] = field(default_factory=list)
     connected_mcp_servers: list[str] = field(default_factory=list)
+    resume_prompt: str = ""
+    handoff_run_id: str = ""
 
 
 # Formats from the Strands Gemini multimodal docs (image / document / video).
@@ -751,19 +787,30 @@ class _HumanControlHook(HookProvider):
 
     def register_hooks(self, registry: HookRegistry, **kwargs: object) -> None:
         registry.add_callback(BeforeToolCallEvent, self._gate)
+        registry.add_callback(BeforeModelCallEvent, self._before_model)
+        registry.add_callback(AfterToolCallEvent, self._after_tool)
+
+    def _after_tool(self, event: AfterToolCallEvent) -> None:
+        if self._human_control[0]:
+            native_stop.stop(
+                {"toolUseId": event.tool_use["toolUseId"], "name": "stop",
+                 "input": {"reason": "User took browser control"}},
+                request_state=event.invocation_state.setdefault("request_state", {}),
+            )
+
+    def _before_model(self, event: BeforeModelCallEvent) -> None:
+        if self._human_control[0]:
+            event.cancel = "User has control of the browser"
 
     def _gate(self, event: BeforeToolCallEvent) -> None:
-        name = event.tool_use.get("name")
-        if self._human_control[0] and name in COMPUTER_USE_TOOL_NAMES:
+        if self._human_control[0]:
+            native_stop.stop(
+                {"toolUseId": event.tool_use["toolUseId"], "name": "stop",
+                 "input": {"reason": "User took browser control"}},
+                request_state=event.invocation_state.setdefault("request_state", {}),
+            )
             event.cancel_tool = "human has control of the browser session"
             return
-        if not self._handoff_requested[0]:
-            return
-        self._handoff_requested[0] = False
-        self._human_control[0] = True
-        reason = "The user took control of the browser. Wait for their instructions before any further browser actions."
-        self._publish({"active": True, "reason": reason})
-        event.interrupt("handoff_to_user", reason=reason)
 
 
 @workflow.defn
@@ -810,6 +857,9 @@ class ChatWorkflow:
         self._human_control = [False]
         self._handoff_requested = [False]
         self._pending_reason: str | None = None
+        self._resume_prompt = input.resume_prompt
+        self._handoff_run_id = input.handoff_run_id
+        self._handoff_rollover = False
         # Installed by _build_agent; turn() resets its once-per-turn flag.
         self._think_hook: _ThinkFirstHook | None = None
 
@@ -845,7 +895,7 @@ class ChatWorkflow:
                             start_to_close_timeout=COMPUTER_USE_START_TO_CLOSE,
                             schedule_to_close_timeout=COMPUTER_USE_SCHEDULE_TO_CLOSE,
                             heartbeat_timeout=COMPUTER_USE_HEARTBEAT,
-                            retry_policy=MODEL_RETRY_POLICY,
+                            retry_policy=BROWSER_RETRY_POLICY,
                         )
                     ),
                 )
@@ -854,18 +904,12 @@ class ChatWorkflow:
             if is_gemini
             else ()
         )
-        computer_use_hooks = (
-            [
-                _ComputerUseSafetyHook(),
-                _HumanControlHook(
-                    self._human_control,
-                    self._handoff_requested,
-                    self._handoffs.publish,
-                ),
-            ]
-            if is_gemini
-            else []
-        )
+        computer_use_hooks = [
+            _HumanControlHook(
+                self._human_control, self._handoff_requested, self._handoffs.publish,
+            ),
+            *([_ComputerUseSafetyHook()] if is_gemini else []),
+        ]
         self._think_hook = _ThinkFirstHook(self._system_prompt)
         model_options = _closable(
             dict(
@@ -941,6 +985,8 @@ class ChatWorkflow:
         """
         await workflow.wait_condition(lambda: self._agent is not None)
         async with self._lock:
+            if self._human_control[0] or self._closing:
+                raise ApplicationError("Browser is under human control", non_retryable=True)
             agent = self._agent
             if agent is None:  # pragma: no cover - guarded by wait_condition
                 raise RuntimeError("agent not initialized")
@@ -973,6 +1019,9 @@ class ChatWorkflow:
             if self._think_hook is not None:
                 self._think_hook.mark_turn_start()
 
+            if self._resume_prompt:
+                turn.prompt = self._resume_prompt
+                self._resume_prompt = ""
             blocks = self._content_blocks(turn)
 
             # EventLoopException is Strands' wrapper for a model/tool activity
@@ -1003,15 +1052,17 @@ class ChatWorkflow:
             # must be answered and the complete list passed back (guide R9).
             # One approval is collected per interrupt -- broadcasting a single
             # answer would approve things the human was never shown.
-            while result.stop_reason == "interrupt":
+            while result.stop_reason == "interrupt" and not self._human_control[0]:
                 interrupts = list(result.interrupts or [])
                 responses: list[InterruptResponseContent] = []
                 for pending in interrupts:
                     self._pending_reason = pending.reason
                     self._approvals.publish({"reason": pending.reason})
                     await workflow.wait_condition(
-                        lambda: self._approval is not None
+                        lambda: self._approval is not None or self._human_control[0]
                     )
+                    if self._human_control[0]:
+                        break
                     responses.append(
                         {
                             "interruptResponse": {
@@ -1025,7 +1076,31 @@ class ChatWorkflow:
                 # Clear the prompt so the UI's reconciled data-approval part
                 # stops showing an answered question.
                 self._approvals.publish({"reason": None})
-                result = await agent.invoke_async(responses, invocation_state=invocation_state)
+                if self._human_control[0]:
+                    break
+                try:
+                    result = await agent.invoke_async(responses, invocation_state=invocation_state)
+                except EventLoopException as error:
+                    raise ApplicationError(
+                        f"Turn failed: {error.__cause__ or error}",
+                        type="TurnFailed", non_retryable=True,
+                    ) from error
+
+            if result.stop_reason == "interrupt" and self._human_control[0]:
+                # Resolve the paused tool through Strands itself. The human
+                # control hook cancels its body, preserving paired tool-use /
+                # tool-result history before the successor receives new text.
+                responses = [
+                    {"interruptResponse": {"interruptId": pending.id, "response": "deny"}}
+                    for pending in result.interrupts or []
+                ]
+                try:
+                    result = await agent.invoke_async(responses, invocation_state=invocation_state)
+                except EventLoopException as error:
+                    raise ApplicationError(
+                        f"Turn failed: {error.__cause__ or error}",
+                        type="TurnFailed", non_retryable=True,
+                    ) from error
 
             # A load_tools this turn recorded a new extra MCP server. Only
             # TemporalAgent's constructor installs the Temporal refresh for
@@ -1055,7 +1130,7 @@ class ChatWorkflow:
         as an update failure, so server.py can surface it rather than the turn
         hanging until the successor run picks it up.
         """
-        if self._closing:
+        if self._closing or self._human_control[0]:
             raise ApplicationError(
                 "Session is rolling over; retry this turn.",
                 type="SessionRollingOver",
@@ -1078,14 +1153,47 @@ class ChatWorkflow:
     @workflow.signal
     def take_control(self) -> None:
         """User took the browser from the Computer Use preview."""
+        if not self._human_control[0]:
+            self._handoff_run_id = ""
         self._human_control[0] = True
         self._handoff_requested[0] = True
+        if self._agent is not None:
+            self._agent.cancel()
         self._handoffs.publish(
             {
                 "active": True,
                 "reason": "User took control of the browser session",
             }
         )
+
+    @workflow.update
+    async def claim_control(self) -> None:
+        """Acknowledge ownership only after all in-flight turn work has settled."""
+        self.take_control()
+        await workflow.wait_condition(lambda: not self._lock.locked())
+        self._turn_start_offset = None
+
+    @workflow.update
+    async def relinquish_control(self, message: str) -> str:
+        if self._handoff_run_id and self._resume_prompt == message.strip():
+            return self._handoff_run_id
+        if not self._human_control[0] or self._lock.locked():
+            raise ApplicationError("Browser control has not been granted", non_retryable=True)
+        if not message.strip():
+            raise ApplicationError("Resume instructions are required", non_retryable=True)
+        self._resume_prompt = message.strip()
+        self._closing = True
+        self._handoff_rollover = True
+        self._handoff_run_id = workflow.info().run_id
+        return self._handoff_run_id
+
+    @workflow.query
+    def control_status(self) -> dict[str, Any]:
+        return {
+            "human_control": self._human_control[0],
+            "ready": self._agent is not None and not self._closing and not self._lock.locked(),
+            "run_id": workflow.info().run_id,
+        }
 
     @workflow.signal
     def give_control(self, message: str) -> None:
@@ -1140,7 +1248,10 @@ class ChatWorkflow:
                 and self._completed_turns >= self._rollover_turns
             )
 
-        await workflow.wait_condition(lambda: self._done or should_rollover())
+        await workflow.wait_condition(
+            lambda: self._done or self._handoff_rollover
+            or (not self._human_control[0] and should_rollover())
+        )
 
         # Closed to new turns from here on. all_handlers_finished waits for
         # the turn currently running, but does nothing to stop a fresh update
@@ -1163,6 +1274,8 @@ class ChatWorkflow:
             await workflow.wait_condition(workflow.all_handlers_finished)
             return
 
+        self._stream.detach_pollers()
+        await workflow.wait_condition(workflow.all_handlers_finished)
         agent = self._agent
         messages: Messages = _clamp_tool_results(
             list(agent.messages) if agent else []
@@ -1186,6 +1299,8 @@ class ChatWorkflow:
                     loaded_tools=list(self._loaded_tools),
                     extra_mcp_servers=list(self._extra_mcp_servers),
                     connected_mcp_servers=list(self._connected_mcp_servers),
+                    resume_prompt=self._resume_prompt,
+                    handoff_run_id=self._handoff_run_id,
                 )
             ]
         )

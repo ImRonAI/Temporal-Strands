@@ -2,39 +2,27 @@
 
 import Link from "next/link"
 import { motion } from "motion/react"
-import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
 
 const NAV = ["Community", "Pricing", "Enterprise", "Docs"]
 
 export function SiteHeader() {
-  const [scrolled, setScrolled] = useState(false)
-
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 16)
-    onScroll()
-    window.addEventListener("scroll", onScroll, { passive: true })
-    return () => window.removeEventListener("scroll", onScroll)
-  }, [])
-
+  // No scroll listener: the app shell is h-dvh with overflow hidden, so
+  // window.scrollY never changes — inner panes own their scrolling. The
+  // header wears its glass treatment statically instead of waiting for a
+  // scroll event that can never fire.
   return (
     <motion.header
       initial={{ opacity: 0, y: -12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-      className={cn(
-        "sticky top-0 z-30 flex items-center justify-between gap-4 border-b px-5 py-4 transition-[background-color,border-color] duration-500 sm:px-8",
-        scrolled
-          ? "border-white/[0.06] bg-background/60 backdrop-blur-xl"
-          : "border-transparent bg-transparent"
-      )}
+      className="app-glass-edge sticky top-0 z-30 flex items-center justify-between gap-2 border-b bg-background/50 px-4 py-4 backdrop-blur-xl sm:gap-4 sm:px-8"
     >
       <div className="flex items-center gap-2.5">
         <span
           aria-hidden="true"
-          className="grid size-7 place-items-center rounded-md border border-white/10 bg-white/[0.04] backdrop-blur-sm transition-shadow duration-500 hover:shadow-[0_0_16px_-2px_oklch(0.62_0.205_277/0.6)]"
+          className="app-glass-edge grid size-7 place-items-center rounded-md border bg-white/[0.04] backdrop-blur-sm transition-shadow duration-500 hover:shadow-[0_0_16px_-2px_oklch(0.62_0.17_250/0.6)]"
         >
           <svg
             className="size-4 text-foreground"
@@ -50,12 +38,14 @@ export function SiteHeader() {
             />
           </svg>
         </span>
-        <span className="font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground">
+        <span className="hidden font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground sm:inline">
           v0 / studio
         </span>
       </div>
 
-      <nav className="hidden items-center gap-1 md:flex">
+      {/* Secondary nav yields below lg: at exactly 768px the four links plus
+          both CTAs overflowed the viewport (scrollWidth 783). */}
+      <nav className="hidden items-center gap-1 lg:flex">
         {NAV.map((item) => (
           <Button
             key={item}
@@ -68,24 +58,31 @@ export function SiteHeader() {
         ))}
       </nav>
 
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-1 sm:gap-2">
+        <Button
+          render={<Link href="/compare">Compare</Link>}
+          nativeButton={false}
+          variant="ghost"
+          size="sm"
+          className="shrink text-muted-foreground hover:text-foreground md:hidden"
+        />
         <Button
           render={<Link href="/compare">Compare models</Link>}
           nativeButton={false}
           variant="ghost"
           size="sm"
-          className="text-muted-foreground hover:text-foreground"
+          className="hidden text-muted-foreground hover:text-foreground md:inline-flex"
         />
         <Button
           variant="ghost"
           size="sm"
-          className="hidden text-muted-foreground hover:text-foreground sm:inline-flex"
+          className="hidden text-muted-foreground hover:text-foreground md:inline-flex"
         >
           Sign in
         </Button>
         <Button
           size="sm"
-          className="rounded-full bg-foreground px-4 text-background transition-transform duration-300 hover:scale-[1.03] hover:bg-foreground/90 active:scale-95"
+          className="shrink-0 rounded-full bg-foreground px-3 text-background transition-transform duration-300 hover:scale-[1.03] hover:bg-foreground/90 active:scale-95 sm:px-4"
         >
           Start building
         </Button>

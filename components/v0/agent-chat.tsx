@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react"
 import { isFileUIPart, isTextUIPart, DefaultChatTransport } from "ai"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { useEffect, useImperativeHandle, useState } from "react"
+import { useEffect, useImperativeHandle, useRef, useState } from "react"
 import type { ReactNode, Ref } from "react"
 import type { ChatStatus } from "ai"
 
@@ -243,44 +243,101 @@ export function AgentChat({
   const pendingApproval = approval && approval !== answered ? approval : ""
 
   async function answerApproval(response: string) {
-    setAnswered(approval)
-    await fetch("/api/orchestrator/approval", {
+    const result = await fetch("/api/orchestrator/approval", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId, response }),
     })
+    if (result.ok) setAnswered(approval)
   }
 
   const hasConversation = messages.length > 0
   const lastMessage = messages.at(-1)
   const awaitingAssistant =
     status === "submitted" && lastMessage?.role === "user"
-  const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant")
   const browserPreview = computerUsePreview(
-    lastAssistant?.parts,
+    messages.filter((message) => message.role === "assistant").flatMap((message) => message.parts),
     status === "streaming"
   )
   const projectIde = projectIdePreview(
-    lastAssistant?.parts,
+    messages.filter((message) => message.role === "assistant").flatMap((message) => message.parts),
     status === "streaming"
   )
   const [dismissedPreview, setDismissedPreview] = useState("")
-  const [dismissedIde, setDismissedIde] = useState("")
+  // Closing the IDE is scoped to the activity it was closed against: the next
+  // REAL activity (a new activityId) reopens it, and the composer's Preview
+  // button reopens it any time — reopening is never a dead end. Closing is
+  // presentation only: the turn keeps streaming and nothing is stopped.
+  const [dismissedIde, setDismissedIde] = useState<string | null>(null)
   const [previewRequested, setPreviewRequested] = useState(false)
-  const previewForced = previewRequested || projectIde.isDevServer || Boolean(projectIde.previewUrl)
+  // Fullscreen keeps the SAME mounted panel (all live IDE state survives) and
+  // only swaps layout classes: the chat column hides, the IDE takes the whole
+  // chat area. Restore returns to the normal split.
+  const [ideFullscreen, setIdeFullscreen] = useState(false)
+  // Auto-close: 10s after the last IDE tool activity the panel closes on its
+  // own — unless the user has the Preview tab selected (an explicit choice to
+  // keep the preview up) or an operation is still running. Project state is
+  // derived from the message stream, so closing loses nothing: any new
+  // activity (or the composer's Preview button) reopens it.
+  const ideLastActiveAtRef = useRef<number | null>(null)
+  const [idePreviewTab, setIdePreviewTab] = useState(false)
+  // Forcing the preview tab is the user's explicit request only; a live dev
+  // server engages the preview through the stream's own activeView instead,
+  // so tool activity (edits, commands) can still pull focus while it runs.
+  const previewForced = previewRequested
   const showBrowserPreview =
     browserPreview.open && dismissedPreview !== browserPreview.sessionId
-  const sessionKey = projectIde.sessionId || "manual"
   const showProjectIde =
     !showBrowserPreview &&
-    dismissedIde !== sessionKey &&
+    dismissedIde !== (projectIde.activityId ?? "closed") &&
     (previewRequested || projectIde.open)
   const splitPreview = showBrowserPreview || showProjectIde
 
-  function giveControl(message: PromptInputMessage) {
+  // The timestamp advances on every new project operation (activityId), so
+  // the idle window is measured from the agent's most recent IDE work. A ref
+  // (not state) — it never drives rendering, only the auto-close timer below,
+  // which already re-runs on the same open/activityId transitions.
+  useEffect(() => {
+    if (projectIde.open) ideLastActiveAtRef.current = Date.now()
+  }, [projectIde.open, projectIde.activityId])
+  useEffect(() => {
+    if (!showProjectIde || idePreviewTab || projectIde.isStreaming) return
+    const ideLastActiveAt = ideLastActiveAtRef.current
+    if (ideLastActiveAt == null) return
+    const remaining = 10_000 - (Date.now() - ideLastActiveAt)
+    const timer = setTimeout(() => {
+      setPreviewRequested(false)
+      setIdeFullscreen(false)
+      setDismissedIde(projectIde.activityId ?? "closed")
+    }, Math.max(0, remaining))
+    return () => clearTimeout(timer)
+  }, [
+    showProjectIde,
+    idePreviewTab,
+    projectIde.isStreaming,
+    projectIde.activityId,
+  ])
+
+  async function handoff(action: "take" | "give", message = "") {
+    if (!sessionId) throw new Error("No active browser session")
+    const response = await fetch("/api/orchestrator/handoff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, action, message }),
+    })
+    if (!response.ok) throw new Error(await response.text())
+  }
+
+  async function takeControl() {
+    await handoff("take")
+    await stop()
+  }
+
+  async function giveControl(message: PromptInputMessage) {
     const text = message.text?.trim()
     if (!text) return
-    sendMessage({ text }, { body: { ...turnBody, sessionId } })
+    await handoff("give", text)
+    void sendMessage({ text }, { body: { ...turnBody, sessionId } })
   }
 
   function submit(message: PromptInputMessage) {
@@ -311,13 +368,17 @@ export function AgentChat({
           reads as a scene change rather than a layout jump. */}
       <AnimatePresence mode="wait">
         {hasConversation || paneId ? (
+          // The chat column is ALWAYS the same centered max-w-3xl shell. A
+          // split (IDE or browser preview) never restyles it — it only pads
+          // the row, so the chat is shoved over by the panel's width as the
+          // panel slides in, instead of snapping to a different track. The
+          // panel animates width 0 → its share, so the shove and the slide
+          // are the same motion.
           <motion.section
             key="chat"
             className={cn(
               "flex min-h-0 w-full flex-1 overflow-hidden",
-              splitPreview
-                ? "flex-col overflow-y-auto @min-[64rem]/chat:flex-row @min-[64rem]/chat:overflow-hidden"
-                : "mx-auto max-w-3xl flex-col px-4 pb-6"
+              splitPreview && "flex-row"
             )}
             initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -327,18 +388,18 @@ export function AgentChat({
             <div
               className={cn(
                 "flex min-h-0 flex-col",
-                splitPreview
-                  ? "order-2 min-h-96 w-full flex-1 shrink-0 border-t border-white/10 @min-[64rem]/chat:order-1 @min-[64rem]/chat:min-h-0 @min-[64rem]/chat:max-w-md @min-[64rem]/chat:flex-none @min-[64rem]/chat:border-r @min-[64rem]/chat:border-t-0"
-                  : "min-h-0 flex-1"
+                // Fullscreen IDE: the chat column hides (CSS only — the chat
+                // stays mounted, streaming, and fully stateful) and the IDE
+                // takes the entire chat area until Restore.
+                showProjectIde && ideFullscreen
+                  ? "hidden"
+                  : splitPreview
+                    ? "order-1 flex h-full min-h-0 w-1/3 min-w-0 shrink-0 flex-col border-r border-white/10"
+                    : "mx-auto min-h-0 w-full max-w-3xl flex-1 px-4 pb-6"
               )}
             >
-            <div
-              className={cn(
-                "flex min-h-0 flex-1 flex-col",
-                splitPreview ? "mx-auto w-full px-4 pb-4 pt-3 @min-[64rem]/chat:pb-6" : "min-h-0"
-              )}
-            >
-            <Conversation className="min-h-0 flex-1">
+            <div className={cn("flex min-h-0 flex-1 flex-col", splitPreview && "px-4 pb-4 pt-3")}>
+            <Conversation className="h-0 min-h-0 flex-1">
               <ConversationContent className="gap-8 py-8">
                 {!hasConversation && (
                   <ConversationEmptyState
@@ -349,7 +410,12 @@ export function AgentChat({
                 {messages.map((message, messageIndex) => (
                   <MessageShell key={message.id} reduce={reduce}>
                     <Message from={message.role}>
-                      <MessageContent>
+                      {/* Vendored MessageContent is w-fit, which collapses
+                          width-only children: the GraphActivity canvas
+                          (w-full inside a fit-content parent) shrank to the
+                          React Flow intrinsic minimum (~142px). Assistant
+                          messages stretch instead; user bubbles keep w-fit. */}
+                      <MessageContent className="group-[.is-assistant]:w-full">
                         {message.role === "assistant" && (
                           <AgentActivity
                             parts={message.parts}
@@ -486,6 +552,11 @@ export function AgentChat({
             </AnimatePresence>
 
             <div className="mt-2 shrink-0">
+              {projectIde.open && !showProjectIde && (
+                <Button type="button" variant="outline" size="sm" className="mb-2" onClick={() => { setDismissedIde(null); setPreviewRequested(true) }}>
+                  Open IDE
+                </Button>
+              )}
               <motion.div
                 initial={reduce ? false : { opacity: 0, y: 24 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -500,12 +571,12 @@ export function AgentChat({
                   reasoningEffort={reasoningEffort ?? "default"}
                   onReasoningEffortChange={(value) => setEfforts({ ...efforts, [model]: value })}
                   status={status}
-                  onStop={stop}
+                   onStop={stop}
                   globalDrop={!paneId}
                   placeholder="Ask for a change, or start something new…"
                   previewActive={showProjectIde}
                   onPreview={() => {
-                    setDismissedIde("")
+                    setDismissedIde(null)
                     setPreviewRequested(true)
                   }}
                 />
@@ -532,27 +603,47 @@ export function AgentChat({
                     onApprove={() => answerApproval("approve")}
                     onDeny={() => answerApproval("deny")}
                     onClose={() => setDismissedPreview(browserPreview.sessionId)}
-                    onStop={stop}
+                    onTakeControl={takeControl}
                     onGiveControl={giveControl}
                   />
                 </motion.div>
               ) : showProjectIde ? (
+                // Full-height right column. The slot is a width track: it
+                // grows from 0 to two-thirds (fullscreen: full width) while the
+                // panel inside, pinned to a fixed viewport width and right-
+                // aligned, stays put — so the IDE slides in from the right edge
+                // while the chat (left third) is shoved left by the same single
+                // motion. transform-only would slide through space the chat had
+                // already vacated, reading as a jump cut instead of a shove.
                 <motion.div
-                  key={sessionKey}
-                  className="order-1 flex min-h-96 min-w-0 flex-1 shrink-0 flex-col @min-[64rem]/chat:order-2 @min-[64rem]/chat:min-h-0"
-                  initial={reduce ? false : { opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 12 }}
-                  transition={{ duration: 0.45, ease: EASE }}
+                  key="project-workspace"
+                  className="order-2 flex h-full min-h-0 shrink-0 flex-col overflow-hidden"
+                  initial={reduce ? false : { width: 0, opacity: 0 }}
+                  animate={{
+                    width: ideFullscreen ? "100%" : "67%",
+                    opacity: 1,
+                  }}
+                  exit={reduce ? { opacity: 0 } : { width: 0, opacity: 0 }}
+                  transition={{ duration: reduce ? 0 : 0.6, ease: [0.22, 0.68, 0, 1] }}
                 >
-                  <ProjectIdePanel
-                    ide={projectIde}
-                    previewForced={previewForced}
-                    onClose={() => {
-                      setDismissedIde(sessionKey)
-                      setPreviewRequested(false)
-                    }}
-                  />
+                  <div className="flex h-full min-h-0 w-[67vw] min-w-0 flex-1 flex-col self-end py-3 pr-3">
+                    <ProjectIdePanel
+                      ide={projectIde}
+                      previewForced={previewForced}
+                      fullscreen={ideFullscreen}
+                      onFullscreenChange={setIdeFullscreen}
+                      onViewChange={(view) => setIdePreviewTab(view === "preview")}
+                      onClose={() => {
+                        // Presentation-only: hides the panel, never stops or
+                        // ends the running turn/session. Scoped to the activity
+                        // it was closed against — the next real activity
+                        // (a new activityId) reopens it.
+                        setDismissedIde(projectIde.activityId ?? "closed")
+                        setPreviewRequested(false)
+                        setIdeFullscreen(false)
+                      }}
+                    />
+                  </div>
                 </motion.div>
               ) : null}
             </AnimatePresence>

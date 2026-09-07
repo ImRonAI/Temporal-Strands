@@ -1,0 +1,25 @@
+# strands-fun-tools integration lane — isolated .venv only.
+# Parent (orchestrator/requirements.txt) owns the shared .venv install; these
+# are the pins the lane verified on 2026-09-07 and recommends upstream.
+#
+# Upstream: https://github.com/cagataycali/strands-fun-tools
+#   release v0.5.0, commit 741c090f952ea6e74c53270aa3bc97bd79637394
+#   PyPI: https://pypi.org/project/strands-fun-tools/0.5.0/
+#   (sdist/wheel verified byte-identical to the flattened collection copy at
+#   /Users/tims-stuff/Desktop/strands-tools/src/strands_tools/strands_fun_tools_*.py)
+#
+# Match the parent app's core pins exactly so verification is representative:
+strands-agents[gemini]==1.50.2
+strands-agents-tools==0.8.5
+
+# The genuine upstream distribution. `[all]` covers every extra EXCEPT the
+# torch-based ones (upstream's [all] deliberately omits ultralytics and
+# openai-whisper/sounddevice/webrtcvad — see pyproject [project.optional-dependencies]).
+strands-fun-tools[all]==0.5.0
+
+# Small audio-capture deps from the upstream `audio` extra so `listen` can be
+# exercised past its import guards. openai-whisper (torch, ~GBs) is
+# intentionally NOT installed here — bulk downloads are out of scope; the
+# `listen` tool degrades gracefully and reports the missing dep at call time.
+sounddevice==0.5.5
+webrtcvad==2.0.10

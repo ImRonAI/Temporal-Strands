@@ -1,0 +1,40 @@
+{
+  "generated": "2026-09-07",
+  "source_root": "/Users/tims-stuff/Desktop/strands-tools/src/mcp",
+  "excluded": {
+    "openapi-mcp": "owned by another agent per task scope"
+  },
+  "classification": {
+    "runnable_servers": {
+      "mcp_servers/calculator_server.py": {"kind": "FastMCP stdio", "status": "verified"},
+      "mcp_servers/weather/weather_server.py": {"kind": "FastMCP stdio (live NWS API)", "status": "verified"},
+      "mcp_servers/calendar/calendar_server.py": {"kind": "FastMCP stdio (JSON file store)", "status": "verified"},
+      "mcp_servers/email_history/email_history_server.py": {"kind": "FastMCP stdio (JSON file store)", "status": "verified"},
+      "mcp_servers/static/static.py": {"kind": "FastMCP stdio", "status": "verified"},
+      "mcp_servers/task_manager_server.py": {"kind": "FastMCP streamable-http", "status": "verified (via `mcp run --transport streamable-http`; source's mcp.run(port=8001) kwarg is incompatible with current SDK)"},
+      "mcp_servers/strands/strands_agent.py": {"kind": "FastMCP stdio wrapping a Bedrock-backed Strands Agent", "status": "list_tools verified; invocation blocked on AWS Bedrock credentials"},
+      "healthcare-mcp-public/server/index.js": {"kind": "Node stdio (@modelcontextprotocol/sdk)", "status": "verified (local source; published npx healthcare-mcp package crashes at initialize)"},
+      "cms-coverage-mcp-server": {"kind": "OpenAPI spec + uvx awslabs.openapi-mcp-server launcher", "status": "verified with corrected base URL https://api.coverage.cms.gov"},
+      "mcp_server/strands-mcp (PyPI strands-agents-mcp-server)": {"kind": "uvx stdio docs server", "status": "verified"},
+      "tools_mcp/strands_tools_mcp": {"kind": "python -m stdio server exposing strands-agents-tools", "status": "verified (unpackaged module; run with PYTHONPATH)"},
+      "cagatay_mcp_server (PyPI strands-mcp-server)": {"kind": "uvx stdio, hot-reload tools/", "status": "partial: list_tools OK, tool calls hit upstream ConcurrencyException"},
+      "mcp-installer (npm @anaisbetts/mcp-installer)": {"kind": "npx stdio", "status": "list_tools verified; both tools are mutating installs, not invoked by policy"},
+      "ronbrowser (electron-playwright-mcp)": {"kind": "FastMCP stdio proxying 3 OpenAPI surfaces of a live Electron app", "status": "partial: 37 tools listed; calls fail - Electron runtime backend not running"}
+    },
+    "libraries_not_servers": {
+      "strands_mcp_server/": "duplicate source dump of cagatay_mcp_server/strands_mcp_server (cli.py/mcp_server.py/mcp_client.py byte-identical); library code, run via the PyPI package instead",
+      "utcp/strands_utcp": "UTCP->Strands tool adapter library; no MCP server entry point",
+      "cagatay_mcp_server/strands_mcp_server": "package source for PyPI strands-mcp-server; tested via uvx",
+      "ronbrowser_mcp_servers.py": "FastAPI router module (MCP server *registry* endpoints) from another app; imports agent.api.core.config which does not exist here - not a runnable MCP server",
+      "cms-coverage-mcp-server/cms_coverage_client.py": "hand-rolled JSON-RPC subprocess helper; superseded by real MCP client probing (also targets a nonexistent plain openapi_mcp_server invocation)"
+    }
+  },
+  "isolated_lanes": {
+    "venvs/probe": "mcp==1.12.4 client used for all handshake/list_tools/call_tool probes",
+    "venvs/workshop": "mcp[cli] 1.29.1 for FastMCP workshop servers",
+    "venvs/strands-tools-mcp": "strands-agents + strands-agents-tools + mcp for tools_mcp and strands_agent.py",
+    "uvx": "ephemeral isolated envs for awslabs.openapi-mcp-server, strands-agents-mcp-server, strands-mcp-server",
+    "npx/npm": "healthcare (local node_modules in upstream server/ dir per its README Option 4), @anaisbetts/mcp-installer via npx -y",
+    "ronbrowser": "pre-existing /Users/tims-stuff/RonBrowserRebuild/venv (editable install of /Users/tims-stuff/electron-playwright-mcp) - reused, not modified"
+  }
+}

@@ -1,0 +1,10 @@
+2026-09-07 00:03:09,001 INFO strands_tools_mcp.loader: Loaded tool 'current_time' from strands_tools.current_time (DecoratedFunctionTool)
+2026-09-07 00:03:20,734 INFO strands_tools_mcp.loader: Loaded tool 'calculator' from strands_tools.calculator (DecoratedFunctionTool)
+2026-09-07 00:03:20,735 INFO __main__: Registered 2 tool(s) with MCP server
+2026-09-07 00:03:20,742 INFO __main__: Starting MCP stdio server with tools: ['current_time', 'calculator']
+2026-09-07 00:03:21,076 INFO mcp.server.lowlevel.server: Processing request of type ListToolsRequest
+2026-09-07 00:03:21,094 INFO mcp.server.lowlevel.server: Processing request of type CallToolRequest
+2026-09-07 00:03:21,117 WARNING strands_tools.current_time: DEPRECATION WARNING: current_time is deprecated. This warning becomes an error log in v0.9.0. Migration path: inject the current time as context with ContextInjector instead of calling a tool. See https://strandsagents.com/docs/user-guide/concepts/plugins/context-injector/
+2026-09-07 00:03:21,159 INFO mcp.server.lowlevel.server: Processing request of type CallToolRequest
+2026-09-07 00:03:21,243 WARNING strands_tools.calculator: DEPRECATION WARNING: calculator is deprecated. This warning becomes an error log in v0.9.0. To achieve similar functionality, use the bash tool vended by strands-agents (from strands.vended_tools import bash). This does change the security boundary: calculator only ever evaluated an expression checked against an AST allowlist, while bash executes arbitrary commands, so review it against your threat model before switching.
+Process group termination failed for PID 8002: [Errno 1] Operation not permitted, falling back to simple terminate

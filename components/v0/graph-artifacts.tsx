@@ -82,10 +82,10 @@ export function GraphArtifacts({ run }: { run: GraphRunState }) {
   return (
     <div className="space-y-2">
       {run.resultText && (
-        <Artifact className="border-white/10 bg-white/[0.02] backdrop-blur-sm">
+        <Artifact className="app-glass-edge border bg-white/[0.02] backdrop-blur-sm">
           <ArtifactHeader>
             <div className="flex items-center gap-2">
-              <NetworkIcon className="size-4 text-muted-foreground" />
+              <NetworkIcon className="size-4 text-blurple-bright/80" />
               <ArtifactTitle>Formation result · {run.runId}</ArtifactTitle>
             </div>
             <ArtifactActions>
@@ -105,11 +105,11 @@ export function GraphArtifacts({ run }: { run: GraphRunState }) {
       {producing.map((node) => (
         <Artifact
           key={node.id}
-          className="border-white/10 bg-white/[0.02] backdrop-blur-sm"
+          className="app-glass-edge border bg-white/[0.02] backdrop-blur-sm"
         >
           <ArtifactHeader>
             <div className="flex items-center gap-2">
-              <NetworkIcon className="size-4 text-muted-foreground" />
+              <NetworkIcon className="size-4 text-blurple-bright/80" />
               <ArtifactTitle>{node.id}</ArtifactTitle>
             </div>
             <ArtifactActions>

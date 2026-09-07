@@ -108,6 +108,24 @@ def closable_activity_options(options: dict) -> dict:
 # batching Temporal documents for LLM streaming (see workflow.py's
 # streaming_batch_interval note -- this is a history-pressure dial).
 THINK_STREAM_BATCH_INTERVAL = timedelta(milliseconds=200)
+# --- Formation graph / sub-agent activities ---
+# A whole formation replay is expensive and non-idempotent (every node call
+# is billable inference), so like the think envelope the graph and use_agent
+# activities get exactly one automatic attempt; a failed formation is
+# re-formed by the orchestrator deliberately, not blindly replayed.
+GRAPH_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
+# Whole-formation wall clock bound applied inside the activity (asyncio
+# timeout around graph execution) and as the activity start_to_close.
+GRAPH_EXECUTION_TIMEOUT = timedelta(minutes=30)
+GRAPH_START_TO_CLOSE = timedelta(minutes=35)
+# Heartbeats are per streamed chunk plus this quiet-period ticker, so the
+# heartbeat timeout can be tight relative to the run length.
+GRAPH_QUIET_HEARTBEAT_INTERVAL = timedelta(seconds=15)
+GRAPH_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
+# use_agent: one isolated sub-agent turn -- same envelope class as think.
+USE_AGENT_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
+USE_AGENT_START_TO_CLOSE = timedelta(minutes=15)
+USE_AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
 # --- Perplexity Agent API operation activities (perplexity_operations.py) ---
 # Background+streamed preset runs can research for a long time; the heartbeat
 # keeps Temporal aware the stream is alive between events.
@@ -135,6 +153,22 @@ AGENT_FILE_STORE_DIR = Path(
 COMPUTER_USE_START_TO_CLOSE = MODEL_START_TO_CLOSE
 COMPUTER_USE_SCHEDULE_TO_CLOSE = MODEL_SCHEDULE_TO_CLOSE
 COMPUTER_USE_HEARTBEAT = MODEL_HEARTBEAT
+# Browser actions can submit forms or otherwise cause non-idempotent effects.
+BROWSER_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
+
+# --- Worker readiness lease ---
+# The readiness file is a live, expiring lease, not a static marker: the worker
+# rewrites it (atomically) every READINESS_HEARTBEAT_INTERVAL with its PID and
+# a heartbeat timestamp, and the API rejects any record whose heartbeat is
+# older than READINESS_LEASE_TTL or whose PID is no longer alive. TTL is a
+# multiple of the heartbeat so one missed/slow write does not flap readiness.
+READINESS_HEARTBEAT_INTERVAL = timedelta(seconds=5)
+READINESS_LEASE_TTL = timedelta(seconds=20)
+# /health and POST /sessions additionally verify live task-queue pollers via
+# DescribeTaskQueue, cached for this long and bounded by this RPC timeout so
+# the check stays cheap. Fail closed: unavailable Temporal reports no pollers.
+READINESS_POLLER_CACHE = timedelta(seconds=5)
+READINESS_POLLER_RPC_TIMEOUT = timedelta(seconds=2)
 
 EMBEDDING_GENERATIONS = {
     "memory-v1": {

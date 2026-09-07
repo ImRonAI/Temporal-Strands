@@ -1,0 +1,6 @@
+[09/07/26 00:06:36] INFO     Processing request of type            server.py:733
+                             ListToolsRequest                                   
+                    INFO     Processing request of type            server.py:733
+                             CallToolRequest                                    
+strands MCPClient tools: ['add', 'subtract', 'multiply', 'divide']
+strands MCPClient call add(40,2): success [{'text': '42.0'}]

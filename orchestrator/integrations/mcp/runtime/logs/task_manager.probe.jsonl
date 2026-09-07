@@ -1,0 +1,3 @@
+{"event": "initialized", "server_name": "Task Manager Server", "server_version": "1.29.1", "protocol": "2025-06-18", "ts": "2026-09-07T06:57:20.530224+00:00"}
+{"event": "tools", "count": 4, "names": ["add_task", "list_tasks", "complete_task", "delete_task"], "ts": "2026-09-07T06:57:20.545805+00:00"}
+{"event": "call", "tool": "list_tasks", "args": {}, "is_error": false, "content": ["No tasks found."], "ts": "2026-09-07T06:57:20.555370+00:00"}

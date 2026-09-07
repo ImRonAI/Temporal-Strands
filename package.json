@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "dev:all": "pnpm dev:clean && concurrently --kill-others --names temporal,worker,api,web -c magenta,yellow,cyan,green \"pnpm dev:temporal\" \"pnpm dev:worker\" \"pnpm dev:api\" \"pnpm dev:web\"",
     "dev:temporal": "temporal server start-dev",
-    "dev:worker": "wait-on -t 60000 tcp:127.0.0.1:7233 && cd orchestrator && .venv/bin/python -u run_worker.py",
+    "dev:worker": "wait-on -t 60000 tcp:127.0.0.1:7233 && cd orchestrator && .venv/bin/python -u ../scripts/worker_supervisor.py -- .venv/bin/python -u run_worker.py",
     "dev:api": "wait-on -t 60000 tcp:127.0.0.1:7233 && cd orchestrator && .venv/bin/python -u -m uvicorn server:app --port 8787",
     "dev:web": "wait-on -t 120000 http-get://127.0.0.1:8787/health && next dev",
     "dev:clean": "bash scripts/free-ports.sh",

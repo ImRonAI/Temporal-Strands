@@ -1,13 +1,14 @@
 """Pattern 3: ``use_skill`` as a durable Temporal activity with stream publish.
 
-Mirrors ``graph_activity.py``: async-generator tool runs inside the activity;
-each stream frame is published on ``THINKING_TOPIC`` for the SSE bridge.
+The async-generator skill tool runs inside the activity; each stream frame is
+sanitized and published on ``THINKING_TOPIC`` for the SSE bridge. Model and
+publish plumbing is shared with ``graph_activity`` / ``use_agent_activity``
+via ``subagent_support``.
 Reference: aws-samples/sample-strands-agents-agentskills ``create_skill_agent_tool``.
 """
 
 from __future__ import annotations
 
-import json
 import traceback
 from collections.abc import Callable, Mapping
 from typing import Any, cast
@@ -21,58 +22,21 @@ from temporalio.exceptions import ApplicationError
 
 from config import THINK_STREAM_BATCH_INTERVAL
 from skills_config import create_use_skill_tool
-
-_MODEL_FACTORIES: dict[str, Callable[[], Any]] = {}
+from subagent_support import heartbeat, sanitize_stream_payload, session_model
+import subagent_support
 
 
 def configure(model_factories: Mapping[str, Callable[[], Any]]) -> None:
-    _MODEL_FACTORIES.clear()
-    _MODEL_FACTORIES.update(model_factories)
+    """Kept for run_worker compatibility: installs the shared registry."""
+    subagent_support.configure(model_factories)
 
 
 async def _session_model() -> Any:
-    info = activity.info()
-    if not info.workflow_id:
-        raise ApplicationError(
-            "use_skill must be scheduled by a workflow",
-            type="UseSkillActivityError",
-            non_retryable=True,
-        )
-    handle = activity.client().get_workflow_handle(info.workflow_id)
-    model_id = await handle.query("model_id")
-    factory = _MODEL_FACTORIES.get(model_id)
-    if factory is None:
-        raise ApplicationError(
-            f"use_skill: no registered model factory for {model_id!r}",
-            type="UseSkillActivityError",
-            non_retryable=True,
-        )
-    return factory()
-
-
-def _json_safe(value: Any) -> Any:
-    try:
-        json.dumps(value)
-        return value
-    except (TypeError, ValueError):
-        return str(value)
+    return await session_model("use_skill")
 
 
 def _sanitize_stream_payload(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        return {"payload": _json_safe(raw)}
-    skill_name = raw.get("skill_name")
-    inner = raw.get("event")
-    if isinstance(inner, dict):
-        # Strands stream events: surface text deltas when present.
-        delta = inner.get("data")
-        if isinstance(delta, str):
-            return {"skill_name": skill_name, "text": delta, "event": inner}
-    return {
-        "skill_name": skill_name,
-        "event": _json_safe(inner),
-        "text": raw.get("text"),
-    }
+    return sanitize_stream_payload(raw, name_key="skill_name")
 
 
 @activity.defn(name="use_skill")
@@ -100,6 +64,7 @@ async def use_skill_activity(skill_name: str, request: str) -> dict[str, Any]:
 
         async with stream_client:
             async for event in use_skill_tool.stream(tool_use, invocation_state):
+                heartbeat()
                 if isinstance(event, ToolStreamEvent):
                     envelope = cast(dict[str, Any], event["tool_stream_event"])
                     data = envelope.get("data")

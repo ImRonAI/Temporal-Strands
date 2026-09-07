@@ -1,0 +1,237 @@
+[
+  {
+    "server": "cms-coverage",
+    "spec": "coverageapi.json",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 93,
+    "sampleTools": [
+      "get-data-article",
+      "get-data-article-future-retire",
+      "get-data-article-related-docs",
+      "get-data-article-related-ncd-docs",
+      "get-data-article-related-source-icd-9"
+    ],
+    "liveCall": {
+      "tool": "get-metadata-state-id",
+      "isError": false,
+      "responsePreview": "{\n  \"meta\": {\n    \"status\": {\n      \"id\": 200,\n      \"message\": \"OK\"\n    },\n    \"notes\": \"\",\n    \"fields\": [\n      \"state_id\",\n      \"description\"\n    ],\n    \"children\": [],\n    \"next_token\": \"\"\n  },\n  \"data\": [\n    {\n      \"state_id\": 1,\n      \"description\": \"Alaska\"\n    },\n    {\n      \"state_id\": "
+    }
+  },
+  {
+    "server": "optum-claim-status",
+    "spec": "Claim_Status_V2.json",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 4,
+    "sampleTools": [
+      "raw-x12-enhanced",
+      "claimstatus",
+      "health-check",
+      "raw-x12"
+    ]
+  },
+  {
+    "server": "optum-eligibility",
+    "spec": "Eligibility.json",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 3,
+    "sampleTools": [
+      "medical-eligibility",
+      "health-check",
+      "raw-x12"
+    ]
+  },
+  {
+    "server": "optum-enhanced-eligibility",
+    "spec": "Enhanced_Eligibility_API_v1.json",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 7,
+    "sampleTools": [
+      "pst-eligibility",
+      "find-all-eligibility-transactions",
+      "find-eligibility-transaction-by-id",
+      "pst-discovery",
+      "get-all-discoveries"
+    ]
+  },
+  {
+    "server": "optum-institutional-claims",
+    "spec": "InstitutionalClaims.json",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 5,
+    "sampleTools": [
+      "validate-claim",
+      "process-claim",
+      "health-check",
+      "process-claim-1",
+      "validate-raw-x12"
+    ]
+  },
+  {
+    "server": "optum-professional-claims",
+    "spec": "MedicalNetworkClaims.json",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 5,
+    "sampleTools": [
+      "validate-claim",
+      "process-claim",
+      "health-check",
+      "raw-x12-submission",
+      "raw-x12-validation"
+    ]
+  },
+  {
+    "server": "optum-prior-auth",
+    "spec": "priorauthorizationv1.json",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 11,
+    "sampleTools": [
+      "278-x-215-prior-authorization-determination",
+      "json-prior-authorization-determination",
+      "278-x-215-prior-authorization-inquiry",
+      "json-prior-authorization-inquiry",
+      "278-x-217-prior-authorization-submission"
+    ]
+  },
+  {
+    "server": "telnyx",
+    "spec": "Telnyx.json",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 838,
+    "sampleTools": [
+      "authorization-server-metadata",
+      "protected-resource-metadata",
+      "lst-access-ip-addresses",
+      "crt-access-ip-address",
+      "del-access-ip-address"
+    ]
+  },
+  {
+    "server": "zoom-meetings",
+    "spec": "zoom_meetings.json",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 183,
+    "sampleTools": [
+      "lst-archived-files",
+      "get-archived-file-statistics",
+      "upd-archived-file",
+      "meeting-local-archiving-archive-token",
+      "get-archived-files"
+    ]
+  },
+  {
+    "server": "perplexity-chat",
+    "spec": "chatCompletions.yml",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 1,
+    "sampleTools": [
+      "chat-completions-chat-completions-pst"
+    ]
+  },
+  {
+    "server": "perplexity-async-create",
+    "spec": "asyncCompletions.yml",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 1,
+    "sampleTools": [
+      "crt-async-chat-completions-async-chat-completions-pst"
+    ]
+  },
+  {
+    "server": "perplexity-async-get",
+    "spec": "getasyncCompletions.yml",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 1,
+    "sampleTools": [
+      "get-async-chat-completion-resp-async-chat-completions-req-g-c649"
+    ]
+  },
+  {
+    "server": "perplexity-async-list",
+    "spec": "listasyncCompletions.yml",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 1,
+    "sampleTools": [
+      "lst-async-chat-completions-async-chat-completions-get"
+    ]
+  },
+  {
+    "server": "perplexity-agentic-research",
+    "spec": "agenticResearch.yml",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 1,
+    "sampleTools": [
+      "crt-resp"
+    ]
+  },
+  {
+    "server": "example",
+    "spec": "example-spec.json",
+    "serverInfo": {
+      "name": "mcp-openapi-server",
+      "version": "1.0.0",
+      "protocolVersion": "2025-06-18"
+    },
+    "toolCount": 3,
+    "sampleTools": [
+      "get-usrs",
+      "crt-usr",
+      "get-usr-by-id"
+    ]
+  }
+]

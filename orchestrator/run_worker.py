@@ -25,6 +25,9 @@ import asyncio
 import json
 import logging
 import os
+import tempfile
+import time
+from contextlib import suppress
 from pathlib import Path
 from collections.abc import Callable
 from typing import Any
@@ -50,9 +53,11 @@ from agent_api_tools import (  # noqa: F401 - re-exported public API
     native_tools,
 )
 from compare_workflow import CompareWorkflow
+from browser_activity import browser_activity, shutdown_browser_activity
 from config import (
     BUILTIN_SKILLS,
     DEFAULT_MODEL_ID,
+    READINESS_HEARTBEAT_INTERVAL,
     GEMINI_MAX_OUTPUT_TOKENS,
     GEMINI_MODEL_IDS,
     MAX_OUTPUT_TOKENS_CEILING,
@@ -65,11 +70,12 @@ from config import (
 from gemini_model import GeminiModel
 from perplexity_model import PRESET_PREFIX, PerplexityModel
 import computer_use_activity
+import subagent_support
 from graph_activity import graph_activity
 from load_tool import mcp_client_activity, run_loaded_tool
 from skills_config import ensure_skills_configured, skills_dir
 from telemetry import telemetry_plugins
-from use_skill_activity import configure as configure_use_skill_activity
+from use_agent_activity import use_agent_activity
 from use_skill_activity import use_skill_activity
 from workflow import ChatWorkflow, mcp_client_factories
 
@@ -318,23 +324,134 @@ async def assemble_model_factories() -> tuple[dict[str, Callable[[], Any]], str]
 def write_readiness(
     model_ids: list[str], agent_name: str, default_model: str
 ) -> None:
-    """Publish a non-secret readiness record for the API to read."""
+    """Publish a non-secret readiness lease for the API to read.
+
+    The record is a live, expiring lease: it carries this worker's ``pid`` and
+    a monotonic-in-wall-clock ``heartbeat`` (unix seconds) that
+    ``refresh_readiness_lease`` rewrites every ``READINESS_HEARTBEAT_INTERVAL``.
+    The write is atomic (temp file + ``os.replace`` in the same directory) so
+    the API can never observe a torn/partial record.
+    """
     READINESS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    READINESS_PATH.write_text(
-        json.dumps(
-            {
-                "task_queue": TASK_QUEUE,
-                "agent": agent_name,
-                "models": model_ids,
-                "default_model": default_model,
-            },
-            indent=2,
-        )
+    payload = json.dumps(
+        {
+            "task_queue": TASK_QUEUE,
+            "agent": agent_name,
+            "models": model_ids,
+            "default_model": default_model,
+            "pid": os.getpid(),
+            "heartbeat": time.time(),
+        },
+        indent=2,
     )
+    fd, tmp_name = tempfile.mkstemp(
+        dir=READINESS_PATH.parent, prefix=".worker-readiness-", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(payload)
+        os.replace(tmp_name, READINESS_PATH)
+    except OSError:
+        with suppress(OSError):
+            os.unlink(tmp_name)
+        raise
+
+
+async def refresh_readiness_lease(
+    model_ids: list[str], agent_name: str, default_model: str
+) -> None:
+    """Rewrite the readiness lease forever; run alongside ``worker.run()``.
+
+    Runs only while the worker task is actually alive (both are awaited in the
+    same TaskGroup-style gather), so a dead/hung worker process cannot keep
+    the lease fresh. A transient write failure logs and retries on the next
+    tick instead of killing the worker.
+    """
+    interval = READINESS_HEARTBEAT_INTERVAL.total_seconds()
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await asyncio.to_thread(
+                write_readiness, model_ids, agent_name, default_model
+            )
+        except OSError as error:
+            logger.warning("readiness heartbeat write failed: %s", error)
 
 
 def clear_readiness() -> None:
+    """Remove the lease, but only if this process still owns it.
+
+    A restarted worker may have already replaced the file with its own lease;
+    deleting that record would take down a healthy successor's readiness.
+    """
+    try:
+        record = json.loads(READINESS_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return
+    if isinstance(record, dict) and record.get("pid") not in (None, os.getpid()):
+        return
     READINESS_PATH.unlink(missing_ok=True)
+
+
+def workflow_tool_specs() -> list[dict[str, Any]]:
+    """Every ToolSpec the workflow's agent advertises to the outer model.
+
+    ``activity_as_tool`` derives each spec from the activity signature +
+    docstring at import time, so the complete list exists before the worker
+    starts. MCP/computer-use tools are excluded: their specs come from live
+    servers / the Gemini-only branch, not from ``activity_as_tool`` here.
+    """
+    from workflow import AGENT_API_TOOLS, PERMANENT_COMMUNITY_TOOLS, THINK_TOOL
+
+    return [
+        dict(tool.tool_spec)
+        for tool in (*PERMANENT_COMMUNITY_TOOLS, THINK_TOOL, *AGENT_API_TOOLS)
+    ]
+
+
+def validate_outbound_tools() -> None:
+    """Fail startup if any generated tool spec would poison the tools array.
+
+    Every outer Perplexity request carries ALL registered tool definitions,
+    so one invalid schema rejects the whole request before inference. This
+    replays the exact outbound conversion (``PerplexityModel._format_request``:
+    function entries with ``_ensure_object_properties``-normalized parameters,
+    prepended natives) and runs the existing Agent API contract validator
+    (``perplexity_operations._validate_tools``). Legal JSON Schema features
+    pass through; only contract violations and non-JSON-serializable payloads
+    fail.
+    """
+    from perplexity_model import _ensure_object_properties
+    from perplexity_operations import _validate_tools
+
+    converted = [
+        {
+            "type": "function",
+            "name": spec["name"],
+            "description": spec.get("description", ""),
+            "parameters": _ensure_object_properties(spec["inputSchema"]["json"]),
+        }
+        for spec in workflow_tool_specs()
+    ]
+    outbound = [*native_tools(), *converted]
+    try:
+        json.dumps(outbound)
+    except (TypeError, ValueError) as error:
+        raise SystemExit(
+            f"tool spec validation: outbound tools array is not JSON-serializable: {error}"
+        ) from error
+    try:
+        _validate_tools(outbound)
+    except Exception as error:
+        raise SystemExit(f"tool spec validation failed: {error}") from error
+    for tool in converted:
+        params = tool["parameters"]
+        if not isinstance(params, dict) or params.get("type") != "object":
+            raise SystemExit(
+                f"tool spec validation: {tool['name']!r} parameters must be an "
+                f"object schema, got {params!r}"
+            )
+    logger.info("Validated %d outbound tool definitions", len(outbound))
 
 
 def connect_included_mcp_servers() -> list[str]:
@@ -379,6 +496,9 @@ async def main() -> None:
     tools_dir = ensure_strands_tools_dir()
     mcp_clients = mcp_client_factories()
     connected_mcp_servers = connect_included_mcp_servers()
+    # Fail fast: one invalid generated tool schema in the outbound array
+    # rejects every outer-model request before inference.
+    validate_outbound_tools()
 
     client = await Client.connect(
         os.environ.get("TEMPORAL_ADDRESS", "localhost:7233"),
@@ -393,8 +513,10 @@ async def main() -> None:
         task_queue=TASK_QUEUE,
         workflows=[ChatWorkflow, CompareWorkflow],
         activities=[
+            browser_activity,
             *computer_use_activity.COMPUTER_USE_ACTIVITIES,
             graph_activity,
+            use_agent_activity,
             use_skill_activity,
             mcp_client_activity,
             run_loaded_tool,
@@ -413,9 +535,15 @@ async def main() -> None:
         workflow_runner=UnsandboxedWorkflowRunner(),
     )
 
-    configure_use_skill_activity(model_factories)
+    # One shared registry for every sub-agent activity (graph / use_agent /
+    # use_skill); think keeps its own pinned copy.
+    subagent_support.configure(model_factories)
     think_activity.configure(model_factories)
-    skill_count = ensure_skills_configured(model_factories[default_model])
+    # No base model pinned at startup: strands_graph_tool.build_skill_agent
+    # prefers the configured base model over the parent agent's, and pinning
+    # the worker default here would stop skill_agent nodes from inheriting
+    # the live session model the graph activity resolves per run.
+    skill_count = ensure_skills_configured(None)
 
     write_readiness(list(model_factories), agent_name, default_model)
     logger.info(
@@ -428,9 +556,16 @@ async def main() -> None:
         skills_dir(),
         list(mcp_clients),
     )
+    heartbeat = asyncio.create_task(
+        refresh_readiness_lease(list(model_factories), agent_name, default_model)
+    )
     try:
         await worker.run()
     finally:
+        heartbeat.cancel()
+        with suppress(asyncio.CancelledError):
+            await heartbeat
+        await asyncio.to_thread(shutdown_browser_activity)
         for name in connected_mcp_servers:
             try:
                 from strands_tools.mcp_client import mcp_client

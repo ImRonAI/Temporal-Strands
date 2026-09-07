@@ -1,0 +1,625 @@
+Downloading chardet (1.0MiB)
+ Downloaded chardet
+Installed 86 packages in 170ms
+2026-09-06 23:59:57.460 | INFO | awslabs.openapi_mcp_server.utils.http_client:<module>:40 - tenacity retry logic enabled
+2026-09-06 23:59:57.464 | INFO | awslabs.openapi_mcp_server.utils.cache_provider:<module>:39 - cachetools caching enabled
+2026-09-06 23:59:57.481 | INFO     | awslabs.openapi_mcp_server.server:main:725 - Starting server with logging level: INFO
+2026-09-06 23:59:57.529 | INFO     | awslabs.openapi_mcp_server.api.config:load_config:277 - Configuration loaded: API name=cms-coverage, transport=stdio
+2026-09-06 23:59:57.529 | INFO     | awslabs.openapi_mcp_server.server:main:733 - Creating MCP server
+2026-09-06 23:59:57.530 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:84 - Creating FastMCP server
+2026-09-06 23:59:57.530 | INFO     | awslabs.openapi_mcp_server.utils.openapi:load_openapi_spec:453 - Loading OpenAPI spec from file: /Users/tims-stuff/Desktop/strands-tools/src/mcp/cms-coverage-mcp-server/coverageapi.json
+2026-09-06 23:59:57.533 | INFO     | awslabs.openapi_mcp_server.utils.openapi:load_openapi_spec:474 - Using prance for reference resolution
+2026-09-06 23:59:58.159 | INFO     | awslabs.openapi_mcp_server.auth.auth_factory:get_auth_provider:117 - Created authentication provider: none
+2026-09-06 23:59:58.238 | INFO     | awslabs.openapi_mcp_server.utils.http_client:create_client:151 - Created HTTP client for https://api.cms.gov/mcd with max_connections=100, max_keepalive=20
+2026-09-06 23:59:58.238 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:201 - Created HTTP client for API base URL: https://api.cms.gov/mcd
+2026-09-06 23:59:58.239 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:206 - Creating FastMCP server with OpenAPI specification
+2026-09-06 23:59:58.239 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:211 - Updated API name from OpenAPI spec title: Coverage API
+2026-09-06 23:59:58.271 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:430 - Successfully configured API: Coverage API
+2026-09-06 23:59:58.271 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:434 - Generating MCP prompts for API: Coverage API
+2026-09-06 23:59:58.271 | INFO     | awslabs.openapi_mcp_server.prompts.prompt_manager:generate_prompts:47 - Generating MCP prompts for Coverage API
+2026-09-06 23:59:58.361 | INFO     | awslabs.openapi_mcp_server.prompts.prompt_manager:generate_prompts:87 - Generated 93 operation prompts
+2026-09-06 23:59:58.361 | INFO     | awslabs.openapi_mcp_server.prompts.prompt_manager:generate_prompts:100 - Generated 0 workflow prompts
+2026-09-06 23:59:58.425 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:533 - Registered tools: ['getDataArticle', 'getDataArticleFutureRetire', 'getDataArticleRelatedDocuments', 'getDataArticleRelatedNcdDocuments', 'getDataArticleRelatedSourceIcd9', 'getDataArticleBillCodes', 'getDataArticleCodeTable', 'getDataArticleContractor', 'getDataArticleHcpcCode', 'getDataArticleHcpcCodeGroup', 'getDataArticleHcpcModifier', 'getDataArticleHcpcModifierGroup', 'getDataArticleIcd10Covered', 'getDataArticleIcd10CoveredGroup', 'getDataArticleIcd10Noncovered', 'getDataArticleIcd10NoncoveredGroup', 'getDataArticleIcd10PcsCode', 'getDataArticleIcd10PcsCodeGroup', 'getDataArticleOtherCodingGroup', 'getDataArticlePrimaryJurisdiction', 'getDataArticleResponseComment', 'getDataArticleRevenueCode', 'getDataArticleRevisionHistory', 'getDataArticleStickyNote', 'getDataArticleUrls', 'getDataCal', 'getDataCalTrackingSheet', 'getDataCalRelatedNcd', 'getDataCalRelatedTa', 'getDataCalRelatedMedCac', 'getDataCalHistory', 'getDataCalRelatedComments', 'getDataContractor', 'getDataLcd', 'getDataLcdRelatedDocuments', 'getDataLcdRelatedNcdDocuments', 'getDataLcdFutureRetire', 'getDataLcdRelatedSourceIcd9', 'getDataLcdAdvisoryCommittee', 'getDataLcdContractor', 'getDataLcdHcpcCodeGroup', 'getDataLcdHcpcCode', 'getDataLcdReasonChange', 'getDataLcdRequestorLetters', 'getDataLcdRevisionHistory', 'getDataLcdStickyNote', 'getDataLcdSynopsisChanges', 'getDataLcdUrls', 'getDataLcdPrimaryJurisdiction', 'getDataLcdTrackingSheet', 'getDataLcdAttachments', 'getDataMedCovDoc', 'getDataMedCovDocRelatedComments', 'getDataMedcacMeeting', 'getDataMedcacRelatedMaterial', 'getDataMedcacRelatedEwebMaterial', 'getDataMedcacRelatedNca', 'getDataMedcacRelatedTa', 'getDataNca', 'getDataNcaTrackingSheet', 'getDataNcaRelatedNcd', 'getDataNcaRelatedTa', 'getDataNcaRelatedMedCac', 'getDataNcaHistory', 'getDataNcaRelatedComments', 'getDataNcd', 'getDataNcdRelatedNca', 'getDataNcdRelatedCal', 'getDataNcdRelatedCpi', 'getDataNcdOtherVersions', 'getDataTechnologyAssessment', 'getDataTaRelatedNca', 'getDataTaRelatedMaterial', 'getDataTaRelatedWebMaterial', 'getDataTaRelatedMedcac', 'getMetadataContractType', 'getMetadataContractSubtype', 'getMetadatalicenseAgreement', 'getMetadataLocalDataSchedule', 'getMetadataStateId', 'getMetadataUpdatePeriod', 'getReportsWhatsNewNational', 'getReportsNationalCoverageAnnual', 'getReportsNcaCalStatus', 'getReportsNationalCoverageNcd', 'getReportsNationalCoverageMedCovDoc', 'getReportsNationalCoverageMEDCAC', 'getReportsNationalCoverageTA', 'getReportsWhatsNewLocal', 'getReportsLocalCoverageFinalLcd', 'getReportsLocalCoverageProposedLcd', 'getReportsLocalCoverageArticle', 'getReportsLocalCoverageSadExclusionList']
+2026-09-06 23:59:58.425 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:536 - Registered prompts: ['getDataArticle', 'getDataArticleFutureRetire', 'getDataArticleRelatedDocuments', 'getDataArticleRelatedNcdDocuments', 'getDataArticleRelatedSourceIcd9', 'getDataArticleBillCodes', 'getDataArticleCodeTable', 'getDataArticleContractor', 'getDataArticleHcpcCode', 'getDataArticleHcpcCodeGroup', 'getDataArticleHcpcModifier', 'getDataArticleHcpcModifierGroup', 'getDataArticleIcd10Covered', 'getDataArticleIcd10CoveredGroup', 'getDataArticleIcd10Noncovered', 'getDataArticleIcd10NoncoveredGroup', 'getDataArticleIcd10PcsCode', 'getDataArticleIcd10PcsCodeGroup', 'getDataArticleOtherCodingGroup', 'getDataArticlePrimaryJurisdiction', 'getDataArticleResponseComment', 'getDataArticleRevenueCode', 'getDataArticleRevisionHistory', 'getDataArticleStickyNote', 'getDataArticleUrls', 'getDataCal', 'getDataCalTrackingSheet', 'getDataCalRelatedNcd', 'getDataCalRelatedTa', 'getDataCalRelatedMedCac', 'getDataCalHistory', 'getDataCalRelatedComments', 'getDataContractor', 'getDataLcd', 'getDataLcdRelatedDocuments', 'getDataLcdRelatedNcdDocuments', 'getDataLcdFutureRetire', 'getDataLcdRelatedSourceIcd9', 'getDataLcdAdvisoryCommittee', 'getDataLcdContractor', 'getDataLcdHcpcCodeGroup', 'getDataLcdHcpcCode', 'getDataLcdReasonChange', 'getDataLcdRequestorLetters', 'getDataLcdRevisionHistory', 'getDataLcdStickyNote', 'getDataLcdSynopsisChanges', 'getDataLcdUrls', 'getDataLcdPrimaryJurisdiction', 'getDataLcdTrackingSheet', 'getDataLcdAttachments', 'getDataMedCovDoc', 'getDataMedCovDocRelatedComments', 'getDataMedcacMeeting', 'getDataMedcacRelatedMaterial', 'getDataMedcacRelatedEwebMaterial', 'getDataMedcacRelatedNca', 'getDataMedcacRelatedTa', 'getDataNca', 'getDataNcaTrackingSheet', 'getDataNcaRelatedNcd', 'getDataNcaRelatedTa', 'getDataNcaRelatedMedCac', 'getDataNcaHistory', 'getDataNcaRelatedComments', 'getDataNcd', 'getDataNcdRelatedNca', 'getDataNcdRelatedCal', 'getDataNcdRelatedCpi', 'getDataNcdOtherVersions', 'getDataTechnologyAssessment', 'getDataTaRelatedNca', 'getDataTaRelatedMaterial', 'getDataTaRelatedWebMaterial', 'getDataTaRelatedMedcac', 'getMetadataContractType', 'getMetadataContractSubtype', 'getMetadatalicenseAgreement', 'getMetadataLocalDataSchedule', 'getMetadataStateId', 'getMetadataUpdatePeriod', 'getReportsWhatsNewNational', 'getReportsNationalCoverageAnnual', 'getReportsNcaCalStatus', 'getReportsNationalCoverageNcd', 'getReportsNationalCoverageMedCovDoc', 'getReportsNationalCoverageMEDCAC', 'getReportsNationalCoverageTA', 'getReportsWhatsNewLocal', 'getReportsLocalCoverageFinalLcd', 'getReportsLocalCoverageProposedLcd', 'getReportsLocalCoverageArticle', 'getReportsLocalCoverageSadExclusionList']
+2026-09-06 23:59:58.432 | INFO     | awslabs.openapi_mcp_server.server:main:746 - Server components: 93 prompts, 93 tools, 0 resources, 0 resource templates
+2026-09-06 23:59:58.433 | INFO     | awslabs.openapi_mcp_server.server:main:764 - Running server with stdio transport
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Coverage API, 3.4.7                         │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                          🎉 Update available: 4.0.3                          │
+│                      Run: pip install --upgrade fastmcp                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[09/06/26 23:59:58] INFO     Starting MCP server 'Coverage API' transport.py:241
+                             with transport 'stdio'                             
+2026-09-07 00:00:11.719 | INFO | awslabs.openapi_mcp_server.utils.http_client:<module>:40 - tenacity retry logic enabled
+2026-09-07 00:00:11.720 | INFO | awslabs.openapi_mcp_server.utils.cache_provider:<module>:39 - cachetools caching enabled
+2026-09-07 00:00:11.734 | INFO     | awslabs.openapi_mcp_server.server:main:725 - Starting server with logging level: INFO
+2026-09-07 00:00:11.777 | INFO     | awslabs.openapi_mcp_server.api.config:load_config:277 - Configuration loaded: API name=cms-coverage, transport=stdio
+2026-09-07 00:00:11.777 | INFO     | awslabs.openapi_mcp_server.server:main:733 - Creating MCP server
+2026-09-07 00:00:11.777 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:84 - Creating FastMCP server
+2026-09-07 00:00:11.777 | INFO     | awslabs.openapi_mcp_server.utils.openapi:load_openapi_spec:453 - Loading OpenAPI spec from file: /Users/tims-stuff/Desktop/strands-tools/src/mcp/cms-coverage-mcp-server/coverageapi.json
+2026-09-07 00:00:11.779 | INFO     | awslabs.openapi_mcp_server.utils.openapi:load_openapi_spec:474 - Using prance for reference resolution
+2026-09-07 00:00:12.301 | INFO     | awslabs.openapi_mcp_server.auth.auth_factory:get_auth_provider:117 - Created authentication provider: none
+2026-09-07 00:00:12.328 | INFO     | awslabs.openapi_mcp_server.utils.http_client:create_client:151 - Created HTTP client for https://api.cms.gov/mcd with max_connections=100, max_keepalive=20
+2026-09-07 00:00:12.328 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:201 - Created HTTP client for API base URL: https://api.cms.gov/mcd
+2026-09-07 00:00:12.328 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:206 - Creating FastMCP server with OpenAPI specification
+2026-09-07 00:00:12.328 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:211 - Updated API name from OpenAPI spec title: Coverage API
+2026-09-07 00:00:12.365 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:430 - Successfully configured API: Coverage API
+2026-09-07 00:00:12.365 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:434 - Generating MCP prompts for API: Coverage API
+2026-09-07 00:00:12.365 | INFO     | awslabs.openapi_mcp_server.prompts.prompt_manager:generate_prompts:47 - Generating MCP prompts for Coverage API
+2026-09-07 00:00:12.455 | INFO     | awslabs.openapi_mcp_server.prompts.prompt_manager:generate_prompts:87 - Generated 93 operation prompts
+2026-09-07 00:00:12.457 | INFO     | awslabs.openapi_mcp_server.prompts.prompt_manager:generate_prompts:100 - Generated 0 workflow prompts
+2026-09-07 00:00:12.468 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:533 - Registered tools: ['getDataArticle', 'getDataArticleFutureRetire', 'getDataArticleRelatedDocuments', 'getDataArticleRelatedNcdDocuments', 'getDataArticleRelatedSourceIcd9', 'getDataArticleBillCodes', 'getDataArticleCodeTable', 'getDataArticleContractor', 'getDataArticleHcpcCode', 'getDataArticleHcpcCodeGroup', 'getDataArticleHcpcModifier', 'getDataArticleHcpcModifierGroup', 'getDataArticleIcd10Covered', 'getDataArticleIcd10CoveredGroup', 'getDataArticleIcd10Noncovered', 'getDataArticleIcd10NoncoveredGroup', 'getDataArticleIcd10PcsCode', 'getDataArticleIcd10PcsCodeGroup', 'getDataArticleOtherCodingGroup', 'getDataArticlePrimaryJurisdiction', 'getDataArticleResponseComment', 'getDataArticleRevenueCode', 'getDataArticleRevisionHistory', 'getDataArticleStickyNote', 'getDataArticleUrls', 'getDataCal', 'getDataCalTrackingSheet', 'getDataCalRelatedNcd', 'getDataCalRelatedTa', 'getDataCalRelatedMedCac', 'getDataCalHistory', 'getDataCalRelatedComments', 'getDataContractor', 'getDataLcd', 'getDataLcdRelatedDocuments', 'getDataLcdRelatedNcdDocuments', 'getDataLcdFutureRetire', 'getDataLcdRelatedSourceIcd9', 'getDataLcdAdvisoryCommittee', 'getDataLcdContractor', 'getDataLcdHcpcCodeGroup', 'getDataLcdHcpcCode', 'getDataLcdReasonChange', 'getDataLcdRequestorLetters', 'getDataLcdRevisionHistory', 'getDataLcdStickyNote', 'getDataLcdSynopsisChanges', 'getDataLcdUrls', 'getDataLcdPrimaryJurisdiction', 'getDataLcdTrackingSheet', 'getDataLcdAttachments', 'getDataMedCovDoc', 'getDataMedCovDocRelatedComments', 'getDataMedcacMeeting', 'getDataMedcacRelatedMaterial', 'getDataMedcacRelatedEwebMaterial', 'getDataMedcacRelatedNca', 'getDataMedcacRelatedTa', 'getDataNca', 'getDataNcaTrackingSheet', 'getDataNcaRelatedNcd', 'getDataNcaRelatedTa', 'getDataNcaRelatedMedCac', 'getDataNcaHistory', 'getDataNcaRelatedComments', 'getDataNcd', 'getDataNcdRelatedNca', 'getDataNcdRelatedCal', 'getDataNcdRelatedCpi', 'getDataNcdOtherVersions', 'getDataTechnologyAssessment', 'getDataTaRelatedNca', 'getDataTaRelatedMaterial', 'getDataTaRelatedWebMaterial', 'getDataTaRelatedMedcac', 'getMetadataContractType', 'getMetadataContractSubtype', 'getMetadatalicenseAgreement', 'getMetadataLocalDataSchedule', 'getMetadataStateId', 'getMetadataUpdatePeriod', 'getReportsWhatsNewNational', 'getReportsNationalCoverageAnnual', 'getReportsNcaCalStatus', 'getReportsNationalCoverageNcd', 'getReportsNationalCoverageMedCovDoc', 'getReportsNationalCoverageMEDCAC', 'getReportsNationalCoverageTA', 'getReportsWhatsNewLocal', 'getReportsLocalCoverageFinalLcd', 'getReportsLocalCoverageProposedLcd', 'getReportsLocalCoverageArticle', 'getReportsLocalCoverageSadExclusionList']
+2026-09-07 00:00:12.468 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:536 - Registered prompts: ['getDataArticle', 'getDataArticleFutureRetire', 'getDataArticleRelatedDocuments', 'getDataArticleRelatedNcdDocuments', 'getDataArticleRelatedSourceIcd9', 'getDataArticleBillCodes', 'getDataArticleCodeTable', 'getDataArticleContractor', 'getDataArticleHcpcCode', 'getDataArticleHcpcCodeGroup', 'getDataArticleHcpcModifier', 'getDataArticleHcpcModifierGroup', 'getDataArticleIcd10Covered', 'getDataArticleIcd10CoveredGroup', 'getDataArticleIcd10Noncovered', 'getDataArticleIcd10NoncoveredGroup', 'getDataArticleIcd10PcsCode', 'getDataArticleIcd10PcsCodeGroup', 'getDataArticleOtherCodingGroup', 'getDataArticlePrimaryJurisdiction', 'getDataArticleResponseComment', 'getDataArticleRevenueCode', 'getDataArticleRevisionHistory', 'getDataArticleStickyNote', 'getDataArticleUrls', 'getDataCal', 'getDataCalTrackingSheet', 'getDataCalRelatedNcd', 'getDataCalRelatedTa', 'getDataCalRelatedMedCac', 'getDataCalHistory', 'getDataCalRelatedComments', 'getDataContractor', 'getDataLcd', 'getDataLcdRelatedDocuments', 'getDataLcdRelatedNcdDocuments', 'getDataLcdFutureRetire', 'getDataLcdRelatedSourceIcd9', 'getDataLcdAdvisoryCommittee', 'getDataLcdContractor', 'getDataLcdHcpcCodeGroup', 'getDataLcdHcpcCode', 'getDataLcdReasonChange', 'getDataLcdRequestorLetters', 'getDataLcdRevisionHistory', 'getDataLcdStickyNote', 'getDataLcdSynopsisChanges', 'getDataLcdUrls', 'getDataLcdPrimaryJurisdiction', 'getDataLcdTrackingSheet', 'getDataLcdAttachments', 'getDataMedCovDoc', 'getDataMedCovDocRelatedComments', 'getDataMedcacMeeting', 'getDataMedcacRelatedMaterial', 'getDataMedcacRelatedEwebMaterial', 'getDataMedcacRelatedNca', 'getDataMedcacRelatedTa', 'getDataNca', 'getDataNcaTrackingSheet', 'getDataNcaRelatedNcd', 'getDataNcaRelatedTa', 'getDataNcaRelatedMedCac', 'getDataNcaHistory', 'getDataNcaRelatedComments', 'getDataNcd', 'getDataNcdRelatedNca', 'getDataNcdRelatedCal', 'getDataNcdRelatedCpi', 'getDataNcdOtherVersions', 'getDataTechnologyAssessment', 'getDataTaRelatedNca', 'getDataTaRelatedMaterial', 'getDataTaRelatedWebMaterial', 'getDataTaRelatedMedcac', 'getMetadataContractType', 'getMetadataContractSubtype', 'getMetadatalicenseAgreement', 'getMetadataLocalDataSchedule', 'getMetadataStateId', 'getMetadataUpdatePeriod', 'getReportsWhatsNewNational', 'getReportsNationalCoverageAnnual', 'getReportsNcaCalStatus', 'getReportsNationalCoverageNcd', 'getReportsNationalCoverageMedCovDoc', 'getReportsNationalCoverageMEDCAC', 'getReportsNationalCoverageTA', 'getReportsWhatsNewLocal', 'getReportsLocalCoverageFinalLcd', 'getReportsLocalCoverageProposedLcd', 'getReportsLocalCoverageArticle', 'getReportsLocalCoverageSadExclusionList']
+2026-09-07 00:00:12.471 | INFO     | awslabs.openapi_mcp_server.server:main:746 - Server components: 93 prompts, 93 tools, 0 resources, 0 resource templates
+2026-09-07 00:00:12.471 | INFO     | awslabs.openapi_mcp_server.server:main:764 - Running server with stdio transport
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Coverage API, 3.4.7                         │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                          🎉 Update available: 4.0.3                          │
+│                      Run: pip install --upgrade fastmcp                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[09/07/26 00:00:12] INFO     Starting MCP server 'Coverage API' transport.py:241
+                             with transport 'stdio'                             
+[09/07/26 00:00:12] Error calling tool 'getDataArticle'                         
+                    ╭─────────── Traceback (most recent call last) ────────────╮
+                    │ /Users/tims-stuff/.cache/uv/archive-v0/rlVupv2d2G9tKdGn/ │
+                    │ lib/python3.14/site-packages/httpx/_transports/default.p │
+                    │ y:101 in map_httpcore_exceptions                         │
+                    │                                                          │
+                    │    98 │   if len(HTTPCORE_EXC_MAP) == 0:                 │
+                    │    99 │   │   HTTPCORE_EXC_MAP = _load_httpcore_exceptio │
+                    │   100 │   try:                                           │
+                    │ ❱ 101 │   │   yield                                      │
+                    │   102 │   except Exception as exc:                       │
+                    │   103 │   │   mapped_exc = None                          │
+                    │   104                                                    │
+                    │                                                          │
+                    │ /Users/tims-stuff/.cache/uv/archive-v0/rlVupv2d2G9tKdGn/ │
+                    │ lib/python3.14/site-packages/httpx/_transports/default.p │
+                    │ y:394 in handle_async_request                            │
+                    │                                                          │
+                    │   391 │   │   │   extensions=request.extensions,         │
+                    │   392 │   │   )                                          │
+                    │   393 │   │   with map_httpcore_exceptions():            │
+                    │ ❱ 394 │   │   │   resp = await self._pool.handle_async_r │
+                    │   395 │   │                                              │
+                    │   396 │   │   assert isinstance(resp.stream, typing.Asyn │
+                    │   397                                                    │
+                    │                                                          │
+                    │                 ... 7 frames hidden ...                  │
+                    │                                                          │
+                    │ /Users/tims-stuff/.local/share/uv/python/cpython-3.14.5- │
+                    │ macos-aarch64-none/lib/python3.14/contextlib.py:162 in   │
+                    │ __exit__                                                 │
+                    │                                                          │
+                    │   159 │   │   │   │   # tell if we get the same exceptio │
+                    │   160 │   │   │   │   value = typ()                      │
+                    │   161 │   │   │   try:                                   │
+                    │ ❱ 162 │   │   │   │   self.gen.throw(value)              │
+                    │   163 │   │   │   except StopIteration as exc:           │
+                    │   164 │   │   │   │   # Suppress StopIteration *unless*  │
+                    │   165 │   │   │   │   # was passed to throw().  This pre │
+                    │                                                          │
+                    │ /Users/tims-stuff/.cache/uv/archive-v0/rlVupv2d2G9tKdGn/ │
+                    │ lib/python3.14/site-packages/httpcore/_exceptions.py:14  │
+                    │ in map_exceptions                                        │
+                    │                                                          │
+                    │   11 │   except Exception as exc:  # noqa: PIE786        │
+                    │   12 │   │   for from_exc, to_exc in map.items():        │
+                    │   13 │   │   │   if isinstance(exc, from_exc):           │
+                    │ ❱ 14 │   │   │   │   raise to_exc(exc) from exc          │
+                    │   15 │   │   raise  # pragma: nocover                    │
+                    │   16                                                     │
+                    │   17                                                     │
+                    ╰──────────────────────────────────────────────────────────╯
+                    ConnectError: [Errno 8] nodename nor servname provided, or  
+                    not known                                                   
+                                                                                
+                    The above exception was the direct cause of the following   
+                    exception:                                                  
+                                                                                
+                    ╭─────────── Traceback (most recent call last) ────────────╮
+                    │ /Users/tims-stuff/.cache/uv/archive-v0/rlVupv2d2G9tKdGn/ │
+                    │ lib/python3.14/site-packages/fastmcp/server/providers/op │
+                    │ enapi/components.py:210 in run                           │
+                    │                                                          │
+                    │ /Users/tims-stuff/.cache/uv/archive-v0/rlVupv2d2G9tKdGn/ │
+                    │ lib/python3.14/site-packages/httpx/_client.py:1629 in    │
+                    │ send                                                     │
+                    │                                                          │
+                    │   1626 │   │                                             │
+                    │   1627 │   │   auth = self._build_request_auth(request,  │
+                    │   1628 │   │                                             │
+                    │ ❱ 1629 │   │   response = await self._send_handling_auth │
+                    │   1630 │   │   │   request,                              │
+                    │   1631 │   │   │   auth=auth,                            │
+                    │   1632 │   │   │   follow_redirects=follow_redirects,    │
+                    │                                                          │
+                    │                 ... 4 frames hidden ...                  │
+                    │                                                          │
+                    │ /Users/tims-stuff/.local/share/uv/python/cpython-3.14.5- │
+                    │ macos-aarch64-none/lib/python3.14/contextlib.py:162 in   │
+                    │ __exit__                                                 │
+                    │                                                          │
+                    │   159 │   │   │   │   # tell if we get the same exceptio │
+                    │   160 │   │   │   │   value = typ()                      │
+                    │   161 │   │   │   try:                                   │
+                    │ ❱ 162 │   │   │   │   self.gen.throw(value)              │
+                    │   163 │   │   │   except StopIteration as exc:           │
+                    │   164 │   │   │   │   # Suppress StopIteration *unless*  │
+                    │   165 │   │   │   │   # was passed to throw().  This pre │
+                    │                                                          │
+                    │ /Users/tims-stuff/.cache/uv/archive-v0/rlVupv2d2G9tKdGn/ │
+                    │ lib/python3.14/site-packages/httpx/_transports/default.p │
+                    │ y:118 in map_httpcore_exceptions                         │
+                    │                                                          │
+                    │   115 │   │   │   raise                                  │
+                    │   116 │   │                                              │
+                    │   117 │   │   message = str(exc)                         │
+                    │ ❱ 118 │   │   raise mapped_exc(message) from exc         │
+                    │   119                                                    │
+                    │   120                                                    │
+                    │   121 class ResponseStream(SyncByteStream):              │
+                    ╰──────────────────────────────────────────────────────────╯
+                    ConnectError: [Errno 8] nodename nor servname provided, or  
+                    not known                                                   
+                                                                                
+                    The above exception was the direct cause of the following   
+                    exception:                                                  
+                                                                                
+                    ╭─────────── Traceback (most recent call last) ────────────╮
+                    │ /Users/tims-stuff/.cache/uv/archive-v0/rlVupv2d2G9tKdGn/ │
+                    │ lib/python3.14/site-packages/fastmcp/server/server.py:13 │
+                    │ 12 in call_tool                                          │
+                    │                                                          │
+                    │ /Users/tims-stuff/.cache/uv/archive-v0/rlVupv2d2G9tKdGn/ │
+                    │ lib/python3.14/site-packages/fastmcp/tools/base.py:421   │
+                    │ in _run                                                  │
+                    │                                                          │
+                    │ /Users/tims-stuff/.cache/uv/archive-v0/rlVupv2d2G9tKdGn/ │
+                    │ lib/python3.14/site-packages/fastmcp/server/providers/op │
+                    │ enapi/components.py:254 in run                           │
+                    ╰──────────────────────────────────────────────────────────╯
+                    ValueError: Request error (ConnectError): [Errno 8] nodename
+                    nor servname provided, or not known                         
+2026-09-07 00:00:46.193 | INFO | awslabs.openapi_mcp_server.utils.http_client:<module>:40 - tenacity retry logic enabled
+2026-09-07 00:00:46.194 | INFO | awslabs.openapi_mcp_server.utils.cache_provider:<module>:39 - cachetools caching enabled
+2026-09-07 00:00:46.201 | INFO     | awslabs.openapi_mcp_server.server:main:725 - Starting server with logging level: INFO
+2026-09-07 00:00:46.239 | INFO     | awslabs.openapi_mcp_server.api.config:load_config:277 - Configuration loaded: API name=cms-coverage, transport=stdio
+2026-09-07 00:00:46.240 | INFO     | awslabs.openapi_mcp_server.server:main:733 - Creating MCP server
+2026-09-07 00:00:46.240 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:84 - Creating FastMCP server
+2026-09-07 00:00:46.240 | INFO     | awslabs.openapi_mcp_server.utils.openapi:load_openapi_spec:453 - Loading OpenAPI spec from file: /Users/tims-stuff/Desktop/strands-tools/src/mcp/cms-coverage-mcp-server/coverageapi.json
+2026-09-07 00:00:46.242 | INFO     | awslabs.openapi_mcp_server.utils.openapi:load_openapi_spec:474 - Using prance for reference resolution
+2026-09-07 00:00:46.785 | INFO     | awslabs.openapi_mcp_server.auth.auth_factory:get_auth_provider:117 - Created authentication provider: none
+2026-09-07 00:00:46.818 | INFO     | awslabs.openapi_mcp_server.utils.http_client:create_client:151 - Created HTTP client for https://api.coverage.cms.gov with max_connections=100, max_keepalive=20
+2026-09-07 00:00:46.819 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:201 - Created HTTP client for API base URL: https://api.coverage.cms.gov
+2026-09-07 00:00:46.820 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:206 - Creating FastMCP server with OpenAPI specification
+2026-09-07 00:00:46.820 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:211 - Updated API name from OpenAPI spec title: Coverage API
+2026-09-07 00:00:46.861 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:430 - Successfully configured API: Coverage API
+2026-09-07 00:00:46.861 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:434 - Generating MCP prompts for API: Coverage API
+2026-09-07 00:00:46.861 | INFO     | awslabs.openapi_mcp_server.prompts.prompt_manager:generate_prompts:47 - Generating MCP prompts for Coverage API
+2026-09-07 00:00:46.954 | INFO     | awslabs.openapi_mcp_server.prompts.prompt_manager:generate_prompts:87 - Generated 93 operation prompts
+2026-09-07 00:00:46.954 | INFO     | awslabs.openapi_mcp_server.prompts.prompt_manager:generate_prompts:100 - Generated 0 workflow prompts
+2026-09-07 00:00:46.967 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:533 - Registered tools: ['getDataArticle', 'getDataArticleFutureRetire', 'getDataArticleRelatedDocuments', 'getDataArticleRelatedNcdDocuments', 'getDataArticleRelatedSourceIcd9', 'getDataArticleBillCodes', 'getDataArticleCodeTable', 'getDataArticleContractor', 'getDataArticleHcpcCode', 'getDataArticleHcpcCodeGroup', 'getDataArticleHcpcModifier', 'getDataArticleHcpcModifierGroup', 'getDataArticleIcd10Covered', 'getDataArticleIcd10CoveredGroup', 'getDataArticleIcd10Noncovered', 'getDataArticleIcd10NoncoveredGroup', 'getDataArticleIcd10PcsCode', 'getDataArticleIcd10PcsCodeGroup', 'getDataArticleOtherCodingGroup', 'getDataArticlePrimaryJurisdiction', 'getDataArticleResponseComment', 'getDataArticleRevenueCode', 'getDataArticleRevisionHistory', 'getDataArticleStickyNote', 'getDataArticleUrls', 'getDataCal', 'getDataCalTrackingSheet', 'getDataCalRelatedNcd', 'getDataCalRelatedTa', 'getDataCalRelatedMedCac', 'getDataCalHistory', 'getDataCalRelatedComments', 'getDataContractor', 'getDataLcd', 'getDataLcdRelatedDocuments', 'getDataLcdRelatedNcdDocuments', 'getDataLcdFutureRetire', 'getDataLcdRelatedSourceIcd9', 'getDataLcdAdvisoryCommittee', 'getDataLcdContractor', 'getDataLcdHcpcCodeGroup', 'getDataLcdHcpcCode', 'getDataLcdReasonChange', 'getDataLcdRequestorLetters', 'getDataLcdRevisionHistory', 'getDataLcdStickyNote', 'getDataLcdSynopsisChanges', 'getDataLcdUrls', 'getDataLcdPrimaryJurisdiction', 'getDataLcdTrackingSheet', 'getDataLcdAttachments', 'getDataMedCovDoc', 'getDataMedCovDocRelatedComments', 'getDataMedcacMeeting', 'getDataMedcacRelatedMaterial', 'getDataMedcacRelatedEwebMaterial', 'getDataMedcacRelatedNca', 'getDataMedcacRelatedTa', 'getDataNca', 'getDataNcaTrackingSheet', 'getDataNcaRelatedNcd', 'getDataNcaRelatedTa', 'getDataNcaRelatedMedCac', 'getDataNcaHistory', 'getDataNcaRelatedComments', 'getDataNcd', 'getDataNcdRelatedNca', 'getDataNcdRelatedCal', 'getDataNcdRelatedCpi', 'getDataNcdOtherVersions', 'getDataTechnologyAssessment', 'getDataTaRelatedNca', 'getDataTaRelatedMaterial', 'getDataTaRelatedWebMaterial', 'getDataTaRelatedMedcac', 'getMetadataContractType', 'getMetadataContractSubtype', 'getMetadatalicenseAgreement', 'getMetadataLocalDataSchedule', 'getMetadataStateId', 'getMetadataUpdatePeriod', 'getReportsWhatsNewNational', 'getReportsNationalCoverageAnnual', 'getReportsNcaCalStatus', 'getReportsNationalCoverageNcd', 'getReportsNationalCoverageMedCovDoc', 'getReportsNationalCoverageMEDCAC', 'getReportsNationalCoverageTA', 'getReportsWhatsNewLocal', 'getReportsLocalCoverageFinalLcd', 'getReportsLocalCoverageProposedLcd', 'getReportsLocalCoverageArticle', 'getReportsLocalCoverageSadExclusionList']
+2026-09-07 00:00:46.967 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:536 - Registered prompts: ['getDataArticle', 'getDataArticleFutureRetire', 'getDataArticleRelatedDocuments', 'getDataArticleRelatedNcdDocuments', 'getDataArticleRelatedSourceIcd9', 'getDataArticleBillCodes', 'getDataArticleCodeTable', 'getDataArticleContractor', 'getDataArticleHcpcCode', 'getDataArticleHcpcCodeGroup', 'getDataArticleHcpcModifier', 'getDataArticleHcpcModifierGroup', 'getDataArticleIcd10Covered', 'getDataArticleIcd10CoveredGroup', 'getDataArticleIcd10Noncovered', 'getDataArticleIcd10NoncoveredGroup', 'getDataArticleIcd10PcsCode', 'getDataArticleIcd10PcsCodeGroup', 'getDataArticleOtherCodingGroup', 'getDataArticlePrimaryJurisdiction', 'getDataArticleResponseComment', 'getDataArticleRevenueCode', 'getDataArticleRevisionHistory', 'getDataArticleStickyNote', 'getDataArticleUrls', 'getDataCal', 'getDataCalTrackingSheet', 'getDataCalRelatedNcd', 'getDataCalRelatedTa', 'getDataCalRelatedMedCac', 'getDataCalHistory', 'getDataCalRelatedComments', 'getDataContractor', 'getDataLcd', 'getDataLcdRelatedDocuments', 'getDataLcdRelatedNcdDocuments', 'getDataLcdFutureRetire', 'getDataLcdRelatedSourceIcd9', 'getDataLcdAdvisoryCommittee', 'getDataLcdContractor', 'getDataLcdHcpcCodeGroup', 'getDataLcdHcpcCode', 'getDataLcdReasonChange', 'getDataLcdRequestorLetters', 'getDataLcdRevisionHistory', 'getDataLcdStickyNote', 'getDataLcdSynopsisChanges', 'getDataLcdUrls', 'getDataLcdPrimaryJurisdiction', 'getDataLcdTrackingSheet', 'getDataLcdAttachments', 'getDataMedCovDoc', 'getDataMedCovDocRelatedComments', 'getDataMedcacMeeting', 'getDataMedcacRelatedMaterial', 'getDataMedcacRelatedEwebMaterial', 'getDataMedcacRelatedNca', 'getDataMedcacRelatedTa', 'getDataNca', 'getDataNcaTrackingSheet', 'getDataNcaRelatedNcd', 'getDataNcaRelatedTa', 'getDataNcaRelatedMedCac', 'getDataNcaHistory', 'getDataNcaRelatedComments', 'getDataNcd', 'getDataNcdRelatedNca', 'getDataNcdRelatedCal', 'getDataNcdRelatedCpi', 'getDataNcdOtherVersions', 'getDataTechnologyAssessment', 'getDataTaRelatedNca', 'getDataTaRelatedMaterial', 'getDataTaRelatedWebMaterial', 'getDataTaRelatedMedcac', 'getMetadataContractType', 'getMetadataContractSubtype', 'getMetadatalicenseAgreement', 'getMetadataLocalDataSchedule', 'getMetadataStateId', 'getMetadataUpdatePeriod', 'getReportsWhatsNewNational', 'getReportsNationalCoverageAnnual', 'getReportsNcaCalStatus', 'getReportsNationalCoverageNcd', 'getReportsNationalCoverageMedCovDoc', 'getReportsNationalCoverageMEDCAC', 'getReportsNationalCoverageTA', 'getReportsWhatsNewLocal', 'getReportsLocalCoverageFinalLcd', 'getReportsLocalCoverageProposedLcd', 'getReportsLocalCoverageArticle', 'getReportsLocalCoverageSadExclusionList']
+2026-09-07 00:00:46.970 | INFO     | awslabs.openapi_mcp_server.server:main:746 - Server components: 93 prompts, 93 tools, 0 resources, 0 resource templates
+2026-09-07 00:00:46.970 | INFO     | awslabs.openapi_mcp_server.server:main:764 - Running server with stdio transport
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Coverage API, 3.4.7                         │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                          🎉 Update available: 4.0.3                          │
+│                      Run: pip install --upgrade fastmcp                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[09/07/26 00:00:46] INFO     Starting MCP server 'Coverage API' transport.py:241
+                             with transport 'stdio'                             
+[09/07/26 00:00:47] WARNING  Argument 'limit' not found in       director.py:182
+                             parameter map for getDataArticle                   
+[09/07/26 00:00:47] Error calling tool 'getDataArticle'                         
+                    ╭─────────── Traceback (most recent call last) ────────────╮
+                    │ /Users/tims-stuff/.cache/uv/archive-v0/rlVupv2d2G9tKdGn/ │
+                    │ lib/python3.14/site-packages/fastmcp/server/providers/op │
+                    │ enapi/components.py:211 in run                           │
+                    │                                                          │
+                    │ /Users/tims-stuff/.cache/uv/archive-v0/rlVupv2d2G9tKdGn/ │
+                    │ lib/python3.14/site-packages/httpx/_models.py:829 in     │
+                    │ raise_for_status                                         │
+                    │                                                          │
+                    │    826 │   │   }                                         │
+                    │    827 │   │   error_type = error_types.get(status_class │
+                    │    828 │   │   message = message.format(self, error_type │
+                    │ ❱  829 │   │   raise HTTPStatusError(message, request=re │
+                    │    830 │                                                 │
+                    │    831 │   def json(self, **kwargs: typing.Any) -> typin │
+                    │    832 │   │   return jsonlib.loads(self.content, **kwar │
+                    ╰──────────────────────────────────────────────────────────╯
+                    HTTPStatusError: Client error '401 Unauthorized' for url    
+                    'https://api.coverage.cms.gov/v1/data/article/'             
+                    For more information check:                                 
+                    https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+                                                                                
+                    The above exception was the direct cause of the following   
+                    exception:                                                  
+                                                                                
+                    ╭─────────── Traceback (most recent call last) ────────────╮
+                    │ /Users/tims-stuff/.cache/uv/archive-v0/rlVupv2d2G9tKdGn/ │
+                    │ lib/python3.14/site-packages/fastmcp/server/server.py:13 │
+                    │ 12 in call_tool                                          │
+                    │                                                          │
+                    │ /Users/tims-stuff/.cache/uv/archive-v0/rlVupv2d2G9tKdGn/ │
+                    │ lib/python3.14/site-packages/fastmcp/tools/base.py:421   │
+                    │ in _run                                                  │
+                    │                                                          │
+                    │ /Users/tims-stuff/.cache/uv/archive-v0/rlVupv2d2G9tKdGn/ │
+                    │ lib/python3.14/site-packages/fastmcp/server/providers/op │
+                    │ enapi/components.py:248 in run                           │
+                    ╰──────────────────────────────────────────────────────────╯
+                    ValueError: HTTP error 401: Unauthorized - {'meta':         
+                    {'status': {'id': 401, 'message': 'UNAUTHORIZED – the       
+                    request did not include a valid authentication token. This  
+                    response indicates that the token is missing, expired, or   
+                    invalid.'}, 'notes': '\r\nLicense Agreements\r\nAmerican    
+                    Medical Association Current Procedural                      
+                    Terminology\r\nAmerican Dental Association Current Dental   
+                    Terminology\r\nAmerican Hospital Association NUBC           
+                    UB-04\r\n\r\n\r\nPlease review the licensing information    
+                    below and indicate your agreement and                       
+                    acceptance.\r\n\r\nLicense For Use Of Current Procedural    
+                    Terminology, Fourth Edition (CPT)\r\n\r\nCPT codes,         
+                    descriptions and other data only are copyright 2025 American
+                    Medical Association (or such other date of publication of   
+                    CPT). All rights reserved. CPT is a registered trademark of 
+                    the American Medical Association (AMA).\r\n\r\nYou are      
+                    authorized to use CPT only as contained herein for your     
+                    personal use only. Personal use means non-commercial uses   
+                    for display on personal computers or other devices.         
+                    \r\n\r\nAny use not authorized herein is prohibited,        
+                    including by way of illustration and not by way of          
+                    limitation, making copies of CPT for resale and/or license, 
+                    transferring copies of CPT to any party not bound by this   
+                    agreement, creating any modified or derivative work of CPT, 
+                    or making any commercial use of CPT. License to use CPT for 
+                    any use not authorized herein must be obtained through the  
+                    AMA, Intellectual Property Services, 330 N. Wabash Ave.,    
+                    Suite 39300, Chicago, IL 60611-5885. Applications are       
+                    available at the AMA Web site,                              
+                    http://www.ama-assn.org/go/cpt .\r\n\r\nApplicable FARS     
+                    Restrictions Apply to Government Use.\r\n\r\nThis product   
+                    includes CPT which is commercial technical data and/or      
+                    computer data bases and/or commercial computer software     
+                    and/or commercial computer software documentation, as       
+                    applicable which were developed exclusively at private      
+                    expense by the American Medical Association, AMA Plaza, 330 
+                    N. Wabash Ave., Suite 39300, Chicago, IL 60611-5885. U.S.   
+                    Government rights to use, modify, reproduce, release,       
+                    perform, display, or disclose these technical data and/or   
+                    computer data bases and/or computer software and/or computer
+                    software documentation are subject to the limited rights    
+                    restrictions of FAR 52.227-14 (December 2007) and/or subject
+                    to the restricted rights provisions of FAR 52.227-14        
+                    (December 2007) and FAR 52.227-19 (December 2007), as       
+                    applicable, and any applicable agency FAR Supplements, for  
+                    non-Department of Defense Federal procurements.\r\n\r\nAMA  
+                    Disclaimer of Warranties and Liabilities\r\n\r\nCPT is      
+                    provided "as is" without warranty of any kind, either       
+                    expressed or implied, including but not limited to, the     
+                    implied warranties of merchantability and fitness for a     
+                    particular purpose. Fee schedules, relative value units,    
+                    conversion factors and/or related components are not        
+                    assigned by the AMA, are not part of CPT, and the AMA is not
+                    recommending their use. The AMA does not directly or        
+                    indirectly practice medicine or dispense medical services.  
+                    The responsibility for the content of the following         
+                    materials is with CMS and no endorsement by the AMA is      
+                    intended or implied. The AMA disclaims responsibility for   
+                    any consequences or liability attributable to or related to 
+                    any use, non-use, or interpretation of information contained
+                    or not contained in the materials. This Agreement will      
+                    terminate upon notice if you violate its terms. The AMA is a
+                    third party beneficiary to this Agreement.\r\n\r\nCMS       
+                    Disclaimer\r\n\r\nThe scope of this license is determined by
+                    the AMA, the copyright holder. Any questions pertaining to  
+                    the license or use of the CPT should be addressed to the    
+                    AMA. End users do not act for or on behalf of the CMS. CMS  
+                    DISCLAIMS RESPONSIBILITY FOR ANY LIABILITY ATTRIBUTABLE TO  
+                    END USER USE OF THE CPT. CMS WILL NOT BE LIABLE FOR ANY     
+                    CLAIMS ATTRIBUTABLE TO ANY ERRORS, OMISSIONS, OR OTHER      
+                    INACCURACIES IN THE INFORMATION OR MATERIAL CONTAINED ON    
+                    THIS PAGE. In no event shall CMS be liable for direct,      
+                    indirect, special, incidental, or consequential damages     
+                    arising out of the use of such information or               
+                    material.\r\n\r\nShould the foregoing terms and conditions  
+                    be acceptable to you, please indicate your agreement and    
+                    acceptance by clicking below on the button labeled          
+                    "accept".\r\n\r\nLicense For Use of Current Dental          
+                    Terminology (CDTTM)\r\n\r\nThese materials contain Current  
+                    Dental Terminology (CDTTM), Copyright© 2025 American Dental 
+                    Association (ADA). All rights reserved. CDT is a trademark  
+                    of the ADA.\r\n\r\nThe license granted herein is expressly  
+                    conditioned upon your acceptance of all terms and conditions
+                    contained in this Agreement. By visiting the                
+                    "/v1/metadata/license-agreement" endpoint, you hereby       
+                    acknowledge that you have read, understood, and agree to all
+                    terms and conditions set forth in this Agreement. \r\n\r\nIf
+                    you do not agree with all terms and conditions set forth    
+                    herein, you may not use the endpoints that require the      
+                    license token.\r\n\r\nIf you are acting on behalf of an     
+                    organization, you represent that you are authorized to act  
+                    on behalf of such organization and that your acceptance of  
+                    the terms of this Agreement creates a legally enforceable   
+                    obligation of the organization. As used herein "YOU" and    
+                    "YOUR" refer to you and any organization on behalf of which 
+                    you are acting.\r\n\r\nSubject to the terms and conditions  
+                    contained in this Agreement, you, your employees, and agents
+                    are authorized to use CDT only as contained in the following
+                    authorized materials and solely for internal use by         
+                    yourself, employees, and agents within your organization    
+                    within the United States and its territories. Use of CDT is 
+                    limited to use in programs administered by Centers for      
+                    Medicare & Medicaid Services (CMS). You agree to take all   
+                    necessary steps to ensure that your employees and agents    
+                    abide by the terms of this Agreement. You acknowledge that  
+                    the ADA holds all copyright, trademark, and other rights in 
+                    CDT. You shall not remove, alter, or obscure any ADA        
+                    copyright notices or other proprietary rights notices       
+                    included in the materials.\r\n\r\nAny use not authorized    
+                    herein is prohibited, including by way of illustration and  
+                    not by way of limitation, making copies of CDT for resale   
+                    and/or license, distributing to commercial third-parties    
+                    outputs in which the CDT is embedded but not directly       
+                    accessible but the output relies on the embedded CDT (e.g.  
+                    Artificial Intelligence outputs), transferring copies of CDT
+                    to any party not bound by this Agreement, creating any      
+                    modified or derivative work of CDT, or making any commercial
+                    use of CDT. License to use CDT for any use not authorized   
+                    herein must be obtained through the American Dental         
+                    Association, 401 North Michigan Avenue, Chicago, IL 60611.  
+                    Applications are available at the American Dental           
+                    Association website, http://www.ADA.org .\r\n\r\nApplicable 
+                    Federal Acquisition Regulation Clauses (FARS)/Department of 
+                    Defense Federal Acquisition Regulation supplement (DFARS)   
+                    Restrictions Apply to Government Use. U.S. Government       
+                    Rights. This product includes Current Dental Terminology    
+                    ("CDT"), which is commercial technical data and/or computer 
+                    data bases and/or commercial computer software and/or       
+                    commercial computer software documentation, as applicable,  
+                    which was developed exclusively at private expense by the   
+                    American Dental Association, 401 North Michigan Avenue,     
+                    Chicago, Illinois, 60611. U.S. Government rights to use,    
+                    modify, reproduce, release, perform, display, or disclose   
+                    these technical data and/or computer data bases and/or      
+                    computer software and/or computer software documentation are
+                    subject to the limited rights restrictions of HHSAR 327.4   
+                    (as it may from time to time be amended, superseded or      
+                    replaced) and the limited rights restrictions of FAR        
+                    52.227-14 (June 1987) and/or subject to the restricted      
+                    rights provisions of FAR 52.227-14 (June 1987) and FAR      
+                    52.227-19 (June 1987), as applicable, and any applicable    
+                    agency FAR Supplements, for non-Department of Defense       
+                    Federal procurements.\r\n\r\nOrganizations who contract with
+                    CMS acknowledge that they may have a commercial CDT license 
+                    with the ADA, and that use of CDT codes as permitted herein 
+                    for the administration of CMS programs does not extend to   
+                    any other programs or services the organization may         
+                    administer and royalties dues for the use of the CDT codes  
+                    are governed by their commercial license.\r\n\r\nADA        
+                    DISCLAIMER OF WARRANTIES AND LIABILITIES. CDT is provided   
+                    "AS IS" without warranty of any kind, either expressed or   
+                    implied, including but not limited to, the implied          
+                    warranties of merchantability and fitness for a particular  
+                    purpose. No fee schedules, basic unit, relative values, or  
+                    related listings are included in CDT. The ADA does not      
+                    directly or indirectly practice medicine or dispense dental 
+                    services. ADA has no responsibility for the software,       
+                    including any CDT and other content contained therein; and  
+                    no endorsement by the ADA is intended or implied. The ADA   
+                    expressly disclaims responsibility for any consequences or  
+                    liability attributable to or related to any use, nonuse, or 
+                    interpretation of information contained or not contained in 
+                    this file/product. This Agreement will terminate upon notice
+                    to you if you violate the terms of this Agreement. The ADA  
+                    is a third-party beneficiary to this Agreement.\r\n\r\nCMS  
+                    DISCLAIMER. The scope of this license is determined by the  
+                    ADA, the copyright holder. Any questions pertaining to the  
+                    license or use of the CDT should be addressed to the ADA.   
+                    End Users do not act for or on behalf of CMS. CMS disclaims 
+                    responsibility for any liability attributable to end user   
+                    use of the CDT. CMS will not be liable for any claims       
+                    attributable to any errors, omissions, or other inaccuracies
+                    in the information or material covered by this license. In  
+                    no event shall CMS be liable for damages (including but not 
+                    limited to direct, indirect, special, incidental, or        
+                    consequential damages) arising out of the use of such       
+                    information or material.\r\n\r\nThe license granted herein  
+                    is expressly conditioned upon your acceptance of all terms  
+                    and conditions contained in this Agreement. If the foregoing
+                    terms and conditions are acceptable to you, please indicate 
+                    your Agreement by clicking below on the button labeled "I   
+                    ACCEPT". If you do not agree to the terms and conditions,   
+                    you may not access this content, you must click below on the
+                    button labeled "I DO NOT ACCEPT" and exit from this         
+                    screen.\r\n\r\n\r\nLicense For Use of National Uniform      
+                    Billing Committee (NUBC) UB-04\r\n\r\nThese materials       
+                    contain NUBC Official UB-04 Specifications (UB-04 Data),    
+                    which is copyrighted by the American Hospital Association   
+                    (AHA).\r\n\r\nTHE LICENSE GRANTED HEREIN IS EXPRESSLY       
+                    CONDITIONED UPON YOUR ACCEPTANCE OF ALL TERMS AND CONDITIONS
+                    CONTAINED IN THIS AGREEMENT. BY VISITING THE                
+                    "/v1/metadata/license-agreement" ENDPOINT, YOU HEREBY       
+                    ACKNOWLEDGE THAT YOU HAVE READ, UNDERSTOOD AND AGREED TO ALL
+                    TERMS AND CONDITIONS SET FORTH IN THIS AGREEMENT.\r\n\r\nIF 
+                    YOU DO NOT AGREE WITH ALL TERMS AND CONDITIONS SET FORTH    
+                    HEREIN, YOU MAY NOT USE THE ENDPOINTS THAT REQUIRE THE      
+                    LICENSE TOKEN. IF YOU ARE ACTING ON BEHALF OF AN            
+                    ORGANIZATION, YOU REPRESENT THAT YOU ARE AUTHORIZED TO ACT  
+                    ON BEHALF OF SUCH ORGANIZATION AND THAT YOUR ACCEPTANCE OF  
+                    THE TERMS OF THIS AGREEMENT CREATES A LEGALLY ENFORCEABLE   
+                    OBLIGATION OF THE ORGANIZATION. AS USED HEREIN, "YOU" AND   
+                    "YOUR" REFER TO YOU AND ANY ORGANIZATION ON BEHALF OF WHICH 
+                    YOU ARE ACTING.\r\n\r\nSubject to the terms and conditions  
+                    contained in this Agreement, you, your employees, and agents
+                    are authorized to use UB-04 Data only as contained in the   
+                    following authorized materials and solely for internal use  
+                    by yourself, employees and agents within your organization  
+                    within the United States and its territories. Use of UB-04  
+                    Data is limited to use in programs administered by Centers  
+                    for Medicare & Medicaid Services (CMS). You agree to take   
+                    all necessary steps to ensure that your employees and agents
+                    abide by the terms of this Agreement. You acknowledge that  
+                    the AHA holds all copyright, trademark, and other rights in 
+                    UB-04 Data. You shall not remove, alter, or obscure any AHA 
+                    copyright notices or other proprietary rights notices       
+                    included in the materials.\r\nAny use not authorized herein 
+                    is prohibited, including, by way of illustration and not by 
+                    way of limitation, making copies of UB-04 Data for resale   
+                    and/or license, transferring copies of UB-04 Data to any    
+                    party not bound by this agreement, creating any modified or 
+                    derivative work of UB-04 Data, or making any commercial use 
+                    of UB-04 Data. License to use UB-04 Data for any use not    
+                    authorized herein must be obtained through the American     
+                    Hospital Association, 155 N. Wacker Drive, Suite 400,       
+                    Chicago, Illinois, 60606. Applications are available at the 
+                    NUBC website, http://www.nubc.org/ .\r\nThe UB-04 Data      
+                    included in this product is commercial technical data and/or
+                    computer databases and/or commercial computer software      
+                    and/or commercial computer software documentation, as       
+                    applicable, which was developed exclusively at private      
+                    expense by the American Hospital Association, 155 N. Wacker 
+                    Drive, Suite 400, Chicago, Illinois 60606. U.S. Government  
+                    rights to use, modify, reproduce, release, perform, display,
+                    or disclose these technical data and/or computer data bases 
+                    and/or computer software and/or computer software           
+                    documentation are subject to the limited rights restrictions
+                    of DFARS 252.227-7015(b)(2) (November 1995) and/or subject  
+                    to the restrictions of DFARS 227.7202-1(a) (June 1995) and  
+                    DFARS 227.7202-3(a) (June 1995), as applicable for U.S.     
+                    Department of Defense procurements and the limited rights   
+                    restrictions of FAR 52.227-14 (December 2007) and FAR       
+                    52.227-19 (December 2007), as applicable, and any applicable
+                    agency FAR Supplements, for non-Department of Defense       
+                    Federal procurements.\r\nAHA DISCLAIMER OF WARRANTIES AND   
+                    LIABILITIES. UB-04 Data is provided "as is" without warranty
+                    of any kind, either expressed or implied, including but not 
+                    limited to, the implied warranties of merchantability and   
+                    fitness for a particular purpose. The sole responsibility   
+                    for the software, including any UB-04 Data and other content
+                    contained therein, is with the Medicare/Medicaid Contractor 
+                    or the CMS; and no endorsement by the AHA is intended or    
+                    implied. The AHA expressly disclaims responsibility for any 
+                    consequences or liability attributable to or related to any 
+                    use, non-use, or interpretation of information contained or 
+                    not contained in this file/product. This Agreement will     
+                    terminate upon notice to you if you violate the terms of    
+                    this Agreement. The AHA is a third-party beneficiary to this
+                    Agreement.\r\nCMS DISCLAIMER. The scope of this license is  
+                    determined by the AHA, the copyright holder. Any questions  
+                    pertaining to the license or use of the UB-04 Data should be
+                    addressed to the AHA. End users do not act for or on behalf 
+                    of the CMS. CMS DISCLAIMS RESPONSIBILITY FOR ANY LIABILITY  
+                    ATTRIBUTABLE TO END USER USE OF THE UB-04 DATA. CMS WILL NOT
+                    BE LIABLE FOR ANY CLAIMS ATTRIBUTABLE TO ANY ERRORS,        
+                    OMISSIONS, OR OTHER INACCURACIES IN THE INFORMATION OR      
+                    MATERIAL COVERED BY THIS LICENSE. In no event shall CMS be  
+                    liable for direct, indirect, special, incidental, or        
+                    consequential damages arising out of the use of such        
+                    information or material.\r\n', 'fields': [], 'children':    
+                    ['/metadata/license-agreement'], 'next_token': ''}, 'data': 
+                    []}                                                         
+2026-09-07 00:01:15.569 | INFO | awslabs.openapi_mcp_server.utils.http_client:<module>:40 - tenacity retry logic enabled
+2026-09-07 00:01:15.570 | INFO | awslabs.openapi_mcp_server.utils.cache_provider:<module>:39 - cachetools caching enabled
+2026-09-07 00:01:15.595 | INFO     | awslabs.openapi_mcp_server.server:main:725 - Starting server with logging level: INFO
+2026-09-07 00:01:15.694 | INFO     | awslabs.openapi_mcp_server.api.config:load_config:277 - Configuration loaded: API name=cms-coverage, transport=stdio
+2026-09-07 00:01:15.694 | INFO     | awslabs.openapi_mcp_server.server:main:733 - Creating MCP server
+2026-09-07 00:01:15.695 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:84 - Creating FastMCP server
+2026-09-07 00:01:15.699 | INFO     | awslabs.openapi_mcp_server.utils.openapi:load_openapi_spec:453 - Loading OpenAPI spec from file: /Users/tims-stuff/Desktop/strands-tools/src/mcp/cms-coverage-mcp-server/coverageapi.json
+2026-09-07 00:01:15.703 | INFO     | awslabs.openapi_mcp_server.utils.openapi:load_openapi_spec:474 - Using prance for reference resolution
+2026-09-07 00:01:17.483 | INFO     | awslabs.openapi_mcp_server.auth.auth_factory:get_auth_provider:117 - Created authentication provider: none
+2026-09-07 00:01:17.552 | INFO     | awslabs.openapi_mcp_server.utils.http_client:create_client:151 - Created HTTP client for https://api.coverage.cms.gov with max_connections=100, max_keepalive=20
+2026-09-07 00:01:17.552 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:201 - Created HTTP client for API base URL: https://api.coverage.cms.gov
+2026-09-07 00:01:17.552 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:206 - Creating FastMCP server with OpenAPI specification
+2026-09-07 00:01:17.552 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:211 - Updated API name from OpenAPI spec title: Coverage API
+2026-09-07 00:01:17.653 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:430 - Successfully configured API: Coverage API
+2026-09-07 00:01:17.653 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:434 - Generating MCP prompts for API: Coverage API
+2026-09-07 00:01:17.653 | INFO     | awslabs.openapi_mcp_server.prompts.prompt_manager:generate_prompts:47 - Generating MCP prompts for Coverage API
+2026-09-07 00:01:17.910 | INFO     | awslabs.openapi_mcp_server.prompts.prompt_manager:generate_prompts:87 - Generated 93 operation prompts
+2026-09-07 00:01:17.910 | INFO     | awslabs.openapi_mcp_server.prompts.prompt_manager:generate_prompts:100 - Generated 0 workflow prompts
+2026-09-07 00:01:17.950 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:533 - Registered tools: ['getDataArticle', 'getDataArticleFutureRetire', 'getDataArticleRelatedDocuments', 'getDataArticleRelatedNcdDocuments', 'getDataArticleRelatedSourceIcd9', 'getDataArticleBillCodes', 'getDataArticleCodeTable', 'getDataArticleContractor', 'getDataArticleHcpcCode', 'getDataArticleHcpcCodeGroup', 'getDataArticleHcpcModifier', 'getDataArticleHcpcModifierGroup', 'getDataArticleIcd10Covered', 'getDataArticleIcd10CoveredGroup', 'getDataArticleIcd10Noncovered', 'getDataArticleIcd10NoncoveredGroup', 'getDataArticleIcd10PcsCode', 'getDataArticleIcd10PcsCodeGroup', 'getDataArticleOtherCodingGroup', 'getDataArticlePrimaryJurisdiction', 'getDataArticleResponseComment', 'getDataArticleRevenueCode', 'getDataArticleRevisionHistory', 'getDataArticleStickyNote', 'getDataArticleUrls', 'getDataCal', 'getDataCalTrackingSheet', 'getDataCalRelatedNcd', 'getDataCalRelatedTa', 'getDataCalRelatedMedCac', 'getDataCalHistory', 'getDataCalRelatedComments', 'getDataContractor', 'getDataLcd', 'getDataLcdRelatedDocuments', 'getDataLcdRelatedNcdDocuments', 'getDataLcdFutureRetire', 'getDataLcdRelatedSourceIcd9', 'getDataLcdAdvisoryCommittee', 'getDataLcdContractor', 'getDataLcdHcpcCodeGroup', 'getDataLcdHcpcCode', 'getDataLcdReasonChange', 'getDataLcdRequestorLetters', 'getDataLcdRevisionHistory', 'getDataLcdStickyNote', 'getDataLcdSynopsisChanges', 'getDataLcdUrls', 'getDataLcdPrimaryJurisdiction', 'getDataLcdTrackingSheet', 'getDataLcdAttachments', 'getDataMedCovDoc', 'getDataMedCovDocRelatedComments', 'getDataMedcacMeeting', 'getDataMedcacRelatedMaterial', 'getDataMedcacRelatedEwebMaterial', 'getDataMedcacRelatedNca', 'getDataMedcacRelatedTa', 'getDataNca', 'getDataNcaTrackingSheet', 'getDataNcaRelatedNcd', 'getDataNcaRelatedTa', 'getDataNcaRelatedMedCac', 'getDataNcaHistory', 'getDataNcaRelatedComments', 'getDataNcd', 'getDataNcdRelatedNca', 'getDataNcdRelatedCal', 'getDataNcdRelatedCpi', 'getDataNcdOtherVersions', 'getDataTechnologyAssessment', 'getDataTaRelatedNca', 'getDataTaRelatedMaterial', 'getDataTaRelatedWebMaterial', 'getDataTaRelatedMedcac', 'getMetadataContractType', 'getMetadataContractSubtype', 'getMetadatalicenseAgreement', 'getMetadataLocalDataSchedule', 'getMetadataStateId', 'getMetadataUpdatePeriod', 'getReportsWhatsNewNational', 'getReportsNationalCoverageAnnual', 'getReportsNcaCalStatus', 'getReportsNationalCoverageNcd', 'getReportsNationalCoverageMedCovDoc', 'getReportsNationalCoverageMEDCAC', 'getReportsNationalCoverageTA', 'getReportsWhatsNewLocal', 'getReportsLocalCoverageFinalLcd', 'getReportsLocalCoverageProposedLcd', 'getReportsLocalCoverageArticle', 'getReportsLocalCoverageSadExclusionList']
+2026-09-07 00:01:17.950 | INFO     | awslabs.openapi_mcp_server.server:create_mcp_server_async:536 - Registered prompts: ['getDataArticle', 'getDataArticleFutureRetire', 'getDataArticleRelatedDocuments', 'getDataArticleRelatedNcdDocuments', 'getDataArticleRelatedSourceIcd9', 'getDataArticleBillCodes', 'getDataArticleCodeTable', 'getDataArticleContractor', 'getDataArticleHcpcCode', 'getDataArticleHcpcCodeGroup', 'getDataArticleHcpcModifier', 'getDataArticleHcpcModifierGroup', 'getDataArticleIcd10Covered', 'getDataArticleIcd10CoveredGroup', 'getDataArticleIcd10Noncovered', 'getDataArticleIcd10NoncoveredGroup', 'getDataArticleIcd10PcsCode', 'getDataArticleIcd10PcsCodeGroup', 'getDataArticleOtherCodingGroup', 'getDataArticlePrimaryJurisdiction', 'getDataArticleResponseComment', 'getDataArticleRevenueCode', 'getDataArticleRevisionHistory', 'getDataArticleStickyNote', 'getDataArticleUrls', 'getDataCal', 'getDataCalTrackingSheet', 'getDataCalRelatedNcd', 'getDataCalRelatedTa', 'getDataCalRelatedMedCac', 'getDataCalHistory', 'getDataCalRelatedComments', 'getDataContractor', 'getDataLcd', 'getDataLcdRelatedDocuments', 'getDataLcdRelatedNcdDocuments', 'getDataLcdFutureRetire', 'getDataLcdRelatedSourceIcd9', 'getDataLcdAdvisoryCommittee', 'getDataLcdContractor', 'getDataLcdHcpcCodeGroup', 'getDataLcdHcpcCode', 'getDataLcdReasonChange', 'getDataLcdRequestorLetters', 'getDataLcdRevisionHistory', 'getDataLcdStickyNote', 'getDataLcdSynopsisChanges', 'getDataLcdUrls', 'getDataLcdPrimaryJurisdiction', 'getDataLcdTrackingSheet', 'getDataLcdAttachments', 'getDataMedCovDoc', 'getDataMedCovDocRelatedComments', 'getDataMedcacMeeting', 'getDataMedcacRelatedMaterial', 'getDataMedcacRelatedEwebMaterial', 'getDataMedcacRelatedNca', 'getDataMedcacRelatedTa', 'getDataNca', 'getDataNcaTrackingSheet', 'getDataNcaRelatedNcd', 'getDataNcaRelatedTa', 'getDataNcaRelatedMedCac', 'getDataNcaHistory', 'getDataNcaRelatedComments', 'getDataNcd', 'getDataNcdRelatedNca', 'getDataNcdRelatedCal', 'getDataNcdRelatedCpi', 'getDataNcdOtherVersions', 'getDataTechnologyAssessment', 'getDataTaRelatedNca', 'getDataTaRelatedMaterial', 'getDataTaRelatedWebMaterial', 'getDataTaRelatedMedcac', 'getMetadataContractType', 'getMetadataContractSubtype', 'getMetadatalicenseAgreement', 'getMetadataLocalDataSchedule', 'getMetadataStateId', 'getMetadataUpdatePeriod', 'getReportsWhatsNewNational', 'getReportsNationalCoverageAnnual', 'getReportsNcaCalStatus', 'getReportsNationalCoverageNcd', 'getReportsNationalCoverageMedCovDoc', 'getReportsNationalCoverageMEDCAC', 'getReportsNationalCoverageTA', 'getReportsWhatsNewLocal', 'getReportsLocalCoverageFinalLcd', 'getReportsLocalCoverageProposedLcd', 'getReportsLocalCoverageArticle', 'getReportsLocalCoverageSadExclusionList']
+2026-09-07 00:01:17.960 | INFO     | awslabs.openapi_mcp_server.server:main:746 - Server components: 93 prompts, 93 tools, 0 resources, 0 resource templates
+2026-09-07 00:01:17.960 | INFO     | awslabs.openapi_mcp_server.server:main:764 - Running server with stdio transport
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Coverage API, 3.4.7                         │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                          🎉 Update available: 4.0.3                          │
+│                      Run: pip install --upgrade fastmcp                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[09/07/26 00:01:17] INFO     Starting MCP server 'Coverage API' transport.py:241
+                             with transport 'stdio'                             

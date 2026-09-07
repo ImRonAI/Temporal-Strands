@@ -1,0 +1,4 @@
+{"event": "initialized", "server_name": "strands-tools-mcp", "server_version": "1.29.1", "protocol": "2025-06-18", "ts": "2026-09-07T07:03:21.052083+00:00"}
+{"event": "tools", "count": 2, "names": ["current_time", "calculator"], "ts": "2026-09-07T07:03:21.085369+00:00"}
+{"event": "call", "tool": "current_time", "args": {}, "is_error": false, "content": ["2026-09-07T07:03:21.117484+00:00"], "ts": "2026-09-07T07:03:21.125709+00:00"}
+{"event": "call", "tool": "calculator", "args": {"expression": "6*7"}, "is_error": false, "content": ["Result: 42"], "ts": "2026-09-07T07:03:21.435324+00:00"}

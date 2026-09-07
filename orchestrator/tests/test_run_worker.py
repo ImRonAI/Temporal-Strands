@@ -303,6 +303,42 @@ async def test_no_keys_at_all_raises_system_exit() -> None:
         await run_worker.assemble_model_factories()
 
 
+# --- outbound tool spec validation ----------------------------------------------
+
+
+def test_workflow_tool_specs_include_all_registered_tools() -> None:
+    names = [spec["name"] for spec in run_worker.workflow_tool_specs()]
+    for expected in ("graph", "use_agent", "use_skill", "mcp_client", "browser", "think"):
+        assert expected in names, f"missing {expected}"
+
+
+def test_validate_outbound_tools_accepts_current_registry() -> None:
+    run_worker.validate_outbound_tools()  # must not raise
+
+
+def test_validate_outbound_tools_rejects_bad_spec(monkeypatch: pytest.MonkeyPatch) -> None:
+    good = run_worker.workflow_tool_specs()
+    broken = [*good, {"name": "", "description": "", "inputSchema": {"json": {"type": "object"}}}]
+    monkeypatch.setattr(run_worker, "workflow_tool_specs", lambda: broken)
+    with pytest.raises(SystemExit):
+        run_worker.validate_outbound_tools()
+
+
+def test_validate_outbound_tools_rejects_unserializable(monkeypatch: pytest.MonkeyPatch) -> None:
+    good = run_worker.workflow_tool_specs()
+    poisoned = [
+        *good,
+        {
+            "name": "bad",
+            "description": "d",
+            "inputSchema": {"json": {"type": "object", "properties": {"x": {"default": object()}}}},
+        },
+    ]
+    monkeypatch.setattr(run_worker, "workflow_tool_specs", lambda: poisoned)
+    with pytest.raises(SystemExit):
+        run_worker.validate_outbound_tools()
+
+
 # --- readiness ------------------------------------------------------------------
 
 

@@ -1,0 +1,123 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: v0 / studio
+      - navigation [ref=e9]:
+        - button "Community" [ref=e10]
+        - button "Pricing" [ref=e11]
+        - button "Enterprise" [ref=e12]
+        - button "Docs" [ref=e13]
+      - generic [ref=e14]:
+        - button "Compare models" [ref=e15] [cursor=pointer]
+        - button "Sign in" [ref=e16]
+        - button "Start building" [ref=e17]
+    - generic [ref=e77]:
+      - generic [ref=e79]:
+        - log [ref=e80]:
+          - generic [ref=e82]:
+            - paragraph [ref=e87]: Write a file called index.html with a hello world heading.
+            - generic [ref=e91]:
+              - button "Thinking…" [expanded] [ref=e93]
+              - generic [ref=e106]:
+                - generic [ref=e130]:
+                  - button [expanded] [ref=e131]:
+                    - paragraph [ref=e136] [cursor=pointer]: Wrote /home/user/workspace/index.html
+                  - generic [ref=e139]: /home/user/workspace/index.html
+                - generic [ref=e147]:
+                  - button [expanded] [ref=e148]:
+                    - paragraph [ref=e153] [cursor=pointer]: index.html
+                  - generic [ref=e158]:
+                    - paragraph [ref=e164]: index.html
+                    - generic [ref=e165]:
+                      - tree [ref=e166]:
+                        - treeitem "index.html" [selected] [ref=e168] [cursor=pointer]
+                      - code [ref=e178]:
+                        - generic [ref=e179]: <!doctype html>
+                        - generic [ref=e180]: <html lang="en">
+                        - generic [ref=e181]: <head>
+                        - generic [ref=e182]: <meta charset="utf-8">
+                        - generic [ref=e183]: <meta name="viewport" content="width=device-width, initial-scale=1">
+                        - generic [ref=e184]: <title>Hello World</title>
+                        - generic [ref=e185]: </head>
+                        - generic [ref=e186]: <body>
+                        - generic [ref=e187]: <h1>Hello World</h1>
+                        - generic [ref=e188]: </body>
+                        - generic [ref=e189]: </html>
+                      - generic [ref=e191]:
+                        - textbox "Enter URL..." [ref=e193]: /api/orchestrator/file?path=%2Fv1%2Fresponses%2Fresp_18dc45b7-de97-4f4a-b3d2-33d23cf0dbef%2Ffiles%2F42d0862a-a5ac-47a9-90f1-2674dc9bcad5%2Fcontent
+                        - iframe [ref=e195]:
+                          - heading "Hello World" [level=1] [ref=f1e2]
+                      - paragraph [ref=e196]:
+                        - link "Download" [ref=e197] [cursor=pointer]:
+                          - /url: /api/orchestrator/file?path=%2Fv1%2Fresponses%2Fresp_18dc45b7-de97-4f4a-b3d2-33d23cf0dbef%2Ffiles%2F42d0862a-a5ac-47a9-90f1-2674dc9bcad5%2Fcontent
+                - generic [ref=e209]:
+                  - generic [ref=e210]: Thinking
+                  - generic [ref=e211]:
+                    - heading "DECOMPOSE" [level=3] [ref=e212]
+                    - paragraph [ref=e213]:
+                      - text: "Question: Create"
+                      - code [ref=e214]: index.html
+                      - text: containing a Hello World heading.
+                    - heading "PARALLEL EVIDENCE GATHERING" [level=3] [ref=e215]
+                    - paragraph [ref=e216]: No external evidence was needed. The requirement was complete and unambiguous.
+                    - heading "APPRAISE" [level=3] [ref=e217]
+                    - paragraph [ref=e218]:
+                      - text: The file-writing tool confirmed that
+                      - code [ref=e219]: /home/user/workspace/index.html
+                      - text: was created successfully.
+                    - heading "SYNTHESIZE" [level=3] [ref=e220]
+                    - paragraph [ref=e221]: "The file contains a valid HTML document with:"
+                    - generic [ref=e222]:
+                      - generic [ref=e223]: html
+                      - generic [ref=e225]:
+                        - button "Download file" [ref=e226] [cursor=pointer]
+                        - button "Copy Code" [ref=e229] [cursor=pointer]
+                      - code [ref=e234]:
+                        - generic [ref=e235]: <h1>Hello World</h1>
+                    - heading "DECIDE AND HAND OFF" [level=3] [ref=e236]
+                    - paragraph [ref=e237]:
+                      - text: "FINDINGS:"
+                      - code [ref=e238]: index.html
+                      - text: "was created successfully. [HIGH] CONFIDENCE: High — file creation was confirmed by the tool. GAPS: None. NEXT ACTION: READY:"
+                      - 'generic "Blocked URL: undefined" [ref=e239]': Download index.html [blocked]
+        - group [ref=e116]:
+          - group [ref=e117]
+          - textbox "Ask for a change, or start something new…" [ref=e119]
+          - group [ref=e120]:
+            - generic [ref=e121]:
+              - button [ref=e122]
+              - button "High (preset)" [ref=e123]
+              - button "Web preview" [pressed] [ref=e127]
+            - button "Stop" [ref=e129]
+      - generic [ref=e242]:
+        - generic [ref=e243]:
+          - generic [ref=e244]:
+            - paragraph [ref=e248]: Project
+            - generic [ref=e249]: 2 files
+          - generic [ref=e250]:
+            - generic [ref=e251]:
+              - button "Code" [ref=e252] [cursor=pointer]
+              - button "Preview" [pressed] [ref=e257] [cursor=pointer]
+              - button "Terminal" [ref=e261] [cursor=pointer]
+            - button "Idle"
+            - button "Fullscreen" [ref=e266]
+            - button "Close project IDE" [ref=e268]:
+              - generic [aria-hidden] [ref=e269]: Close
+              - generic [ref=e270]: Close
+        - generic [ref=e272]:
+          - generic [ref=e273]:
+            - button "Code" [ref=e274] [cursor=pointer]
+            - button "Preview" [pressed] [ref=e279] [cursor=pointer]
+            - button "Terminal" [ref=e283] [cursor=pointer]
+          - generic [ref=e292]:
+            - textbox "Enter URL..." [ref=e294]: /api/orchestrator/file?path=%2Fv1%2Fresponses%2Fresp_18dc45b7-de97-4f4a-b3d2-33d23cf0dbef%2Ffiles%2F42d0862a-a5ac-47a9-90f1-2674dc9bcad5%2Fcontent
+            - iframe [ref=e296]:
+              - heading "Hello World" [level=1] [ref=f2e2]
+  - button "Open Next.js Dev Tools" [ref=e297] [cursor=pointer]:
+    - generic [ref=e300]:
+      - text: Compiling
+      - generic [ref=e301]:
+        - generic [ref=e302]: .
+        - generic [ref=e303]: .
+        - generic [ref=e304]: .
+  - alert [ref=e76]

@@ -1,0 +1,40 @@
+Healthcare MCP Node.js server running...
+Session ID: 91070fff-3b43-4ca2-8b39-c43aaf730957
+Cache TTL: 86400 seconds
+Usage recorded: calculate_bmi (session: 91070fff-3b43-4ca2-8b39-c43aaf730957)
+Usage recorded: fda_drug_lookup (session: 91070fff-3b43-4ca2-8b39-c43aaf730957)
+Fetching FDA drug information for aspirin, type: general
+Making GET request to https://api.fda.gov/drug/ndc.json?search=generic_name%3Aaspirin+OR+brand_name%3Aaspirin&limit=1
+API response status: 200
+Usage recorded: lookup_icd_code (session: 91070fff-3b43-4ca2-8b39-c43aaf730957)
+Looking up ICD-10 code for: code=, description=hypertension
+Making GET request to https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search?sf=code%2Cname&terms=hypertension&maxList=3
+API response status: 200
+Usage recorded: pubmed_search (session: 91070fff-3b43-4ca2-8b39-c43aaf730957)
+Searching PubMed for: aspirin cardiovascular, max_results=2, date_range=
+Making GET request to https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=aspirin+cardiovascular&retmax=2&format=json
+API response status: 200
+Making GET request to https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=42696076%2C42692452&retmode=json
+API response status: 200
+Healthcare MCP Node.js server running...
+Session ID: 3320d507-a8e5-41d7-8c5d-5c562f72ca10
+Cache TTL: 86400 seconds
+Usage recorded: health_topics (session: 3320d507-a8e5-41d7-8c5d-5c562f72ca10)
+Searching Health Topics for: diabetes, language: en
+Making GET request to https://odphp.health.gov/myhealthfinder/api/v4/topicsearch.json?keyword=diabetes&lang=en
+API response status: 200
+Usage recorded: clinical_trials_search (session: 3320d507-a8e5-41d7-8c5d-5c562f72ca10)
+Searching Clinical Trials for: asthma, status: recruiting, max_results: 2
+Making GET request to https://clinicaltrials.gov/api/v2/studies?query.cond=asthma&pageSize=2&format=json&filter.overallStatus=RECRUITING
+API response status: 200
+Usage recorded: ncbi_bookshelf_search (session: 3320d507-a8e5-41d7-8c5d-5c562f72ca10)
+Searching NCBI Bookshelf for: genetics, max_results=2
+Making GET request to https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=books&term=genetics&retmax=2&format=json
+API response status: 200
+Making GET request to https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=books&id=5916348%2C5916346&retmode=json
+API response status: 200
+Usage recorded: medrxiv_search (session: 3320d507-a8e5-41d7-8c5d-5c562f72ca10)
+Searching medRxiv for: influenza, max_results=2
+Making GET request to https://api.medrxiv.org/details/medrxiv/influenza/0/180/json
+API response status: 200
+Usage recorded: get_usage_stats (session: 3320d507-a8e5-41d7-8c5d-5c562f72ca10)

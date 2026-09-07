@@ -16,6 +16,7 @@ level rather than on the instance.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections import deque
 from typing import Any, AsyncGenerator, Callable
@@ -38,6 +39,7 @@ from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 import think_activity
 from load_tool import mcp_client_activity, run_loaded_tool
 from workflow import ChatInput, ChatWorkflow, TurnInput, mcp_client_factories
+from browser_activity import browser_activity
 
 TASK_QUEUE = "test-chat-workflow"
 
@@ -208,6 +210,7 @@ async def client() -> AsyncGenerator[Client, None]:
                 run_loaded_tool,
                 think_activity.think,
                 stub_list_agent_models,
+                browser_activity,
             ],
             workflow_runner=UnsandboxedWorkflowRunner(),
         )
@@ -286,6 +289,117 @@ async def test_turn_replies_and_history_is_queryable(client: Client) -> None:
     assert "<think_notes>" in user_text
     assert THINK_NOTES in user_text
 
+    await handle.signal(ChatWorkflow.end_chat)
+    await handle.result()
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_take_control_waits_for_turn_and_blocks_new_turns(client: Client) -> None:
+    handle = await start_session(client, "chat-browser-handoff")
+    SCRIPTS.append(text_events("paused work"))
+    turn = await handle.start_update(
+        ChatWorkflow.turn, TurnInput(prompt="Work on the browser"),
+        wait_for_stage=WorkflowUpdateStage.ACCEPTED,
+    )
+    async def turn_started():
+        return await handle.query(ChatWorkflow.turn_start_offset) is not None
+
+    await poll(turn_started)
+
+    await handle.execute_update("claim_control")
+
+    assert (await handle.query("control_status"))["human_control"] is True
+    assert await handle.query(ChatWorkflow.turn_start_offset) is None
+    await turn.result()
+    with pytest.raises(WorkflowUpdateFailedError):
+        await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="must not run"))
+    await handle.signal(ChatWorkflow.end_chat)
+    await handle.result()
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_relinquish_continues_as_new_preserving_session(client: Client) -> None:
+    handle = await start_session(client, "chat-browser-relinquish")
+    SCRIPTS.append(text_events("before handoff"))
+    await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="initial task"))
+    await handle.execute_update("claim_control")
+    before = await handle.query(ChatWorkflow.messages)
+
+    old_run = await handle.execute_update("relinquish_control", "I signed in; continue")
+
+    async def successor_ready():
+        state = await handle.query("control_status")
+        return state if state["run_id"] != old_run and state["ready"] else None
+
+    state = await poll(successor_ready)
+    assert state["human_control"] is False
+    assert await handle.execute_update("relinquish_control", "I signed in; continue") == old_run
+    assert await handle.query(ChatWorkflow.session_id) == "chat-browser-relinquish"
+    assert await handle.query(ChatWorkflow.messages) == before
+    SCRIPTS.append(text_events("continued work"))
+    assert await handle.execute_update(
+        ChatWorkflow.turn, TurnInput(prompt="I signed in; continue")
+    ) == "continued work"
+    assert "before handoff" in assistant_texts(await handle.query(ChatWorkflow.messages))
+    await handle.signal(ChatWorkflow.end_chat)
+    await handle.result()
+
+
+def browser_events(tool_id: str, action: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {"messageStart": {"role": "assistant"}},
+        {"contentBlockStart": {"start": {"toolUse": {"toolUseId": tool_id, "name": "browser"}}}},
+        {"contentBlockDelta": {"delta": {"toolUse": {"input": json.dumps({"browser_input": {"action": action}})}}}},
+        {"contentBlockStop": {}},
+        {"messageStop": {"stopReason": "tool_use"}},
+        {"metadata": {"usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2}, "metrics": {"latencyMs": 1}}},
+    ]
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_browser_survives_handoff_rollover(client: Client, monkeypatch, tmp_path) -> None:
+    import json
+
+    monkeypatch.setenv("STRANDS_BROWSER_HEADLESS", "true")
+    monkeypatch.setenv("STRANDS_BROWSER_USER_DATA_DIR", str(tmp_path))
+    handle = await start_session(client, "chat-real-browser-handoff")
+    session = "browser-handoff-session"
+    SCRIPTS.extend([
+        browser_events("create", {"type": "init_session", "session_name": session, "description": "Handoff test"}),
+        browser_events("before", {"type": "execute_cdp", "session_name": session, "method": "Target.getTargetInfo"}),
+        text_events("ready for user"),
+    ])
+    await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="Open browser"))
+
+    def target_id(messages):
+        results = [block["toolResult"] for message in messages for block in message["content"] if "toolResult" in block]
+        for result in reversed(results):
+            envelope = json.loads(result["content"][0]["text"])
+            content = envelope.get("content", [])
+            if content and "text" in content[0] and "targetInfo" in content[0]["text"]:
+                return json.loads(content[0]["text"])["targetInfo"]["targetId"]
+        raise AssertionError("No native target result")
+
+    before = target_id(await handle.query(ChatWorkflow.messages))
+    await handle.execute_update("claim_control")
+    old_run = await handle.execute_update("relinquish_control", "Continue in this browser")
+
+    async def ready():
+        state = await handle.query("control_status")
+        return state["run_id"] != old_run and state["ready"]
+
+    await poll(ready)
+    SCRIPTS.extend([
+        browser_events("after", {"type": "execute_cdp", "session_name": session, "method": "Target.getTargetInfo"}),
+        text_events("same browser"),
+    ])
+    await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="Continue in this browser"))
+    assert target_id(await handle.query(ChatWorkflow.messages)) == before
+    SCRIPTS.extend([
+        browser_events("close", {"type": "close", "session_name": session}),
+        text_events("closed"),
+    ])
+    await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="Close browser"))
     await handle.signal(ChatWorkflow.end_chat)
     await handle.result()
 

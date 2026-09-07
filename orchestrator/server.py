@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import re
+import time
 from collections.abc import AsyncIterator
 import asyncio
 from contextlib import asynccontextmanager, suppress
@@ -45,7 +46,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from temporalio.client import Client, WorkflowUpdateStage
+from temporalio.client import Client, WorkflowUpdateStage, WorkflowUpdateFailedError
 from temporalio.contrib.strands import StrandsPlugin
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
 from temporalio.service import RPCError, RPCStatusCode
@@ -57,7 +58,12 @@ from compare_workflow import (
     CompareWorkflow,
     model_topic,
 )
-from config import TASK_QUEUE
+from config import (
+    READINESS_LEASE_TTL,
+    READINESS_POLLER_CACHE,
+    READINESS_POLLER_RPC_TIMEOUT,
+    TASK_QUEUE,
+)
 from perplexity_operations import AGENT_RUNS_TOPIC
 from run_worker import READINESS_PATH, agent_identity
 from skills_config import augmented_system_prompt
@@ -103,8 +109,50 @@ CHAT_TOPICS = [
 _state: dict[str, Any] = {"client": None, "system_prompt": ""}
 
 
+def _pid_alive(pid: int) -> bool:
+    """True when a local process with this PID exists (signal 0 probe)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Exists but owned by someone else; still a live process.
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def validate_readiness_record(
+    record: Any, *, now: float | None = None
+) -> dict[str, Any] | None:
+    """The record if it is a live worker lease, else None.
+
+    Rejects (never raises): non-dict/malformed records, legacy records without
+    ``pid``/``heartbeat``, heartbeats older than READINESS_LEASE_TTL, heartbeats
+    implausibly far in the future (clock damage), and leases whose PID is no
+    longer a live local process.
+    """
+    if not isinstance(record, dict):
+        return None
+    pid = record.get("pid")
+    heartbeat = record.get("heartbeat")
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return None
+    if not isinstance(heartbeat, (int, float)) or isinstance(heartbeat, bool):
+        return None
+    current = time.time() if now is None else now
+    ttl = READINESS_LEASE_TTL.total_seconds()
+    age = current - float(heartbeat)
+    if age > ttl or age < -ttl:
+        return None
+    if not _pid_alive(pid):
+        return None
+    return record
+
+
 async def readiness() -> dict[str, Any] | None:
-    """Worker readiness record, or None when no worker is running.
+    """Live worker readiness lease, or None when no live worker holds one.
 
     Off the event loop: FastAPI runs `async def` handlers directly on the loop,
     so a synchronous read_text here blocks every other in-flight request --
@@ -113,11 +161,52 @@ async def readiness() -> dict[str, Any] | None:
 
     def _read() -> dict[str, Any] | None:
         try:
-            return json.loads(READINESS_PATH.read_text())
-        except (OSError, json.JSONDecodeError):
+            record = json.loads(READINESS_PATH.read_text())
+        except (OSError, json.JSONDecodeError, ValueError):
             return None
+        return validate_readiness_record(record)
 
     return await run_in_threadpool(_read)
+
+
+_poller_cache: dict[str, Any] = {"checked_at": 0.0, "ok": False}
+
+
+async def task_queue_has_pollers() -> bool:
+    """Cached DescribeTaskQueue probe: are workflow pollers on TASK_QUEUE?
+
+    Fail closed: no Temporal client, an RPC error, or a slow RPC all report
+    False. Cached for READINESS_POLLER_CACHE so health/session gating stays
+    cheap under load.
+    """
+    now = time.monotonic()
+    if now - _poller_cache["checked_at"] < READINESS_POLLER_CACHE.total_seconds():
+        return bool(_poller_cache["ok"])
+    client = _state["client"]
+    ok = False
+    if client is not None:
+        try:
+            from temporalio.api.taskqueue.v1 import TaskQueue
+            from temporalio.api.enums.v1 import TaskQueueType
+            from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
+
+            response = await asyncio.wait_for(
+                client.workflow_service.describe_task_queue(
+                    DescribeTaskQueueRequest(
+                        namespace=client.namespace,
+                        task_queue=TaskQueue(name=TASK_QUEUE),
+                        task_queue_type=TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW,
+                    )
+                ),
+                timeout=READINESS_POLLER_RPC_TIMEOUT.total_seconds(),
+            )
+            ok = len(response.pollers) > 0
+        except Exception as error:  # noqa: BLE001 - fail closed, never crash
+            logger.warning("task-queue poller probe failed: %s", error)
+            ok = False
+    _poller_cache["checked_at"] = now
+    _poller_cache["ok"] = ok
+    return ok
 
 
 def models_of(record: dict[str, Any] | None) -> list[str]:
@@ -199,12 +288,17 @@ async def health() -> dict[str, Any]:
     record = await readiness()
     temporal_ok = _state["client"] is not None
     worker_ok = record is not None
+    pollers_ok = await task_queue_has_pollers()
     model_ids = models_of(record)
     payload: dict[str, Any] = {
-        "status": "ok" if (temporal_ok and worker_ok) else "degraded",
+        "status": "ok" if (temporal_ok and worker_ok and pollers_ok) else "degraded",
         "api": True,
         "temporal": temporal_ok,
         "worker": worker_ok,
+        # Live DescribeTaskQueue verification (cached): the lease proves a
+        # local worker process is alive, pollers prove it is actually polling
+        # Temporal. Fail closed when Temporal is unavailable.
+        "pollers": pollers_ok,
         "models": len(model_ids),
         # Full readiness catalog, in worker registration order. The Next.js
         # model helper (lib/perplexity.ts) reads this so the picker mirrors
@@ -229,6 +323,8 @@ async def start_session(body: StartSession) -> dict[str, str]:
         raise HTTPException(
             400, f"Unsupported model: {body.model_id}. Available: {preview}"
         )
+    if not await task_queue_has_pollers():
+        raise HTTPException(503, "No worker is polling the task queue")
 
     client = temporal()
     session_id = f"chat-{os.urandom(8).hex()}"
@@ -395,9 +491,19 @@ async def handoff(session_id: str, body: HandoffRequest) -> None:
     handle = temporal().get_workflow_handle(session_id)
     try:
         if body.action == "take":
-            await handle.signal(ChatWorkflow.take_control)
+            await handle.execute_update(ChatWorkflow.claim_control)
             return
-        await handle.signal(ChatWorkflow.give_control, body.message)
+        old_run = await handle.execute_update(ChatWorkflow.relinquish_control, body.message)
+        async with asyncio.timeout(30):
+            while True:
+                state = await handle.query(ChatWorkflow.control_status)
+                if state["run_id"] != old_run and state["ready"]:
+                    return
+                await asyncio.sleep(0.1)
+    except TimeoutError as error:
+        raise HTTPException(504, "Session is still resuming; retry shortly") from error
+    except WorkflowUpdateFailedError as error:
+        raise HTTPException(409, str(error.__cause__ or error)) from error
     except RPCError as error:
         if error.status == RPCStatusCode.NOT_FOUND:
             raise HTTPException(404, f"Unknown session: {session_id}") from error

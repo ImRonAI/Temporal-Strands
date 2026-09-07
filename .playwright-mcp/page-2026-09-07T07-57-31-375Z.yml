@@ -1,0 +1,31 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: v0 / studio
+      - navigation [ref=e9]:
+        - button "Community" [ref=e10]
+        - button "Pricing" [ref=e11]
+        - button "Enterprise" [ref=e12]
+        - button "Docs" [ref=e13]
+      - generic [ref=e14]:
+        - button "Compare models" [ref=e15] [cursor=pointer]
+        - button "Sign in" [ref=e16]
+        - button "Start building" [ref=e17]
+    - generic [ref=e79]:
+      - log [ref=e80]:
+        - generic [ref=e82]:
+          - paragraph [ref=e87]: Write a file called index.html with a hello world heading, then stop.
+          - generic [ref=e91]:
+            - button "Thinking…" [expanded] [ref=e93]
+            - generic [ref=e105]: Working
+      - group [ref=e116]:
+        - group [ref=e117]
+        - textbox "Ask for a change, or start something new…" [ref=e119]
+        - group [ref=e120]:
+          - generic [ref=e121]:
+            - button [ref=e122]
+            - button "High (preset)" [ref=e123]
+            - button "Web preview" [ref=e127]
+          - button "Stop" [ref=e129]
+  - button "Open Next.js Dev Tools" [ref=e69] [cursor=pointer]
+  - alert [ref=e76]

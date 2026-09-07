@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils"
 
 /**
- * Editorial blurple ambience.
+ * Editorial blue-glass ambience.
  * A pair of slow-drifting radial glows sit behind everything, softened by a
  * heavy blur and a fine grid so the surface reads as "paper, lit from behind"
  * rather than a flat gradient. Purely decorative — hidden from assistive tech.
@@ -25,21 +25,21 @@ export function BlurpleBackground({ settled = false }: { settled?: boolean }) {
           settled ? "opacity-40" : "opacity-100"
         )}
       >
-        {/* primary blurple bloom, upper-left */}
-        <div className="absolute -left-[12%] -top-[18%] h-[78vh] w-[78vh] animate-blurple-drift rounded-full bg-[radial-gradient(circle_at_center,oklch(0.62_0.23_277/0.85),transparent_66%)] blur-[80px]" />
+        {/* primary blue bloom, upper-left */}
+        <div className="ambient-bloom absolute -left-[12%] -top-[18%] h-[78vh] w-[78vh] animate-blurple-drift rounded-full" />
 
-        {/* secondary cooler bloom, lower-right */}
-        <div className="absolute -bottom-[22%] -right-[8%] h-[68vh] w-[68vh] animate-blurple-drift-alt rounded-full bg-[radial-gradient(circle_at_center,oklch(0.66_0.2_300/0.7),transparent_68%)] blur-[90px]" />
+        {/* complementary blue/purple bloom, lower-right */}
+        <div className="ambient-bloom-secondary absolute -bottom-[22%] -right-[8%] h-[68vh] w-[68vh] animate-blurple-drift-alt rounded-full" />
 
         {/* tight accent core glowing behind the headline */}
-        <div className="absolute left-1/2 top-[34%] h-[46vh] w-[46vh] -translate-x-1/2 animate-blurple-drift rounded-full bg-[radial-gradient(circle_at_center,oklch(0.58_0.22_285/0.6),transparent_70%)] blur-[110px]" />
+        <div className="ambient-bloom-core absolute left-1/2 top-[34%] h-[46vh] w-[46vh] -translate-x-1/2 animate-blurple-drift rounded-full" />
       </div>
 
       {/* fine editorial grid */}
       <div className="absolute inset-0 opacity-[0.05] [background-image:linear-gradient(to_right,white_1px,transparent_1px),linear-gradient(to_bottom,white_1px,transparent_1px)] [background-size:64px_64px] [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]" />
 
       {/* vignette to ground the type */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_52%,oklch(0.13_0.02_280/0.78))]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_52%,oklch(0.13_0.02_250/0.78))]" />
     </div>
   )
 }

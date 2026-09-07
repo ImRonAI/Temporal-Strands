@@ -39,6 +39,8 @@ const h = vi.hoisted(() => {
     buttonProps: [] as Array<Record<string, unknown>>,
     suggestionProps: [] as Array<Record<string, unknown>>,
     previewPanelProps: [] as Array<Record<string, unknown>>,
+    idePanelProps: [] as Array<Record<string, unknown>>,
+    projectIdePreviewCalls: [] as unknown[][],
     computerUsePreviewResult: {
       open: false,
       sessionId: "",
@@ -254,11 +256,17 @@ vi.mock("@/components/v0/computer-use-preview", () => ({
 }))
 
 vi.mock("@/components/v0/project-ide", () => ({
-  projectIdePreview: () => h.projectIdePreviewResult,
+  projectIdePreview: (...args: unknown[]) => {
+    h.projectIdePreviewCalls.push(args)
+    return h.projectIdePreviewResult
+  },
 }))
 
 vi.mock("@/components/v0/project-ide-panel", () => ({
-  ProjectIdePanel: () => <div data-testid="project-ide-panel" />,
+  ProjectIdePanel: (props: Record<string, unknown>) => {
+    h.idePanelProps.push(props)
+    return <div data-testid="project-ide-panel" />
+  },
 }))
 
 vi.mock("@/components/v0/site-header", () => ({
@@ -304,6 +312,8 @@ beforeEach(() => {
   h.buttonProps.length = 0
   h.suggestionProps.length = 0
   h.previewPanelProps.length = 0
+  h.idePanelProps.length = 0
+  h.projectIdePreviewCalls.length = 0
   h.computerUsePreviewResult = { open: false, sessionId: "" }
   h.projectIdePreviewResult = {
     open: false,
@@ -605,6 +615,178 @@ describe("AgentChat approval flow", () => {
     expect(html).toContain('data-testid="computer-use-preview-panel"')
     expect(html).toContain('data-pending-approval="Take over the browser?"')
     expect(html).not.toContain("Approval needed")
+  })
+})
+
+describe("AgentChat project IDE wiring", () => {
+  const toolPart = (id: string): Part => ({
+    type: "dynamic-tool",
+    toolName: "shell",
+    toolCallId: id,
+    state: "output-available",
+    input: { command: "ls" },
+    output: "ok",
+  })
+
+  it("feeds projectIdePreview the parts of EVERY assistant turn, in order", () => {
+    setChat({
+      messages: [
+        { id: "u1", role: "user", parts: [textPart("build it")] },
+        { id: "a1", role: "assistant", parts: [toolPart("t1"), textPart("done 1")] },
+        { id: "u2", role: "user", parts: [textPart("now run it")] },
+        { id: "a2", role: "assistant", parts: [toolPart("t2")] },
+      ],
+    })
+    render()
+    const [parts] = h.projectIdePreviewCalls.at(-1) as [Part[]]
+    const ids = parts
+      .filter((p) => p.type === "dynamic-tool")
+      .map((p) => p.toolCallId)
+    // Both turns' tool parts, user parts excluded.
+    expect(ids).toEqual(["t1", "t2"])
+    expect(parts.some((p) => p.type === "text" && p.text === "build it")).toBe(false)
+  })
+
+  it("renders the IDE panel when the aggregated preview opens", () => {
+    h.projectIdePreviewResult = {
+      open: true,
+      sessionId: "ide-1",
+      activityId: "t2",
+      isDevServer: false,
+      previewUrl: "",
+    }
+    setChat({
+      messages: [{ id: "a1", role: "assistant", parts: [toolPart("t2")] }],
+    })
+    const html = render()
+    expect(html).toContain('data-testid="project-ide-panel"')
+    const panel = h.idePanelProps.at(-1)!
+    expect(typeof panel.onClose).toBe("function")
+    expect(panel.ide).toBe(h.projectIdePreviewResult)
+  })
+
+  it("keeps the browser preview panel ahead of the IDE when both are open", () => {
+    h.computerUsePreviewResult = { open: true, sessionId: "cu-1" }
+    h.projectIdePreviewResult = {
+      open: true,
+      sessionId: "ide-1",
+      isDevServer: false,
+      previewUrl: "",
+    }
+    setChat({
+      messages: [{ id: "a1", role: "assistant", parts: [toolPart("t1")] }],
+    })
+    const html = render()
+    expect(html).toContain('data-testid="computer-use-preview-panel"')
+    expect(html).not.toContain('data-testid="project-ide-panel"')
+  })
+})
+
+describe("AgentChat project IDE wiring", () => {
+  it("feeds projectIdePreview the parts of EVERY assistant turn, in order", () => {
+    setChat({
+      messages: [
+        { id: "u1", role: "user", parts: [textPart("build it")] },
+        {
+          id: "a1",
+          role: "assistant",
+          parts: [{ type: "dynamic-tool", toolName: "file_write", toolCallId: "w1" }],
+        },
+        { id: "u2", role: "user", parts: [textPart("now run it")] },
+        {
+          id: "a2",
+          role: "assistant",
+          parts: [{ type: "dynamic-tool", toolName: "shell", toolCallId: "sh1" }],
+        },
+      ],
+    })
+    render()
+    const [parts, streaming] = h.projectIdePreviewCalls.at(-1)!
+    expect(streaming).toBe(false)
+    expect(
+      (parts as Array<{ toolCallId?: string }>).map((p) => p.toolCallId)
+    ).toEqual(["w1", "sh1"])
+  })
+
+  it("opens the IDE panel when the projection reports activity", () => {
+    h.projectIdePreviewResult = {
+      open: true,
+      sessionId: "ide-1",
+      isDevServer: false,
+      previewUrl: "",
+      activityId: "op-1",
+    }
+    setChat({
+      messages: [
+        { id: "u1", role: "user", parts: [textPart("go")] },
+        { id: "a1", role: "assistant", parts: [textPart("done")] },
+      ],
+    })
+    const html = render()
+    expect(html).toContain('data-testid="project-ide-panel"')
+    const panel = h.idePanelProps.at(-1)!
+    expect(panel.ide).toBe(h.projectIdePreviewResult)
+    expect(typeof panel.onClose).toBe("function")
+    // The stream's own activeView drives view focus; the panel is not
+    // preview-forced merely because a dev server exists.
+    expect(panel.previewForced).toBe(false)
+  })
+
+  it("keeps the browser preview panel ahead of the IDE when both are open", () => {
+    h.computerUsePreviewResult = { open: true, sessionId: "cu-1" }
+    h.projectIdePreviewResult = {
+      open: true,
+      sessionId: "ide-1",
+      isDevServer: false,
+      previewUrl: "",
+    }
+    setChat({
+      messages: [{ id: "a1", role: "assistant", parts: [textPart("x")] }],
+    })
+    const html = render()
+    expect(html).toContain('data-testid="computer-use-preview-panel"')
+    expect(html).not.toContain('data-testid="project-ide-panel"')
+  })
+})
+
+describe("AgentChat IDE fullscreen and presentation-only close", () => {
+  const openIde = () => {
+    h.projectIdePreviewResult = {
+      open: true,
+      sessionId: "ide-1",
+      activityId: "op-1",
+      isDevServer: false,
+      previewUrl: "",
+    }
+    setChat({
+      status: "streaming",
+      messages: [{ id: "a1", role: "assistant", parts: [textPart("working")] }],
+    })
+  }
+
+  it("hands the panel fullscreen state and a working onFullscreenChange handler", () => {
+    openIde()
+    render()
+    const panel = h.idePanelProps.at(-1)!
+    expect(panel.fullscreen).toBe(false)
+    expect(typeof panel.onFullscreenChange).toBe("function")
+  })
+
+  it("closing the IDE never calls stop — it is presentation only", () => {
+    openIde()
+    render()
+    const panel = h.idePanelProps.at(-1)!
+    ;(panel.onClose as () => void)()
+    expect(h.chat.stop).not.toHaveBeenCalled()
+  })
+
+  it("offers an explicit reopen path: the composer's onPreview clears the dismissal", () => {
+    openIde()
+    render()
+    const composer = h.composerProps.at(-1)!
+    // The reopen affordance is wired whenever the IDE projection is live.
+    expect(typeof composer.onPreview).toBe("function")
+    expect(composer.previewActive).toBe(true)
   })
 })
 

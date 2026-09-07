@@ -1,0 +1,3 @@
+{"event": "initialized", "server_name": "Email History Server", "server_version": "1.29.1", "protocol": "2025-06-18", "ts": "2026-09-07T06:58:07.369457+00:00"}
+{"event": "tools", "count": 2, "names": ["get_emails", "get_email_by_id"], "ts": "2026-09-07T06:58:07.373756+00:00"}
+{"event": "call", "tool": "get_emails", "args": {}, "is_error": false, "content": [], "ts": "2026-09-07T06:58:07.381020+00:00"}

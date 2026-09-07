@@ -113,6 +113,8 @@ export function computerUseFields(part: {
 export function unwrapToolOutput(value: unknown): Record<string, unknown> | null {
   const record = asRecord(value)
   if (!record) return null
+  const browserPreview = asRecord(record.browserPreview)
+  if (browserPreview) return browserPreview
 
   // TemporalActivityTool JSON-stringifies the whole activity return value:
   // {"status":"success","content":[{"text":"{\"action\":...}"}]}
@@ -146,19 +148,22 @@ export function computerUsePreview(
 
   for (const part of parts) {
     if (!isDynamicToolUIPart(part)) continue
-    if (!COMPUTER_USE_TOOL_NAMES.has(part.toolName)) continue
+    if (part.toolName !== "browser" && !COMPUTER_USE_TOOL_NAMES.has(part.toolName)) continue
     const fields = computerUseFields(part)
     if (!panelId) panelId = part.toolCallId
+    // Resolve the nullable accumulator to a concrete ComputerUsePreview so
+    // property reads never happen behind a narrowing-hostile optional chain.
+    const previous: ComputerUsePreview = latest ?? EMPTY
     latest = {
       open: false,
       sessionId: panelId,
-      url: fields.url || latest?.url || "",
-      livePreviewUrl: fields.livePreviewUrl || latest?.livePreviewUrl || "",
+      url: fields.url || previous.url,
+      livePreviewUrl: fields.livePreviewUrl || previous.livePreviewUrl,
       devtoolsFrontendUrl:
-        fields.devtoolsFrontendUrl || latest?.devtoolsFrontendUrl || "",
+        fields.devtoolsFrontendUrl || previous.devtoolsFrontendUrl,
       action: fields.action,
-      intent: fields.intent || latest?.intent || "",
-      screenshot: fields.screenshot ?? latest?.screenshot ?? null,
+      intent: fields.intent || previous.intent,
+      screenshot: fields.screenshot ?? previous.screenshot,
     }
   }
 
@@ -174,6 +179,7 @@ export function computerUsePreview(
 export function stripComputerUseScreenshot(output: unknown): unknown {
   const record = asRecord(output)
   if (!record || !("screenshot" in record)) return output
-  const { screenshot: _screenshot, ...rest } = record
+  const rest = { ...record }
+  delete rest.screenshot
   return rest
 }

@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from strands.models.model import Model
 from temporalio.contrib.strands.workflow import activity_as_tool
+from temporalio.exceptions import ApplicationError
 
 import graph_activity as ga
 import subagent_support
@@ -281,9 +282,9 @@ async def test_execute_without_task_errors() -> None:
     info.activity_id = "a1"
     info.attempt = 1
     with patch.object(ga.activity, "info", return_value=info):
-        result = await graph_activity(action="execute", topology={"nodes": [{"id": "x"}]})
-    assert result["status"] == "error"
-    assert "task prompt is required" in result["content"][0]["text"]
+        with pytest.raises(ApplicationError, match="task prompt is required") as exc:
+            await graph_activity(action="execute", topology={"nodes": [{"id": "x"}]})
+    assert exc.value.non_retryable
 
 
 @pytest.mark.asyncio
@@ -292,9 +293,8 @@ async def test_create_without_topology_errors() -> None:
     info.activity_id = "a1"
     info.attempt = 1
     with patch.object(ga.activity, "info", return_value=info):
-        result = await graph_activity(action="create", graph_id="g1")
-    assert result["status"] == "error"
-    assert "non-empty 'nodes'" in result["content"][0]["text"]
+        with pytest.raises(ApplicationError, match="non-empty 'nodes'"):
+            await graph_activity(action="create", graph_id="g1")
 
 
 @pytest.mark.asyncio
@@ -303,15 +303,15 @@ async def test_unknown_tools_fail_clearly() -> None:
     stream = FakeStreamClient()
     a, b, c = run_graph(model, stream)
     with a, b, c:
-        result = await graph_activity(
-            action="execute",
-            topology={"nodes": [{"id": "solo", "system_prompt": "s"}]},
-            task="go",
-            tools=["definitely_not_a_tool"],
-        )
-    assert result["status"] == "error"
-    assert "definitely_not_a_tool" in result["content"][0]["text"]
-    assert "available" in result["content"][0]["text"]
+        with pytest.raises(ApplicationError, match="definitely_not_a_tool") as exc:
+            await graph_activity(
+                action="execute",
+                topology={"nodes": [{"id": "solo", "system_prompt": "s"}]},
+                task="go",
+                tools=["definitely_not_a_tool"],
+            )
+    assert "available" in str(exc.value)
+    assert exc.value.non_retryable
 
 
 # --- one-shot execution through real native executors -----------------------
@@ -489,12 +489,12 @@ async def test_node_error_yields_error_terminal_state() -> None:
     stream = FakeStreamClient()
     a, b, c = run_graph(model, stream)
     with a, b, c:
-        result = await graph_activity(
-            action="execute",
-            topology={"nodes": [{"id": "solo", "system_prompt": "s"}]},
-            task="go",
-        )
-    assert result["status"] == "error"
+        with pytest.raises(ApplicationError):
+            await graph_activity(
+                action="execute",
+                topology={"nodes": [{"id": "solo", "system_prompt": "s"}]},
+                task="go",
+            )
     from strands_graph_tool.graph import _manager
 
     assert _manager.graphs == {}  # cleanup ran despite the failure
@@ -509,13 +509,14 @@ async def test_execution_timeout_produces_error_and_cleanup(monkeypatch) -> None
     stream = FakeStreamClient()
     a, b, c = run_graph(model, stream)
     with a, b, c:
-        result = await graph_activity(
-            action="execute",
-            topology={"nodes": [{"id": "solo", "system_prompt": "s"}]},
-            task="go",
-        )
-    assert result["status"] == "error"
-    assert "exceeded" in result["content"][0]["text"]
+        with pytest.raises(ApplicationError, match="exceeded"):
+            await graph_activity(
+                action="execute",
+                topology={"nodes": [{"id": "solo", "system_prompt": "s"}]},
+                task="go",
+            )
+    # The terminal error frame still reaches the frontend.
+    assert frames(stream)[-1]["data"]["status"] == "error"
     from strands_graph_tool.graph import _manager
 
     assert _manager.graphs == {}
@@ -631,23 +632,63 @@ async def test_management_actions_pass_through() -> None:
 
 def test_activity_as_tool_spec_is_flat_and_documented() -> None:
     spec = activity_as_tool(graph_activity).tool_spec
-    props = spec["inputSchema"]["json"]["properties"]
+    schema = spec["inputSchema"]["json"]
+    props = schema["properties"]
     assert set(props) == {
-        "action", "graph_id", "topology", "task",
-        "model_provider", "model_settings", "tools",
+        "action", "graph_id", "topology", "task", "model_provider", "tools",
     }
     for name, prop in props.items():
         assert prop.get("description"), f"{name} lacks a description"
-    assert props["topology"]["type"] == "object"
     assert props["tools"]["type"] == "array"
-    # The full outbound conversion accepts it.
-    from perplexity_model import _ensure_object_properties
+    # topology is a typed Pydantic model: the schema is structural, not a bare
+    # object (which the Perplexity Agent API rejects and which leaves the model
+    # nothing to fill -- observed live as topology={}).
+    topology = schema["$defs"]["GraphTopology"]
+    assert set(topology["properties"]) == {"nodes", "edges", "entry_points"}
+    assert topology["required"] == ["nodes"]
+    node = schema["$defs"]["GraphNode"]
+    assert {"id", "type", "system_prompt", "skill", "tools", "agents", "nodes",
+            "edges", "tasks"} <= set(node["properties"])
+    assert schema["$defs"]["GraphEdge"]["required"] == ["from", "to"]
+    # No untyped object anywhere in the outbound schema.
+    def bare_objects(node: Any) -> list[Any]:
+        found = []
+        if isinstance(node, dict):
+            if node.get("type") == "object" and "properties" not in node:
+                found.append(node)
+            for value in node.values():
+                found.extend(bare_objects(value))
+        elif isinstance(node, list):
+            for value in node:
+                found.extend(bare_objects(value))
+        return found
+
+    assert bare_objects(schema) == []
+    # The outbound conversion (verbatim schema) passes the Agent API validator.
     from perplexity_operations import _validate_tools
 
-    converted = {
+    _validate_tools([{
         "type": "function",
         "name": spec["name"],
         "description": spec.get("description", ""),
-        "parameters": _ensure_object_properties(spec["inputSchema"]["json"]),
-    }
-    _validate_tools([converted])
+        "parameters": schema,
+    }])
+
+
+def test_topology_model_round_trips_to_sibling_dict() -> None:
+    from graph_activity import GraphTopology, _as_topology_dict
+
+    topo = GraphTopology.model_validate({
+        "nodes": [
+            {"id": "a", "system_prompt": "s"},
+            {"id": "jobs", "type": "workflow",
+             "tasks": [{"task_id": "t1", "description": "d", "dependencies": []}]},
+        ],
+        "edges": [{"from": "a", "to": "jobs"}],
+    })
+    as_dict = _as_topology_dict(topo)
+    assert as_dict["edges"] == [{"from": "a", "to": "jobs"}]
+    assert as_dict["nodes"][0] == {"id": "a", "type": "agent", "system_prompt": "s"}
+    assert as_dict["nodes"][1]["tasks"][0]["task_id"] == "t1"
+    # Plain dicts (unit tests, direct callers) pass through unchanged.
+    assert _as_topology_dict({"nodes": []}) == {"nodes": []}

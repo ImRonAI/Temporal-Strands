@@ -60,7 +60,7 @@ from strands.types.exceptions import EventLoopException
 from strands.types.interrupt import InterruptResponseContent
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ApplicationError
+from temporalio.exceptions import ActivityError, ApplicationError
 from temporalio.contrib.strands import TemporalAgent, TemporalMCPClient
 from temporalio.contrib.strands.workflow import activity_as_tool
 from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamState
@@ -494,8 +494,29 @@ def turn_content_blocks(turn: TurnInput) -> list[dict[str, Any]]:
     return blocks
 
 
+def _failure_text(error: BaseException) -> str:
+    """The innermost failure message of a Temporal activity failure.
+
+    A failed ``activity_as_tool`` activity reaches Strands as
+    ``ActivityError("Activity task failed")`` whose ``__cause__`` is the
+    ``ApplicationError`` the activity raised. Strands' executor stringifies
+    the outer error, so without unwrapping the model only ever reads
+    "Activity task failed".
+    """
+    cause: BaseException | None = error
+    while isinstance(cause, ActivityError) and cause.__cause__ is not None:
+        cause = cause.__cause__
+    return str(cause)
+
+
 class _ToolResultHook(HookProvider):
     """Publishes each tool's result on the ``tool_results`` topic.
+
+    Also rewrites a failed activity tool's error result to carry the
+    activity's own failure message. ``AfterToolCallEvent.result`` is the
+    hook-writable slot Strands provides for exactly this (the event fires
+    "regardless of whether the execution was successful or resulted in an
+    error"), and the rewritten result is what enters the conversation.
 
     Deterministic: it only reads the event and appends to the workflow-owned
     stream log, which is itself part of replayable workflow state.
@@ -511,6 +532,11 @@ class _ToolResultHook(HookProvider):
         result = event.result
         if not result:
             return
+        if event.exception is not None and result.get("status") == "error":
+            result = event.result = {
+                **result,
+                "content": [{"text": f"Error: {_failure_text(event.exception)}"}],
+            }
         self._publish(
             {
                 "tool_use_id": result.get("toolUseId", event.tool_use["toolUseId"]),
@@ -938,10 +964,15 @@ class ChatWorkflow:
             system_prompt=self._system_prompt,
             messages=list(messages),
             plugins=[
+                # Default "userTurn" trigger: the catalog is folded into the
+                # fresh user ask only. With "everyTurn" Strands appends it
+                # AFTER each tool result (a tool result must stay the first
+                # block of its turn), and the model answered the catalog
+                # instead of the graph result (live: chat-8be4046dba273ada,
+                # reply "Received the Agent API model catalog.").
                 ContextInjector(
                     render_agent_api_models,
                     name="agent-api-models",
-                    trigger="everyTurn",
                 ),
             ],
             tools=[

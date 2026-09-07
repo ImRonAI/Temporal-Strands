@@ -43,6 +43,19 @@ def _application_error(message: str, *, non_retryable: bool) -> ApplicationError
 
 
 def _ensure_object_properties(schema: Any) -> Any:
+    """Provider-side schema normalization for the Agent API.
+
+    The Perplexity Agent API rejects any function parameter schema containing
+    an ``object`` node without ``properties`` (verified live: 400 ``invalid
+    request`` for ``{"type": "object"}`` alone, with ``additionalProperties``,
+    or as array ``items``). Community tools such as ``mcp_client`` declare
+    free-form ``dict`` arguments that serialize exactly that way, so the
+    adapter adds an empty ``properties`` map -- the same provider-adapter
+    role Strands' own ``ensure_strict_json_schema`` plays for Bedrock
+    (``strands/models/_strict_schema.py``). Tools that need the model to fill
+    a structured object must declare it with typed Pydantic fields; this
+    normalization only keeps the request valid, it cannot invent structure.
+    """
     if isinstance(schema, dict):
         normalized = {key: _ensure_object_properties(value) for key, value in schema.items()}
         if normalized.get("type") == "object" and "properties" not in normalized:

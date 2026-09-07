@@ -103,7 +103,6 @@ async def test_context_injector_folds_catalog_into_model_input() -> None:
                     "</agent_api_models>"
                 ),
                 name="agent-api-models",
-                trigger="everyTurn",
             )
         ],
     )

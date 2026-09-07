@@ -35,7 +35,15 @@ Frame contract (published on ``THINKING_TOPIC``, one frame per event):
    ``multiagent_node_stream`` frames retain the whole sanitized agent event
    (text deltas AND tool use / tool results), not text only.
 3. One final ``{"status": "success" | "error" | "cancelled", "content":
-   [{"text": ...}]}`` terminal frame (also the activity's return value).
+   [{"text": ...}]}`` terminal frame. On success it is also the activity's
+   return value; on failure the activity RAISES a non-retryable
+   ``ApplicationError`` so Strands hands the model a ``status: "error"`` tool
+   result (a returned error dict would arrive as a successful call).
+
+Parameters are typed Pydantic models (``GraphTopology`` / ``GraphNode`` /
+``GraphEdge`` / ``GraphTask``) so the generated tool schema is fully
+structural; the Perplexity Agent API rejects untyped ``{"type": "object"}``
+parameters outright.
 
 Runtime ``Agent``/``model`` handles, result dataclasses, and circular
 structures are sanitized by ``subagent_support.publishable`` before publish.
@@ -54,9 +62,9 @@ worker. Prefer the one-shot form.
 from __future__ import annotations
 
 import asyncio
-import traceback
 from typing import Any, Optional, cast
 
+from pydantic import BaseModel, ConfigDict, Field
 from strands import Agent
 from strands.types._events import ToolResultEvent, ToolStreamEvent
 from strands_graph_tool.graph import graph as sibling_graph
@@ -79,6 +87,103 @@ from subagent_support import (
 )
 
 _NODE_KINDS = ("agent", "skill_agent", "swarm", "graph", "workflow", "parallel")
+
+# Typed activity parameters. Strands' FunctionToolMetadata emits their JSON
+# Schema for the tool spec and the plugin's pydantic_data_converter carries
+# them across the activity boundary (Temporal Strands README, Structured
+# Output). A bare ``dict`` parameter serializes as an untyped ``{"type":
+# "object"}``, which the Perplexity Agent API rejects (400 invalid request)
+# and which leaves the model nothing structural to fill.
+
+
+class GraphEdge(BaseModel):
+    """One directed edge between two node ids in the same formation."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_: str = Field(alias="from", description="Source node id.")
+    to: str = Field(description="Target node id.")
+
+
+class GraphTask(BaseModel):
+    """One task of a ``workflow`` node."""
+
+    model_config = ConfigDict(extra="allow")
+
+    task_id: str = Field(description="Unique task id within the workflow.")
+    description: Optional[str] = Field(
+        default=None, description="What the task's agent must do (used as its prompt)."
+    )
+    system_prompt: Optional[str] = Field(default=None)
+    dependencies: list[str] = Field(
+        default_factory=list, description="task_ids that must finish first."
+    )
+    skill: Optional[str] = Field(
+        default=None, description="Registered skill name; runs that skill's sub-agent."
+    )
+    model_provider: Optional[str] = None
+    tools: Optional[list[str]] = None
+
+
+class GraphNode(BaseModel):
+    """One formation node; ``type`` selects which other fields apply."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(description="Unique node id within its formation.")
+    type: str = Field(
+        default="agent",
+        description="agent | skill_agent | swarm | graph | workflow | parallel.",
+    )
+    system_prompt: Optional[str] = Field(
+        default=None, description="agent nodes: the specialist's instructions."
+    )
+    skill: Optional[str] = Field(
+        default=None, description="skill_agent nodes: registered skill name."
+    )
+    tools: Optional[list[str]] = Field(
+        default=None, description="agent nodes: tool names; omit to inherit all."
+    )
+    model_provider: Optional[str] = Field(
+        default=None, description="Override model provider; omit to inherit the session model."
+    )
+    agents: Optional[list["GraphNode"]] = Field(
+        default=None, description="swarm / parallel nodes: member agent nodes."
+    )
+    nodes: Optional[list["GraphNode"]] = Field(
+        default=None, description="graph nodes: nested pipeline nodes."
+    )
+    edges: Optional[list[GraphEdge]] = Field(
+        default=None, description="graph nodes: nested pipeline edges."
+    )
+    entry_points: Optional[list[str]] = Field(
+        default=None, description="graph nodes: nested entry node ids."
+    )
+    tasks: Optional[list[GraphTask]] = Field(
+        default=None, description="workflow nodes: dependency-ordered tasks."
+    )
+
+
+class GraphTopology(BaseModel):
+    """A formation: nodes, structural edges, and entry points."""
+
+    nodes: list[GraphNode] = Field(description="Formation nodes (at least one).")
+    edges: list[GraphEdge] = Field(
+        default_factory=list, description="Directed edges between top-level node ids."
+    )
+    entry_points: list[str] = Field(
+        default_factory=list,
+        description="Node ids that receive the task first; omit to auto-detect.",
+    )
+
+
+def _as_topology_dict(topology: GraphTopology | dict[str, Any] | None) -> dict[str, Any] | None:
+    """The sibling tool's plain-dict topology (aliases such as ``from`` kept)."""
+    if topology is None:
+        return None
+    if isinstance(topology, BaseModel):
+        return topology.model_dump(by_alias=True, exclude_none=True)
+    return topology
 
 
 def _qualify(path: str, node_id: str) -> str:
@@ -234,12 +339,18 @@ def flatten_native_event(
     return [cast(dict, publishable(event))]
 
 
-def _error_result(activity_id: str, text: str) -> dict[str, Any]:
-    return {
-        "status": "error",
-        "content": [{"text": text}],
-        "toolUseId": activity_id,
-    }
+def _fail(message: str) -> ApplicationError:
+    """A non-retryable tool failure.
+
+    Raising (not returning) is the framework contract: the Temporal Strands
+    ``activity_as_tool`` wrapper turns a *returned* value into a
+    ``status: "success"`` tool result, so an error dict would reach the model
+    as a successful call. A raised ``ApplicationError`` fails the activity;
+    Strands' tool executor converts the exception into a ``status: "error"``
+    tool result the model actually sees. Non-retryable because the input is
+    what is wrong; a retry would repeat the same billable formation run.
+    """
+    return ApplicationError(message, type="GraphActivityError", non_retryable=True)
 
 
 def _tool_input(**kwargs: Any) -> dict[str, Any]:
@@ -273,6 +384,14 @@ async def _run_sibling(
     return result
 
 
+def _result_text(result: dict[str, Any]) -> str:
+    return "\n".join(
+        block["text"]
+        for block in result.get("content") or []
+        if isinstance(block, dict) and isinstance(block.get("text"), str)
+    )
+
+
 async def _heartbeat_ticker() -> None:
     """Keep the activity visibly alive through quiet stream periods."""
     await quiet_heartbeat_ticker(GRAPH_QUIET_HEARTBEAT_INTERVAL.total_seconds())
@@ -282,10 +401,9 @@ async def _heartbeat_ticker() -> None:
 async def graph_activity(
     action: str = "execute",
     graph_id: Optional[str] = None,
-    topology: Optional[dict] = None,
+    topology: Optional[GraphTopology] = None,
     task: Optional[str] = None,
     model_provider: Optional[str] = None,
-    model_settings: Optional[dict[str, Any]] = None,
     tools: Optional[list[str]] = None,
 ) -> dict:
     """Create and execute multi-agent formations with live streaming.
@@ -295,14 +413,13 @@ async def graph_activity(
     and cleaned up in one call, and every node's progress streams live.
 
     Node "type" values (default "agent"): "agent" (one specialist:
-    id, system_prompt, optional model_provider/model_settings/tools),
-    "skill_agent" (a registered skill's isolated sub-agent: id, skill),
-    "swarm" (dynamic handoffs between 2-5 agents: id, agents), "graph"
-    (a nested pipeline as one node, recursive: id, nodes, edges),
-    "workflow" (task list with dependencies: id, tasks -- each task has
-    task_id, description, optional dependencies/skill/system_prompt), and
-    "parallel" (independent fan-out: id, agents). Nodes that omit
-    model_provider/model_settings inherit the session's model.
+    id, system_prompt, optional model_provider/tools), "skill_agent" (a
+    registered skill's isolated sub-agent: id, skill), "swarm" (dynamic
+    handoffs between 2-5 agents: id, agents), "graph" (a nested pipeline as
+    one node, recursive: id, nodes, edges), "workflow" (task list with
+    dependencies: id, tasks -- each task has task_id, description, optional
+    dependencies/skill/system_prompt), and "parallel" (independent fan-out:
+    id, agents). Nodes that omit model_provider inherit the session's model.
 
     Args:
         action: "execute" (default), "create", "list", or "delete". "create",
@@ -310,12 +427,12 @@ async def graph_activity(
             to one worker; prefer the single-call execute form.
         graph_id: Optional stable label for the run (auto-derived if omitted).
         task: Task prompt executed through the formation (required for execute).
-        topology: Formation topology: {"nodes": [...], "edges": [{"from", "to"}],
-            "entry_points": [...]} with the per-node "type" extension described
-            above. Required for create and for single-call execute.
+        topology: Formation topology: nodes (each with id, type, and the
+            type-specific fields above), edges ({"from", "to"} pairs between
+            node ids), and optional entry_points. Required for create and for
+            single-call execute.
         model_provider: Optional default model provider override for nodes;
             omit to inherit the session model everywhere.
-        model_settings: Optional default model configuration for override nodes.
         tools: Optional tool names available to formation agents, resolved from
             the built-ins (use_skill, file_read, file_write) plus community
             modules under orchestrator/tools/. Unknown names fail the call with
@@ -327,72 +444,97 @@ async def graph_activity(
     activity_id = info.activity_id or "graph_run"
     attempt = getattr(info, "attempt", 1) or 1
     tool_use = {"name": "graph", "toolUseId": activity_id}
+    topology_dict = _as_topology_dict(topology)
 
     if action == "execute" and not task:
-        return _error_result(activity_id, "task prompt is required for execute action")
-    if action == "create" and not (
-        isinstance(topology, dict) and topology.get("nodes")
-    ):
-        return _error_result(
-            activity_id,
+        raise _fail("task prompt is required for execute action")
+    if action == "create" and not (topology_dict and topology_dict.get("nodes")):
+        raise _fail(
             "topology with a non-empty 'nodes' list is required for create action. "
             "Example: {'nodes': [{'id': 'researcher', 'type': 'agent', "
-            "'system_prompt': 'Research requirements.'}]}",
+            "'system_prompt': 'Research requirements.'}]}"
         )
 
-    one_shot = (
-        action == "execute"
-        and isinstance(topology, dict)
-        and bool(topology.get("nodes"))
+    one_shot = action == "execute" and bool(
+        topology_dict and topology_dict.get("nodes")
     )
 
+    model = await session_model("graph")
     try:
-        model = await session_model("graph")
-        try:
-            parent_tools = resolve_tools(tools, model)
-        except UnknownToolError as error:
-            return _error_result(activity_id, f"graph tools: {error}")
-        parent = Agent(
-            model=model, tools=parent_tools, system_prompt="", callback_handler=None
-        )
+        parent_tools = resolve_tools(tools, model)
+    except UnknownToolError as error:
+        raise _fail(f"graph tools: {error}") from error
+    parent = Agent(model=model, tools=parent_tools, system_prompt="", callback_handler=None)
 
-        stream_client = WorkflowStreamClient.from_within_activity(
-            batch_interval=THINK_STREAM_BATCH_INTERVAL,
-        )
-        topic = stream_client.topic(THINKING_TOPIC)
+    stream_client = WorkflowStreamClient.from_within_activity(
+        batch_interval=THINK_STREAM_BATCH_INTERVAL,
+    )
+    topic = stream_client.topic(THINKING_TOPIC)
 
-        run_label = graph_id or "graph"
-        planned = (
-            planned_topology(topology, run_label)
-            if isinstance(topology, dict)
-            else None
-        )
-        meta = _meta_index(planned) if planned else {}
+    run_label = graph_id or "graph"
+    planned = planned_topology(topology_dict, run_label) if topology_dict else None
+    meta = _meta_index(planned) if planned else {}
 
-        def publish(data: Any) -> None:
-            topic.publish({"tool_use": tool_use, "data": data})
+    def publish(data: Any) -> None:
+        topic.publish({"tool_use": tool_use, "data": data})
 
-        def publish_native(data: Any) -> None:
-            for frame in flatten_native_event(data, "", meta):
-                publish(frame)
+    def publish_native(data: Any) -> None:
+        for frame in flatten_native_event(data, "", meta):
+            publish(frame)
 
-        common = _tool_input(
-            model_provider=model_provider,
-            model_settings=model_settings,
-            tools=tools,
-        )
+    common = _tool_input(model_provider=model_provider, tools=tools)
 
-        ticker = asyncio.create_task(_heartbeat_ticker())
-        try:
-            async with stream_client:
-                if not one_shot:
-                    # Management actions and execute-by-id: the sibling tool's
-                    # own public actions, process-local registry semantics.
+    ticker = asyncio.create_task(_heartbeat_ticker())
+    try:
+        async with stream_client:
+            if not one_shot:
+                # Management actions and execute-by-id: the sibling tool's
+                # own public actions, process-local registry semantics.
+                result = await _run_sibling(
+                    _tool_input(
+                        action=action,
+                        graph_id=graph_id,
+                        topology=topology_dict,
+                        task=task,
+                        **common,
+                    ),
+                    parent,
+                    activity_id,
+                    on_event=publish_native,
+                )
+                if result.get("status") == "error":
+                    raise _fail(_result_text(result))
+                result.setdefault("toolUseId", activity_id)
+                return result
+
+            # Single-call execute: unique per-attempt registry id, create ->
+            # execute -> delete-in-finally. Activity ids are only unique within
+            # one workflow run, and the sibling registry is process-local to
+            # the worker, so the workflow run id keeps concurrent sessions on
+            # one worker apart.
+            run_correlation = getattr(info, "workflow_run_id", "") or ""
+            unique_id = f"{run_label}-{run_correlation}-{activity_id}-a{attempt}"
+            if planned is not None:
+                publish(planned)
+            created = await _run_sibling(
+                _tool_input(
+                    action="create",
+                    graph_id=unique_id,
+                    topology=topology_dict,
+                    **common,
+                ),
+                parent,
+                f"{activity_id}-create",
+            )
+            if created.get("status") == "error":
+                publish(publishable(created))
+                raise _fail(_result_text(created))
+            try:
+                async with asyncio.timeout(GRAPH_EXECUTION_TIMEOUT.total_seconds()):
                     result = await _run_sibling(
                         _tool_input(
-                            action=action,
-                            graph_id=graph_id,
-                            topology=topology,
+                            action="execute",
+                            graph_id=unique_id,
                             task=task,
                             **common,
                         ),
@@ -400,90 +542,39 @@ async def graph_activity(
                         activity_id,
                         on_event=publish_native,
                     )
-                    result.setdefault("toolUseId", activity_id)
-                    return result
-
-                # Single-call execute: unique per-attempt registry id, create ->
-                # execute -> delete-in-finally. No substring error matching and
-                # no collisions between runs or retry attempts. Activity ids are
-                # only unique within one workflow run, and the sibling registry
-                # is process-local to the worker, so the workflow run id is
-                # required to keep concurrent sessions on one worker apart.
-                run_correlation = getattr(info, "workflow_run_id", "") or ""
-                unique_id = f"{run_label}-{run_correlation}-{activity_id}-a{attempt}"
-                if planned is not None:
-                    publish(planned)
-                created = await _run_sibling(
-                    _tool_input(
-                        action="create",
-                        graph_id=unique_id,
-                        topology=topology,
-                        **common,
-                    ),
-                    parent,
-                    f"{activity_id}-create",
-                )
-                if created.get("status") == "error":
-                    created.setdefault("toolUseId", activity_id)
-                    publish(publishable(created))
-                    return created
+            except TimeoutError:
+                message = f"Graph run exceeded {GRAPH_EXECUTION_TIMEOUT} and was stopped."
+                publish({"status": "error", "content": [{"text": message}]})
+                raise _fail(message) from None
+            except asyncio.CancelledError:
                 try:
-                    async with asyncio.timeout(
-                        GRAPH_EXECUTION_TIMEOUT.total_seconds()
-                    ):
-                        result = await _run_sibling(
-                            _tool_input(
-                                action="execute",
-                                graph_id=unique_id,
-                                task=task,
-                                **common,
-                            ),
-                            parent,
-                            activity_id,
-                            on_event=publish_native,
-                        )
-                except TimeoutError:
-                    final = _error_result(
-                        activity_id,
-                        f"Graph run exceeded {GRAPH_EXECUTION_TIMEOUT} and was stopped.",
+                    publish(
+                        {
+                            "status": "cancelled",
+                            "content": [{"text": "Graph run cancelled."}],
+                            "toolUseId": activity_id,
+                        }
                     )
-                    publish(publishable(final))
-                    return final
-                except asyncio.CancelledError:
-                    try:
-                        publish(
-                            {
-                                "status": "cancelled",
-                                "content": [{"text": "Graph run cancelled."}],
-                                "toolUseId": activity_id,
-                            }
-                        )
-                    except Exception:  # noqa: BLE001 - best-effort terminal frame
-                        pass
-                    raise
-                finally:
-                    # Best-effort registry cleanup: a failure here must not
-                    # mask the real outcome. The id is unique per attempt, so
-                    # a leaked entry can never collide with a later run.
-                    try:
-                        await _run_sibling(
-                            _tool_input(action="delete", graph_id=unique_id),
-                            parent,
-                            f"{activity_id}-delete",
-                        )
-                    except Exception as cleanup_error:  # noqa: BLE001
-                        activity.logger.warning(
-                            "graph cleanup failed for %s: %s",
-                            unique_id,
-                            cleanup_error,
-                        )
-                result.setdefault("toolUseId", activity_id)
-                return result
-        finally:
-            ticker.cancel()
-    except (ApplicationError, asyncio.CancelledError):
-        raise
-    except Exception as error:  # noqa: BLE001 - tool boundary
-        message = f"Error in graph tool: {error}\n{traceback.format_exc()}"
-        activity.logger.error("graph activity failed: %s", error)
-        return _error_result(activity_id, message)
+                except Exception:  # noqa: BLE001 - best-effort terminal frame
+                    pass
+                raise
+            finally:
+                # Best-effort registry cleanup: a failure here must not
+                # mask the real outcome. The id is unique per attempt, so
+                # a leaked entry can never collide with a later run.
+                try:
+                    await _run_sibling(
+                        _tool_input(action="delete", graph_id=unique_id),
+                        parent,
+                        f"{activity_id}-delete",
+                    )
+                except Exception as cleanup_error:  # noqa: BLE001
+                    activity.logger.warning(
+                        "graph cleanup failed for %s: %s", unique_id, cleanup_error
+                    )
+            if result.get("status") == "error":
+                raise _fail(_result_text(result))
+            result.setdefault("toolUseId", activity_id)
+            return result
+    finally:
+        ticker.cancel()

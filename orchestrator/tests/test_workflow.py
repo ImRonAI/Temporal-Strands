@@ -48,6 +48,22 @@ TASK_QUEUE = "test-chat-workflow"
 async def stub_list_agent_models() -> dict[str, Any]:
     return {"object": "list", "data": []}
 
+
+GRAPH_FAILURE = "topology with a non-empty 'nodes' list is required for create action"
+
+
+@activity.defn(name="graph")
+async def stub_failing_graph(
+    action: str = "execute",
+    graph_id: Any = None,
+    topology: Any = None,
+    task: Any = None,
+    model_provider: Any = None,
+    tools: Any = None,
+) -> dict[str, Any]:
+    """Stands in for graph_activity's failure path: raise, never return an error dict."""
+    raise ApplicationError(GRAPH_FAILURE, type="GraphActivityError", non_retryable=True)
+
 # Event lists consumed one per Model.stream() call, in call order. Turns run
 # under the workflow lock, so call order is deterministic within a test.
 SCRIPTS: deque[list[dict[str, Any]]] = deque()
@@ -210,6 +226,7 @@ async def client() -> AsyncGenerator[Client, None]:
                 run_loaded_tool,
                 think_activity.think,
                 stub_list_agent_models,
+                stub_failing_graph,
                 browser_activity,
             ],
             workflow_runner=UnsandboxedWorkflowRunner(),
@@ -446,6 +463,43 @@ async def test_failed_model_activity_surfaces_to_the_caller(client: Client) -> N
 
     # The session survives the failed turn.
     assert await handle.query(ChatWorkflow.model_id) == "fake/broken"
+    await handle.signal(ChatWorkflow.end_chat)
+    await handle.result()
+
+
+def graph_call_events(tool_id: str) -> list[dict[str, Any]]:
+    return [
+        {"messageStart": {"role": "assistant"}},
+        {"contentBlockStart": {"start": {"toolUse": {"toolUseId": tool_id, "name": "graph"}}}},
+        {"contentBlockDelta": {"delta": {"toolUse": {"input": json.dumps({"action": "create", "graph_id": "g"})}}}},
+        {"contentBlockStop": {}},
+        {"messageStop": {"stopReason": "tool_use"}},
+        {"metadata": {"usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2}, "metrics": {"latencyMs": 1}}},
+    ]
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_failed_activity_tool_reaches_the_model_as_an_error_result(client: Client) -> None:
+    """A tool activity that raises becomes a status=error tool result carrying
+    the activity's own message -- the turn continues, and the model can read
+    what went wrong (not just "Activity task failed")."""
+    handle = await start_session(client, "chat-graph-error")
+    SCRIPTS.extend([graph_call_events("graph-1"), text_events("I saw the error")])
+
+    assert await handle.execute_update(
+        ChatWorkflow.turn, TurnInput(prompt="run a graph")
+    ) == "I saw the error"
+
+    messages = await handle.query(ChatWorkflow.messages)
+    results = [
+        block["toolResult"]
+        for message in messages
+        for block in message["content"]
+        if "toolResult" in block
+    ]
+    assert results[-1]["status"] == "error"
+    assert GRAPH_FAILURE in results[-1]["content"][0]["text"]
+    assert "Activity task failed" not in results[-1]["content"][0]["text"]
     await handle.signal(ChatWorkflow.end_chat)
     await handle.result()
 

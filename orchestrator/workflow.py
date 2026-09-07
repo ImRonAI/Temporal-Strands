@@ -94,6 +94,7 @@ with workflow.unsafe.imports_passed_through():
 
     from strands import tool
     from strands.tools.mcp import MCPClient
+    from strands.vended_plugins.context_injector import ContextInjector
     from strands_tools.load_tool import load_tool
 
     # Official load_tool is sync; Strands stream() uses asyncio.to_thread, which
@@ -201,6 +202,34 @@ AGENT_API_TOOLS = (
         for activity_fn in _AGENT_READ_ACTIVITIES
     ),
 )
+
+def _format_agent_api_models(catalog: Any) -> str | None:
+    entries = catalog.get("data") if isinstance(catalog, dict) else None
+    if not isinstance(entries, list):
+        return None
+    ids = [
+        entry["id"]
+        for entry in entries
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str) and entry["id"]
+    ]
+    if not ids:
+        return None
+    return "<agent_api_models>\n" + "\n".join(ids) + "\n</agent_api_models>"
+
+
+async def render_agent_api_models(
+    context: Any,
+    *,
+    executor: Callable[..., Any] | None = None,
+) -> str | None:
+    del context
+    execute = executor or workflow.execute_activity
+    catalog = await execute(
+        perplexity_operations.list_agent_models,
+        retry_policy=AGENT_OPERATION_RETRY_POLICY,
+        **_AGENT_OPERATION_OPTIONS,
+    )
+    return _format_agent_api_models(catalog)
 
 _MCP_CONFIG_PATH = Path(__file__).resolve().parent / "mcp.json"
 _SHELL_MCP = Path(__file__).resolve().parent / ".venv/bin/strands-shell"
@@ -864,6 +893,13 @@ class ChatWorkflow:
             streaming_topic=EVENTS_TOPIC,
             system_prompt=self._system_prompt,
             messages=list(messages),
+            plugins=[
+                ContextInjector(
+                    render_agent_api_models,
+                    name="agent-api-models",
+                    trigger="everyTurn",
+                ),
+            ],
             tools=[
                 *PERMANENT_COMMUNITY_TOOLS,
                 THINK_TOOL,

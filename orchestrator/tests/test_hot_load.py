@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from strands.models.model import Model
+from temporalio import activity
 from temporalio.client import Client
 from temporalio.contrib.strands import StrandsPlugin
 from temporalio.exceptions import ApplicationError
@@ -31,6 +32,11 @@ from workflow import ChatInput, ChatWorkflow, TurnInput, mcp_client_factories
 os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
 
 TASK_QUEUE = "test-hot-load"
+
+
+@activity.defn(name="list_agent_models")
+async def stub_list_agent_models() -> dict[str, Any]:
+    return {"object": "list", "data": []}
 SCRIPTS: deque[list[dict[str, Any]]] = deque()
 ECHO_SERVER = Path(__file__).resolve().parent / "echo_mcp_server.py"
 FILE_READ_MARKER = "hot-load-file-read-marker-7f3a"
@@ -131,7 +137,7 @@ async def client() -> AsyncGenerator[Client, None]:
             env.client,
             task_queue=TASK_QUEUE,
             workflows=[ChatWorkflow],
-            activities=[run_loaded_tool, mcp_client_activity],
+            activities=[run_loaded_tool, mcp_client_activity, stub_list_agent_models],
             workflow_runner=UnsandboxedWorkflowRunner(),
         )
         async with worker:

@@ -25,12 +25,9 @@ _ROOT = Path(__file__).resolve().parent
 _REPO_ROOT = _ROOT.parent
 _STRANDS_TOOLS = _REPO_ROOT.parent / "strands-tools"
 
-# Candidate catalog locations in the sibling repo, first existing wins. The
-# repo moved its catalog from ``skills/`` to ``src/skills/`` in 2026-09.
-_DEFAULT_SKILLS_DIRS = (
-    (_STRANDS_TOOLS / "skills").resolve(),
-    (_STRANDS_TOOLS / "src" / "skills").resolve(),
-)
+# Intended catalog (AGENTS.md). ``src/skills`` is a skills-CLI dump — load_tool
+# can open a specific file there; discover_skills must not walk it at startup.
+_DEFAULT_SKILLS_DIRS = ((_STRANDS_TOOLS / "skills").resolve(),)
 
 # Vendored agentskills (aws-samples/sample-strands-agents-agentskills layout).
 # Optional: when neither location is present the skills catalog is simply

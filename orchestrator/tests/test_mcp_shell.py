@@ -39,6 +39,21 @@ def test_permanent_registry_includes_skills_and_graph() -> None:
     assert registry.registry["mcp_client"].tool_type == "temporal_activity"
 
 
+def test_graph_tool_exposes_official_community_schema() -> None:
+    from strands_tools.graph import graph as community_graph
+
+    graph_tool = next(tool for tool in PERMANENT_COMMUNITY_TOOLS if tool.tool_name == "graph")
+    official = community_graph.tool_spec["inputSchema"]["json"]["properties"]
+    spec = graph_tool.tool_spec["inputSchema"]["json"]["properties"]
+    assert spec["graph_id"]["description"] == official["graph_id"]["description"]
+    assert spec["topology"]["description"] == official["topology"]["description"]
+    assert spec["task"]["description"] == official["task"]["description"]
+    assert "Unique identifier" in spec["graph_id"]["description"]
+    assert "nodes" in spec["topology"]["description"]
+    assert "edges" in spec["topology"]["description"]
+    assert "required for execute" in spec["task"]["description"]
+
+
 def test_mcp_json_servers_use_temporal_mcp_client() -> None:
     factories = mcp_client_factories()
     assert set(factories) == {"shell"}
@@ -56,6 +71,9 @@ def test_strands_tools_dir_exposes_the_installed_package() -> None:
     assert tool_file_path("file_read.py") == str(tools_dir / "file_read.py")
     assert tool_file_path("tools/file_read.py") == str(tools_dir / "file_read.py")
     assert os.path.isfile(tool_file_path("file_read"))
+    assert tool_file_path("skills_loader.py") == str(_ROOT / "skills_loader.py")
+    assert tool_file_path("orchestrator/skills_loader.py") == str(_ROOT / "skills_loader.py")
+    assert os.path.isfile(tool_file_path("skills_loader"))
 
 
 def test_mcp_json_catalog_keeps_shell_and_optional_servers() -> None:
@@ -67,6 +85,26 @@ def test_mcp_json_catalog_keeps_shell_and_optional_servers() -> None:
     }
     assert servers["datacommons"]["continue_on_error"] is True
     assert servers["pophive"]["continue_on_error"] is True
+
+
+def test_startup_connect_skips_streamable_http_catalog(monkeypatch) -> None:
+    """Worker boot only pre-connects stdio. HTTP catalog servers stay on-demand."""
+    monkeypatch.setenv("DATACOMMONS_MCP_URL", "https://api.datacommons.org/mcp")
+    monkeypatch.setenv("DC_API_KEY", "test-key")
+    monkeypatch.setenv("POPHIVE_MCP_URL", "https://mcp.pophive.org/mcp")
+    calls: list[dict] = []
+
+    def fake_mcp_client(**kwargs):
+        calls.append(kwargs)
+        return {"status": "success"}
+
+    monkeypatch.setattr("strands_tools.mcp_client.mcp_client", fake_mcp_client)
+    from run_worker import connect_included_mcp_servers
+
+    names = connect_included_mcp_servers()
+    assert names == ["shell"]
+    assert [call.get("transport") for call in calls] == ["stdio"]
+    assert calls[0]["connection_id"] == "shell"
 
 
 def test_mcp_client_factories_skips_temporal_list_tools_for_remote_catalog(

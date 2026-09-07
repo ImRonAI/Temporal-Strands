@@ -47,9 +47,11 @@ from config import (
 )
 
 # Official load_tool loads an existing .py file (path + name).
-# This directory is cwd()/tools/ from the official tool docs. Drop other
-# tool repos here as subfolders; community tools are linked in at worker start.
-STRANDS_TOOLS_DIR = Path(__file__).resolve().parent / "tools"
+# Search roots (in order): implemented community tools, official meta-tooling
+# cwd()/tools, this package (skills_loader / Pattern 2), Agent Skills catalogs.
+_ORCHESTRATOR_DIR = Path(__file__).resolve().parent
+STRANDS_TOOLS_DIR = _ORCHESTRATOR_DIR / "tools"
+_STRANDS_TOOLS_REPO = _ORCHESTRATOR_DIR.parent.parent / "strands-tools"
 
 _IMPLEMENTATIONS: dict[str, AgentTool] = {}
 _LOADED_PATHS: dict[str, str] = {}
@@ -69,31 +71,65 @@ _ACTIVITY_OPTIONS = closable_activity_options(
 _SKIP_PARAMS = frozenset({"self", "cls", "agent", "tool"})
 
 
+def load_tool_search_dirs() -> list[Path]:
+    """Directories official ``load_tool`` may resolve ``path`` against."""
+    from skills_config import skills_dir
+
+    ordered = [
+        STRANDS_TOOLS_DIR,
+        Path.cwd() / "tools",
+        _ORCHESTRATOR_DIR,
+        skills_dir(),
+        _STRANDS_TOOLS_REPO / "skills",
+        _STRANDS_TOOLS_REPO / "src" / "skills",
+    ]
+    seen: set[Path] = set()
+    dirs: list[Path] = []
+    for raw in ordered:
+        resolved = raw.expanduser().resolve()
+        if resolved in seen or not resolved.is_dir():
+            continue
+        seen.add(resolved)
+        dirs.append(resolved)
+    return dirs
+
+
+def _looks_in(root: Path, rel: Path) -> Path | None:
+    name = rel.name if rel.suffix == ".py" else f"{rel.name}.py"
+    candidates = [root / rel, root / name]
+    if rel.suffix != ".py":
+        candidates.append(root / f"{rel}.py")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    for pattern in (f"*/{name}", f"*/scripts/{name}"):
+        for match in root.glob(pattern):
+            if match.is_file():
+                return match
+    return None
+
+
 def tool_file_path(path: str) -> str:
     """Resolve a load_tool path the official tool can open.
 
-    Official load_tool only accepts a file that exists. Names and
-    ``tools/<repo>/<name>.py`` paths are resolved under STRANDS_TOOLS_DIR.
+    Official load_tool only accepts a file that exists. Bare names and
+    ``tools/`` / ``orchestrator/`` prefixes are resolved against the
+    implemented community tools dir, ``cwd()/tools`` (meta-tooling),
+    this package (``skills_loader.py``), and the Agent Skills catalogs.
     """
     path = expanduser(path)
     if os.path.exists(path):
         return str(Path(path).absolute())
     rel = Path(path)
     parts = rel.parts
-    if parts and parts[0] == "tools":
+    if parts and parts[0] in {"tools", "orchestrator"}:
         rel = Path(*parts[1:]) if len(parts) > 1 else Path(rel.name)
-    direct = STRANDS_TOOLS_DIR / rel
-    if direct.is_file():
-        return str(direct)
-    if direct.suffix != ".py":
-        with_ext = Path(str(direct) + ".py")
-        if with_ext.is_file():
-            return str(with_ext)
-    name = rel.name if rel.suffix == ".py" else f"{rel.name}.py"
-    for match in STRANDS_TOOLS_DIR.glob(f"*/{name}"):
-        if match.is_file():
-            return str(match)
-    return str(direct if direct.suffix == ".py" else STRANDS_TOOLS_DIR / name)
+    for root in load_tool_search_dirs():
+        found = _looks_in(root, rel)
+        if found is not None:
+            return str(found)
+    fallback = STRANDS_TOOLS_DIR / rel
+    return str(fallback if fallback.suffix == ".py" else STRANDS_TOOLS_DIR / f"{rel.name}.py")
 
 
 def _tool_input_signature(loaded: AgentTool) -> inspect.Signature:

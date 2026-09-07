@@ -31,6 +31,7 @@ from temporalio.client import (
 from temporalio.contrib.strands import StrandsPlugin
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
 from temporalio.exceptions import ApplicationError
+from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
@@ -39,6 +40,11 @@ from load_tool import mcp_client_activity, run_loaded_tool
 from workflow import ChatInput, ChatWorkflow, TurnInput, mcp_client_factories
 
 TASK_QUEUE = "test-chat-workflow"
+
+
+@activity.defn(name="list_agent_models")
+async def stub_list_agent_models() -> dict[str, Any]:
+    return {"object": "list", "data": []}
 
 # Event lists consumed one per Model.stream() call, in call order. Turns run
 # under the workflow lock, so call order is deterministic within a test.
@@ -201,6 +207,7 @@ async def client() -> AsyncGenerator[Client, None]:
                 mcp_client_activity,
                 run_loaded_tool,
                 think_activity.think,
+                stub_list_agent_models,
             ],
             workflow_runner=UnsandboxedWorkflowRunner(),
         )

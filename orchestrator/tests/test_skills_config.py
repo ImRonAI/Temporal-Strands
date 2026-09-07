@@ -16,6 +16,14 @@ def _clear_skill_cache() -> None:
     skills_config.discovered_skills.cache_clear()
 
 
+def test_default_skills_dir_is_not_the_src_skills_dump() -> None:
+    dump = (
+        Path(__file__).resolve().parents[2].parent / "strands-tools" / "src" / "skills"
+    ).resolve()
+    default = skills_config.skills_dir()
+    assert default != dump
+
+
 def test_discover_fixture_skills(monkeypatch: pytest.MonkeyPatch) -> None:
     fixtures = (
         Path(__file__).resolve().parents[2]
@@ -38,7 +46,15 @@ def test_skills_loader_exports_tools() -> None:
     assert skills_loader.skill.tool_name == "skill"
 
 
-def test_augmented_prompt_mentions_loader() -> None:
+def test_augmented_prompt_mentions_loader(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixtures = (
+        Path(__file__).resolve().parents[2]
+        / ".."
+        / "strands-tools"
+        / "tests"
+        / "fixtures_skills"
+    ).resolve()
+    monkeypatch.setenv("SKILLS_DIR", str(fixtures))
     text = skills_config.augmented_system_prompt("Base.")
     assert "list_skills" in text
     assert "use_skill" in text

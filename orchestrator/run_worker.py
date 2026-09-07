@@ -65,7 +65,6 @@ from config import (
 from gemini_model import GeminiModel
 from perplexity_model import PRESET_PREFIX, PerplexityModel
 import computer_use_activity
-from graph_activity import configure as configure_graph_activity
 from graph_activity import graph_activity
 from load_tool import mcp_client_activity, run_loaded_tool
 from skills_config import ensure_skills_configured, skills_dir
@@ -369,23 +368,6 @@ def connect_included_mcp_servers() -> list[str]:
                 logger.info("Connected stdio MCP server '%s' (%s)", name, command)
             else:
                 logger.warning("Could not connect MCP server '%s': %s", name, res)
-        elif "url" in cfg:
-            url = os.path.expandvars(cfg["url"])
-            if not url or url.startswith("${"):
-                continue
-            headers = {k: os.path.expandvars(v) for k, v in cfg.get("headers", {}).items()}
-            res = mcp_client(
-                action="connect",
-                connection_id=name,
-                transport="streamable_http",
-                server_url=url,
-                headers=headers or None,
-            )
-            if res.get("status") == "success":
-                connected.append(name)
-                logger.info("Connected HTTP MCP server '%s' (%s)", name, url)
-            else:
-                logger.warning("Could not connect MCP server '%s': %s", name, res)
     return connected
 
 
@@ -431,7 +413,6 @@ async def main() -> None:
         workflow_runner=UnsandboxedWorkflowRunner(),
     )
 
-    configure_graph_activity(model_factories)
     configure_use_skill_activity(model_factories)
     think_activity.configure(model_factories)
     skill_count = ensure_skills_configured(model_factories[default_model])

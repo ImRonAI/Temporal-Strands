@@ -659,3 +659,22 @@ async def test_continue_as_new_preserves_the_session(client: Client) -> None:
 
     await latest.signal(ChatWorkflow.end_chat)
     await latest.result()
+
+
+def test_workflow_uses_config_closable() -> None:
+    """The MCP activity envelope carries config's shared schedule-to-close fallback.
+
+    workflow.py used to define its own ``_closable`` + ``_UNCAPPED_FALLBACK_*``
+    duplicates of config.closable_activity_options. With MODEL_START_TO_CLOSE /
+    MODEL_SCHEDULE_TO_CLOSE unset (the default), config's generous 1-day
+    fallback must apply, and workflow must not still define a private copy.
+    """
+    import config
+    import workflow
+
+    assert (
+        workflow._MCP_ACTIVITY_OPTIONS["schedule_to_close_timeout"]
+        == config.UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE
+    )
+    assert not hasattr(workflow, "_closable")
+    assert not hasattr(workflow, "_UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE")

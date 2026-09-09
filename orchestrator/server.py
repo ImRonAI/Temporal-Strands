@@ -67,6 +67,7 @@ from config import (
 from perplexity_operations import AGENT_RUNS_TOPIC
 from run_worker import READINESS_PATH, agent_identity
 from skills_config import augmented_system_prompt
+from workspace_api import WorkspaceRequestBoundary, router as workspace_router, workspace_lifespan
 from workflow import (
     THINKING_TOPIC,
     APPROVAL_TOPIC,
@@ -226,12 +227,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as error:  # noqa: BLE001 - API stays up so /health can report
         logger.warning("Temporal unavailable at startup: %s", error)
         _state["client"] = None
-    async with httpx.AsyncClient(timeout=60) as http:
+    async with httpx.AsyncClient(timeout=60) as http, workspace_lifespan(app):
         _state["http"] = http
         yield
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(WorkspaceRequestBoundary)
+app.include_router(workspace_router)
 
 
 def temporal() -> Client:

@@ -23,6 +23,19 @@ const tool = (
   }) as unknown as DynamicToolUIPart
 
 describe("computerUsePreview", () => {
+  it("decodes native browser inputs and nested Temporal screenshot metadata", () => {
+    const fields = computerUseFields({
+      toolName: "browser", input: { browser_input: { action: { type: "screenshot", session_name: "fixture" } } },
+      output: { status: "success", content: [{ text: JSON.stringify({
+        status: "success", content: [{ text: "Screenshot captured" }],
+        browserPreview: { action: "screenshot", screenshotUrl: "http://localhost:8787/browser-observations/fixture/content" },
+      }) }] },
+    })
+    expect(fields.action).toBe("screenshot")
+    expect(fields.screenshotUrl).toContain("/browser-observations/")
+    expect(COMPUTER_USE_TOOL_NAMES.has("browser")).toBe(true)
+    expect(computerUseFields({ toolName: "browser", input: { browser_input: { action: { type: "click" } } } }).action).toBe("click")
+  })
   it("opens native browser results using their separate viewer metadata", () => {
     const preview = computerUsePreview([tool("browser", {
       state: "output-available",

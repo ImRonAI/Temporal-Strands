@@ -1,5 +1,7 @@
 "use client"
 
+import NextImage from "next/image"
+
 import {
   isDynamicToolUIPart,
   isReasoningUIPart,
@@ -790,8 +792,9 @@ function dynamicToolStatus(
 }
 
 function computerUseStepLabel(part: DynamicToolUIPart): string {
-  const { intent, action } = computerUseFields(part)
-  return intent || action || part.toolName
+  const { intent, action, url } = computerUseFields(part)
+  const label = intent || action.replaceAll("_", " ") || part.toolName
+  return url && action === "navigate" ? `${label}: ${url}` : label
 }
 
 /** One Task per computer-use run; steps are TaskItems (native task.tsx pattern). */
@@ -825,12 +828,21 @@ function ComputerUseTask({
       </TaskTrigger>
       <TaskContent>
         {parts.map((part) => {
-          const { screenshot } = computerUseFields(part)
+          const { screenshot, screenshotUrl } = computerUseFields(part)
           const label = computerUseStepLabel(part)
+          const status = part.state === "output-error" ? "Failed"
+            : part.state === "output-available" ? "Completed"
+            : part.state === "approval-requested" ? "Awaiting approval"
+            : "Running"
           return (
-            <div key={part.toolCallId} className="space-y-2">
-              <TaskItem>{label}</TaskItem>
-              {part.toolName === "take_screenshot" && screenshot ? (
+            <div key={part.toolCallId} className="space-y-2" data-computer-action={part.toolCallId}>
+              <TaskItem>{label} <span className="text-xs text-muted-foreground">{status}</span></TaskItem>
+              {screenshotUrl ? (
+                <ChainOfThoughtImage caption={label}>
+                  <NextImage alt={label} src={screenshotUrl} width={1440} height={900}
+                    unoptimized className="h-auto max-w-full rounded-md" />
+                </ChainOfThoughtImage>
+              ) : screenshot ? (
                 <ChainOfThoughtImage caption={label}>
                   <Image
                     alt={label}

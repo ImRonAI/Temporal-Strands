@@ -1,0 +1,12 @@
+# Deny credentials and local state in any root build context.
+**/fair-expanse-493212-h8-138622c839d2.json
+**/.env*
+**/.git
+**/node_modules
+**/.venv
+**/__pycache__
+**/.runtime
+.kilo
+.omo
+.worktrees
+compute.json

@@ -9,6 +9,9 @@ __v0_jsx-dev-runtime.ts
 # Environment variables
 .env*.local
 
+# Supplied bootstrap credential: never include in source or release contexts.
+fair-expanse-493212-h8-138622c839d2.json
+
 # Common ignores
 node_modules
 .next/

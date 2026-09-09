@@ -5,7 +5,7 @@ Patterns from sample-strands-agents-agentskills:
 - Pattern 3: ``create_skill_agent_tool`` → ``use_skill(skill_name, request)`` (isolated sub-agent)
 
 Skills directory defaults to ``../../strands-tools/src/skills``; override with ``SKILLS_DIR``.
-``configure_skills`` registers names for graph ``skill_agent`` nodes (``strands_graph_tool``).
+``configure_skills`` registers names for graph ``skill_agent`` nodes (``graph_tool``).
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from strands_graph_tool import configure_skills
+from graph_tool import configure_skills
 
 logger = logging.getLogger(__name__)
 
@@ -186,34 +186,26 @@ def ensure_skills_configured(model_factory: Any | None = None) -> int:
     return len(skills)
 
 
-def skills_system_prompt_suffix() -> str:
-    """Compact catalog header — full list via ``list_skills`` tool."""
-    skills = discovered_skills()
-    directory = skills_dir()
-    if not skills:
-        return (
-            "\n\n## Agent Skills\n"
-            f"No skills discovered at `{directory}`. "
-            "Install with `pnpm skills:add owner/repo` or set `SKILLS_DIR`.\n"
-        )
-    loader = _ROOT / "skills_loader.py"
-    return (
-        "\n\n## Agent Skills\n"
-        f"{len(skills)} skills registered under `{directory}`.\n"
-        f"- **Discover**: `load_tool(path=\"{loader}\", name=\"list_skills\")` "
-        "then call `list_skills`.\n"
-        f"- **Pattern 2 (inline)**: `load_tool(path=\"{loader}\", name=\"skill\")` "
-        "then `skill(skill_name=...)` loads full instructions into your context.\n"
-        "- **Pattern 3 (meta-tool)**: permanent `use_skill(skill_name, request)` runs an "
-        "isolated sub-agent with the skill's SKILL.md as system prompt.\n"
-        "- **Graph formations**: `skill_agent` nodes reference skill names from the registry "
-        "(same names as `list_skills`).\n"
-        "- **Install more**: `pnpm skills:add <owner/repo>` (npx skills CLI).\n"
-    )
+def skills_prompt() -> str:
+    """The reference Phase-1 catalog prompt: ``agentskills.generate_skills_prompt``.
+
+    Exact aws-samples/sample-strands-agents-agentskills wiring (examples 2
+    and 3): every skill's name, description, and SKILL.md location in an
+    ``<available_skills>`` XML block plus the ``<skills_instructions>``
+    usage policy. Empty string when the package or catalog is unavailable.
+    """
+    agentskills = _import_agentskills()
+    if agentskills is None:
+        return ""
+    return agentskills.generate_skills_prompt(list(discovered_skills()))
 
 
 def augmented_system_prompt(base: str) -> str:
-    return base.rstrip() + skills_system_prompt_suffix()
+    """Reference examples 2 and 3: ``f"{base_prompt}\\n\\n{skills_prompt}"``."""
+    prompt = skills_prompt()
+    if not prompt:
+        return base
+    return f"{base}\n\n{prompt}"
 
 
 def create_inline_skill_tool() -> Any:

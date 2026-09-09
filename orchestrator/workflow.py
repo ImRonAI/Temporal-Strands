@@ -72,6 +72,7 @@ from config import (
     AGENT_OPERATION_SCHEDULE_TO_CLOSE,
     AGENT_OPERATION_START_TO_CLOSE,
     BROWSER_RETRY_POLICY,
+    closable_activity_options,
     GRAPH_HEARTBEAT_TIMEOUT,
     GRAPH_RETRY_POLICY,
     GRAPH_START_TO_CLOSE,
@@ -118,25 +119,11 @@ with workflow.unsafe.imports_passed_through():
 # schedule_to_close_timeout (_workflow_instance._outbound_schedule_activity).
 # config.py currently leaves the MODEL_* / AGENT_OPERATION_* envelopes fully
 # unset ("we do not cap"), which that validation rejects at schedule time and
-# permanently fails the workflow task. Until config.py carries a valid
-# envelope, fall back to a generous schedule-to-close cap instead of crashing
-# the session (graceful degradation, telemetry.py convention).
-_UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE = timedelta(days=1)
-
-
-def _closable(options: dict[str, Any]) -> dict[str, Any]:
-    """Ensure the SDK's required timeout is present, preserving config intent."""
-    if options.get("start_to_close_timeout") or options.get(
-        "schedule_to_close_timeout"
-    ):
-        return options
-    return {
-        **options,
-        "schedule_to_close_timeout": _UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE,
-    }
-
-
-_MCP_ACTIVITY_OPTIONS = _closable(
+# permanently fails the workflow task. Callers wrap their activity options in
+# ``closable_activity_options`` (config.py) so a generous schedule-to-close
+# fallback is applied only when both timeouts are None (graceful degradation,
+# telemetry.py convention).
+_MCP_ACTIVITY_OPTIONS = closable_activity_options(
     dict(
         start_to_close_timeout=MODEL_START_TO_CLOSE,
         schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,
@@ -194,7 +181,7 @@ THINK_TOOL = activity_as_tool(think_activity.think, **_THINK_ACTIVITY_OPTIONS)
 # one automatic attempt (no idempotency key on POST /v1/responses — see
 # config.AGENT_CREATE_RETRY_POLICY); retrieve/list/download are read-only and
 # retry normally.
-_AGENT_OPERATION_OPTIONS = _closable(
+_AGENT_OPERATION_OPTIONS = closable_activity_options(
     dict(
         start_to_close_timeout=AGENT_OPERATION_START_TO_CLOSE,
         schedule_to_close_timeout=AGENT_OPERATION_SCHEDULE_TO_CLOSE,
@@ -268,6 +255,25 @@ async def render_agent_api_models(
 
 _MCP_CONFIG_PATH = Path(__file__).resolve().parent / "mcp.json"
 _SHELL_MCP = Path(__file__).resolve().parent / ".venv/bin/strands-shell"
+_AGENT_IDENTITY_PATH = Path(__file__).resolve().parent / "agent.json"
+
+
+def think_prompts() -> tuple[str, str | None]:
+    """The think persona and methodology prompts from agent.json's ``think``
+    key. The activity owns no prompt text; these are its arguments. A missing
+    key degrades to the caller's own system prompt + upstream's default
+    thinking instructions (telemetry.py's graceful-degradation convention).
+    """
+    identity = json.loads(_AGENT_IDENTITY_PATH.read_text()).get("think") or {}
+    persona = identity.get("system_prompt")
+    methodology = identity.get("thinking_system_prompt")
+    return (
+        persona if isinstance(persona, str) and persona.strip() else "",
+        methodology if isinstance(methodology, str) and methodology.strip() else None,
+    )
+
+
+THINK_SYSTEM_PROMPT, THINK_METHODOLOGY_PROMPT = think_prompts()
 
 
 def _eager_mcp_server_names() -> frozenset[str]:
@@ -703,9 +709,18 @@ class _ThinkFirstHook(HookProvider):
         self,
         system_prompt: str,
         executor: Callable[..., Any] | None = None,
+        think_system_prompt: str | None = None,
+        thinking_system_prompt: str | None = None,
     ) -> None:
         self._system_prompt = system_prompt
         self._executor = executor
+        # WHO the nested thinker is, from agent.json's ``think`` key; without
+        # one the session's own system prompt is used, as before.
+        self._think_system_prompt = think_system_prompt
+        # HOW the nested thinker works, from agent.json's ``think`` key. The
+        # activity carries no prompt text of its own, so an absent methodology
+        # means upstream strands_tools' default instructions.
+        self._thinking_system_prompt = thinking_system_prompt
         self._ran_this_turn = False
 
     def mark_turn_start(self) -> None:
@@ -726,10 +741,16 @@ class _ThinkFirstHook(HookProvider):
             return
         self._ran_this_turn = True
         executor = self._executor or workflow.execute_activity
+        # thought, cycle_count, system_prompt[, thinking_system_prompt] --
+        # the methodology is only sent when agent.json supplies one, so an
+        # absent key leaves upstream's default thinking instructions in place.
+        args: list[Any] = [prompt, 1, self._think_system_prompt or self._system_prompt]
+        if self._thinking_system_prompt is not None:
+            args.append(self._thinking_system_prompt)
         try:
             result = await executor(
                 think_activity.think,
-                args=[prompt, 1, self._system_prompt],
+                args=args,
                 **_THINK_ACTIVITY_OPTIONS,
             )
         except Exception as error:
@@ -917,7 +938,7 @@ class ChatWorkflow:
             tuple(
                 activity_as_tool(
                     computer_use_activity,
-                    **_closable(
+                    **closable_activity_options(
                         dict(
                             start_to_close_timeout=COMPUTER_USE_START_TO_CLOSE,
                             schedule_to_close_timeout=COMPUTER_USE_SCHEDULE_TO_CLOSE,
@@ -937,8 +958,12 @@ class ChatWorkflow:
             ),
             *([_ComputerUseSafetyHook()] if is_gemini else []),
         ]
-        self._think_hook = _ThinkFirstHook(self._system_prompt)
-        model_options = _closable(
+        self._think_hook = _ThinkFirstHook(
+            self._system_prompt,
+            think_system_prompt=THINK_SYSTEM_PROMPT,
+            thinking_system_prompt=THINK_METHODOLOGY_PROMPT,
+        )
+        model_options = closable_activity_options(
             dict(
                 start_to_close_timeout=MODEL_START_TO_CLOSE,
                 schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,

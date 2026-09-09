@@ -4,6 +4,7 @@ import { isDynamicToolUIPart, type UIMessage } from "ai"
  *  https://ai.google.dev/gemini-api/docs/computer-use
  */
 export const COMPUTER_USE_TOOL_NAMES = new Set([
+  "browser",
   "click",
   "double_click",
   "triple_click",
@@ -92,21 +93,37 @@ export function computerUseFields(part: {
   action: string
   intent: string
   screenshot: { base64: string; mediaType: string } | null
+  screenshotUrl: string
 } {
-  const input = asRecord(part.input)
+  const rawInput = asRecord(part.input)
+  const input = part.toolName === "browser"
+    ? asRecord(asRecord(rawInput?.browser_input)?.action) ?? rawInput
+    : rawInput
   const output = unwrapToolOutput(part.output)
   const url = stringField(output, "url") || stringField(input, "url")
   const livePreviewUrl = stringField(output, "livePreviewUrl")
   const devtoolsFrontendUrl = stringField(output, "devtoolsFrontendUrl")
   const intent = stringField(output, "intent") || stringField(input, "intent")
-  const action = stringField(output, "action") || part.toolName
+  const action = stringField(output, "action") || stringField(input, "type") || part.toolName
   const raw = output?.screenshot
   const mediaType = stringField(output, "mediaType") || "image/jpeg"
   const screenshot =
     typeof raw === "string" && raw.length > 0
       ? { base64: raw, mediaType }
       : null
-  return { url, livePreviewUrl, devtoolsFrontendUrl, action, intent, screenshot }
+  const candidate = stringField(output, "screenshotUrl")
+  let screenshotUrl = ""
+  try {
+    const parsed = new URL(candidate)
+    if (["http:", "https:"].includes(parsed.protocol) &&
+      !parsed.username && !parsed.password &&
+      /^\/browser-observations\/[a-zA-Z0-9_-]+\/content$/.test(parsed.pathname)) {
+      screenshotUrl = candidate
+    }
+  } catch {
+    // Native observations use explicit service URLs, never arbitrary tool text.
+  }
+  return { url, livePreviewUrl, devtoolsFrontendUrl, action, intent, screenshot, screenshotUrl }
 }
 
 /** Unwrap Computer Use payloads from tool-output-available shapes. */
@@ -124,7 +141,7 @@ export function unwrapToolOutput(value: unknown): Record<string, unknown> | null
       const nested = asRecord(block)
       if (!nested) continue
       const fromText = asRecord(nested.text)
-      if (fromText) return fromText
+      if (fromText) return asRecord(fromText.browserPreview) ?? fromText
     }
   }
 

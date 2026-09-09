@@ -1,54 +1,32 @@
 # Repository Guidelines
 
-v0-style chat product: Next.js UI streams durable agent turns from a Python Temporal/Strands orchestrator backed by Google Gemini (`gemini-flash-latest`).
+Multi-provider agent gateway: a Next.js UI streams durable agent turns from a Python Temporal/Strands orchestrator. Perplexity's Agent API is the primary provider; Google AI Studio connects directly. Any other provider (OpenAI, Anthropic, Mistral, xAI, and so on) is roadmap-only and must not be described as implemented.
 
-> **Read this first.** The architecture below is the *target* design. The frontend and the orchestrator's core runtime exist; several supporting modules are still planned. See [Current state](#current-state) for the exact split. Treat planned modules as binding design intent — they are the contract the remaining work builds against — but do not assume you can import or run them.
+> **Read this first.** This file describes the verified current state of the working tree. Where a behavior is policy (the agent model policy below, the provider-declaration rule), treat it as binding.
 
 ## Project Structure & Module Organization
 
-Request path: `app/page.tsx` (`useChat` → `/api/orchestrator`) converts FastAPI SSE into AI SDK UI-message parts; the bridge is `orchestrator/server.py` (`POST /sessions`, `/turns/stream`, `/end`, `/compare/stream`, `/approve`, `GET /health`) talking to Temporal workflow `ChatWorkflow` in `workflow.py`. Workers (`run_worker.py`) register `GeminiModel` factories (`gemini-3.8-flash` and dynamic alias `gemini-flash-latest`) on task queue `perplexity-orchestrator`.
+Request path: `app/page.tsx` (`useChat` → `/api/orchestrator`) converts FastAPI SSE into AI SDK UI-message parts; the bridge is `orchestrator/server.py` (`POST /sessions`, `/turns/stream`, `/end`, `/compare/stream`, `/approve`, `GET /health`) talking to Temporal workflow `ChatWorkflow` in `workflow.py`. Workers (`run_worker.py`) register provider model factories on task queue `perplexity-orchestrator`.
 
 - `components/ai-elements/` — vendored AI Elements primitives; treat as library code.
 - `components/v0/` — app UI that **composes** those primitives (`composer`, `agent-activity`, `model-picker`, `compare-view`).
 - `components/ui/` — shadcn/base-ui primitives (`Button`/`Select` use `@base-ui/react`, not Radix `asChild`).
-- `lib/perplexity.ts` — `DEFAULT_MODEL` + unauthenticated model listing only; all inference goes through the orchestrator.
+- `lib/perplexity.ts` — model listing helpers only; all inference goes through the orchestrator.
 - `orchestrator/` — Python stack (`requirements.txt`, local `.venv`). Agent identity lives in `agent.json`.
 
 **Hard rule:** every AI Elements surface must use native subcomponents, props, and animations (`Conversation` scroll, `MessageResponse`/Streamdown, `PromptInput*` submit/attachments, `ChainOfThought*`). Do not reimplement those in `components/v0/`. `reasoning.tsx` is intentionally not vendored — `ChainOfThought` is the only reasoning UI. Model ids are never hardcoded lists; pickers use `/api/models`. Models switch per turn: the picker stays live mid-conversation, each turn body carries the selected model, and the orchestrator rebuilds the session's agent on the new model without ending the session.
 
-### Current state
+**Provider declaration.** Providers are declared by the worker, never inferred client-side. The readiness lease and `/health` carry provider metadata; pickers group models by the declared owner, not by guessing from the id shape. This closes the gap where a `gemini*` id could mean "Google AI Studio (direct)" or "google/* via Perplexity gateway" and both collapsed into one group.
 
-Verified against the working tree. Anything not listed as present is planned.
-
-**Frontend — present.** `app/page.tsx`, `app/compare/page.tsx`, `app/layout.tsx`, `app/globals.css`. Routes: `app/api/orchestrator/route.ts`, `app/api/orchestrator/end/route.ts`, `app/api/orchestrator/approval/route.ts`, `app/api/orchestrator/file/route.ts` (streams sandbox-produced `share_file` output through the orchestrator, resolving relative Agent API file paths `/v1/{responses|agent}/{id}/files/{id}/content`; `app/api/orchestrator/route.ts` rewrites native tool file URLs to `/api/orchestrator/file?path=...` around line 354), `app/api/compare/route.ts`, `app/api/models/route.ts`. `app/page.tsx` uses `useChat` with `DefaultChatTransport({ api: "/api/orchestrator" })` and calls `/api/orchestrator/end` and `/api/orchestrator/approval` directly. `components/ai-elements/` is vendored (and correctly has **no** `reasoning.tsx`); `components/ui/` is present with 18 files importing `@base-ui/react`; `components/v0/` holds `composer`, `agent-activity`, `model-picker`, `compare-view`, plus `site-header`, `blurple-background`, and the `use-models` hook. `lib/perplexity.ts` and `lib/utils.ts` are present.
-
-**Orchestrator — present.** Core runtime plus foundation:
-
-| File | Contents |
-| --- | --- |
-| `orchestrator/config.py` | `TASK_QUEUE = "perplexity-orchestrator"`, activity timeouts, `MODEL_RETRY_POLICY`, `EMBEDDING_GENERATIONS` |
-| `orchestrator/telemetry.py` | `telemetry_plugins()` — opt-in Temporal OTel wiring, a no-op unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set |
-| `orchestrator/perplexity_model.py` | the `PerplexityModel` implementation |
-| `orchestrator/workflow.py` | `ChatWorkflow`: durable session, `turn` update, HITL approval, streaming topics, continue-as-new. The `think` community tool is discontinued. Native Gemini thought text (`part.thought`) streams as Strands `reasoningContent` on topic `events` and the SSE bridge maps it to AI SDK `reasoning-delta` / Chain of Thought. `AgentActivity` still suppresses a tool card named `think` if one ever appears. |
-| `orchestrator/compare_workflow.py` | `CompareWorkflow`: independent per-model comparison |
-| `orchestrator/run_worker.py` | worker: Gemini model factory (`gemini-3.8-flash`) + Strands `MCPClient` from `mcp.json`, readiness file |
-| `orchestrator/server.py` | FastAPI SSE bridge (`POST /sessions`, `/turns/stream`, `/end`, `/compare/stream`, `/approve`, `GET /health`) |
-| `orchestrator/agent.json` | agent identity: `name` + system `prompt` |
-| `orchestrator/requirements.txt` | pinned deps (`strands-agents`, `temporalio[strands-agents,pydantic]`, `perplexityai`, `lancedb`, `fastapi`, `mcp`, `pytest`, …) |
-
-Tests live in `orchestrator/tests/`: `test_config.py`, `test_telemetry.py`, `test_perplexity_model.py`, `test_workflow.py`. There is no `conftest.py` or `__init__.py` — run pytest from inside `orchestrator/`. `compare_workflow.py`, `run_worker.py`, and `server.py` do **not** have test suites yet; writing them is tracked in Jira (see below).
-
-**Orchestrator — planned, not yet on disk.** `perplexity_operations.py`, `memory.py`, `mcp_config.py` + `pophive_sync.py` + `scripts/sync-pophive.sh`, `graph_activity.py`, `agent_runtime.py`, replay fixtures under `tests/histories/`, `run_workflow.py` + `orchestrator/README.md`. References to these describe intended structure, not current fact.
-
-**`orchestrator/graph_tool.py` is absent and protected.** Never create or edit it opportunistically. The graph-activity work (`graph_activity.py`) is blocked until a more capable graph tool is designed with the user; `graph_activity.py` remains a durable activity wrapper around that tool's public `graph` name and native schema, not a reimplementation of it. The two currently-failing tests in `app/api/orchestrator/route.test.ts` assert `data-graph-event` handling and belong to that blocked work.
+**Agent model policy.** Delegated/subagent work may run ONLY on: Fable 5.1, GPT 6, DeepSeek V4 Flash, DeepSeek V4 Pro, GLM 5.3, GLM 5.3 Flash, Gemini 3.8 Flash, Grok 4.6, Kimi K3. Haiku, Sonnet, and any other model are prohibited.
 
 ### Code intelligence (CodeGraph)
 
-The workspace is indexed by **CodeGraph** (OhMyOpenCode's code-intelligence graph). `.codegraph` at the repo root is a symlink to `~/.omo/codegraph/projects/v0-clone-blurple-5c4264970e8c4939/`, which holds a SQLite index (`codegraph.db`) created 2026-07-31 and auto-synced by a file watcher (~1s lag). Agents with `codegraph_*` tools should reach for `codegraph_explore` first when asking about TypeScript or Python source — one call returns verbatim line-numbered source plus callers/callees and blast radius, replacing grep/read loops. CodeGraph is developer tooling only: it is unrelated to the product graph work (`orchestrator/graph_tool.py` / `graph_activity.py`), which remains absent and blocked as described above.
+The workspace is indexed by **CodeGraph** (OhMyOpenCode's code-intelligence graph). `.codegraph` at the repo root is a symlink to `~/.omo/codegraph/projects/v0-clone-blurple-5c4264970e8c4939/`, holding a SQLite index auto-synced by a file watcher (~1s lag). Agents with `codegraph_*` tools should reach for `codegraph_explore` first when asking about TypeScript or Python source — one call returns verbatim line-numbered source plus callers/callees and blast radius, replacing grep/read loops. CodeGraph is developer tooling only; it is unrelated to the product graph work.
 
 ### Work tracking
 
-Remaining work is tracked in **Jira** (Atlassian MCP is configured in `.kilo/kilo.json`). `docs/jira-backlog.md` is the migration source: it maps every remaining task, its files, verification gates, acceptance criteria, and dependencies. Canonical requirements remain in `docs/superpowers/plans/2026-07-30-durable-strands-temporal-orchestrator.md`. A second plan, `2026-07-30-coding-agent-product-reset.md`, renames `components/v0/` to `components/coding-agent/` and `blurple-background.tsx` to `app-background.tsx`; it lives on branch `feature/coding-agent-product-reset` (worktree `.worktrees/coding-agent-product-reset`). **Order is orchestrator work first, product reset second** — do not apply the rename until the orchestrator epic completes, so the `components/v0/` paths above stay current.
+Remaining work is tracked in **Jira** (Atlassian MCP is configured in `.kilo/kilo.json`). `docs/jira-backlog.md` is the migration source: it maps every remaining task, its files, verification gates, acceptance criteria, and dependencies. Canonical requirements remain in `docs/superpowers/plans/2026-07-30-durable-strands-temporal-orchestrator.md`. A second plan, `2026-07-30-coding-agent-product-reset.md`, renames `components/v0/` to `components/coding-agent/` and `blurple-background.tsx` to `app-background.tsx`; it lives on branch `feature/coding-agent-product-reset` (worktree `.worktrees/coding-agent-product-reset`). Sequencing: this plan (`.omo/plans/framework-adherence-reset.md`) precedes the coding-agent product reset.
 
 ### Jira documentation rules (project GWEN)
 
@@ -75,10 +53,9 @@ pnpm dev:all          # frees ports, then Temporal :7233, worker, API :8787, Nex
 pnpm dev:clean        # scripts/free-ports.sh (3000, 7233, 8233, 8787 + stale worker/uvicorn)
 pnpm build && pnpm start
 pnpm lint
-cd orchestrator && .venv/bin/python run_workflow.py "prompt" [model_id]  # smoke test, no UI
 ```
 
-The `orchestrator/.venv` is already provisioned. The `run_workflow.py` smoke test remains planned (see `docs/jira-backlog.md`).
+The `orchestrator/.venv` is already provisioned.
 
 Python tests, from `orchestrator/`:
 
@@ -87,14 +64,16 @@ Python tests, from `orchestrator/`:
 .venv/bin/python -m pytest tests/test_workflow.py -q      # one suite (needs local Temporal via `temporal` CLI on PATH)
 ```
 
-Vitest is configured (`vitest.config.ts`, aliasing `@` to the repo root) and one frontend suite exists, `app/api/orchestrator/route.test.ts`. `package.json` defines no `test` script, and the config sets no `include`/`exclude`, so an unscoped run collects `.worktrees/` duplicates. Always scope it:
+Vitest is configured (`vitest.config.ts`, aliasing `@` to the repo root) and one frontend suite exists, `app/api/orchestrator/route.test.ts`. `package.json` defines no `test` script, and the config sets no `include`/`exclude`, so an unscoped run collects `.worktrees/` and `.kilo/` duplicates. Always scope it:
 
 ```bash
-pnpm exec vitest run --exclude '**/.worktrees/**'
-pnpm exec vitest run --exclude '**/.worktrees/**' app/api/orchestrator/route.test.ts   # one suite
+pnpm exec vitest run --exclude '**/.worktrees/**' --exclude '**/.kilo/**'
+pnpm exec vitest run --exclude '**/.worktrees/**' --exclude '**/.kilo/**' app/api/orchestrator/route.test.ts   # one suite
 ```
 
-The two failures in that suite are expected: they assert `data-graph-event` handling that belongs to the blocked graph work. A second worktree lives at `.kilo/worktrees/oasis-streetcar/`, which `--exclude '**/.worktrees/**'` does not cover — add `--exclude '**/.kilo/**'` to avoid collecting its duplicate `route.test.ts`.
+## Gates
+
+Verification before claiming work complete: `npx tsc --noEmit`, `pnpm lint`, scoped vitest (`pnpm exec vitest run --exclude '**/.worktrees/**' --exclude '**/.kilo/**'`), and orchestrator pytest run from inside `orchestrator/` (`.venv/bin/python -m pytest tests -q`). Two adherence suites are being added by the active plan and count as planned gates: `orchestrator/tests/test_framework_adherence.py` and `app/framework-adherence.test.ts`.
 
 ## Coding Style & Naming Conventions
 
@@ -104,6 +83,6 @@ Python here targets 3.13, uses 4-space indent and `snake_case` modules, and keep
 
 ## Commit & Pull Request Guidelines
 
-Subjects are capitalized, imperative, and unprefixed ("Implement durable orchestrator foundation", "Plan coding agent product reset"); keep that form and commit once per completed task. PRs should note frontend vs orchestrator impact and any env/Temporal process requirements for reviewers.
+Subjects are capitalized, imperative, and unprefixed ("Implement durable orchestrator foundation", "Plan coding agent product reset"); a `feat:` prefix appears in history but is not required. Keep that form and commit once per completed task. PRs should note frontend vs orchestrator impact and any env/Temporal process requirements for reviewers.
 
 Protected paths bind regardless of committing: `.env*`, `orchestrator/graph_tool.py`, and the six existing `app/api/**/route.ts` files (orchestrator, orchestrator/end, orchestrator/approval, orchestrator/file, compare, models). Change a route only when a failing compatibility test proves the backend cannot satisfy an existing contract. The former `.opencode/` ledger/guard system is retired; scope and sequencing now live in Jira (`docs/jira-backlog.md` is the migration source).

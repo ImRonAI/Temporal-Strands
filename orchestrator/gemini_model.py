@@ -14,7 +14,6 @@ https://developers.google.com/maps/documentation/javascript/reference/places-wid
 from __future__ import annotations
 
 import base64
-import copy
 import json
 import mimetypes
 from collections.abc import AsyncGenerator
@@ -23,7 +22,6 @@ from typing import Any
 from google import genai
 from strands.models.gemini import GeminiModel as _GeminiModel
 from strands.types.content import ContentBlock, Messages
-from strands.types.exceptions import ContextWindowOverflowException, ModelThrottledException
 from strands.types.streaming import StreamEvent
 from strands.types.tools import ToolChoice, ToolSpec
 
@@ -143,7 +141,61 @@ def search_from_grounding(event: object) -> dict[str, Any] | None:
     return payload
 
 
+class _GroundingTapModels:
+    """``client.aio.models`` proxy that taps grounding metadata off raw events."""
+
+    def __init__(self, models: Any, sink: dict[str, Any]) -> None:
+        self._models = models
+        self._sink = sink
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._models, name)
+
+    async def generate_content_stream(self, **kwargs: Any) -> AsyncGenerator[Any, None]:
+        response = await self._models.generate_content_stream(**kwargs)
+
+        async def tapped() -> AsyncGenerator[Any, None]:
+            async for event in response:
+                maps = maps_from_grounding(event)
+                if maps is not None:
+                    self._sink["maps"] = maps
+                search = search_from_grounding(event)
+                if search is not None:
+                    self._sink["search"] = search
+                yield event
+
+        return tapped()
+
+
+class _GroundingTapAio:
+    def __init__(self, aio: Any, sink: dict[str, Any]) -> None:
+        self._aio = aio
+        self.models = _GroundingTapModels(aio.models, sink)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._aio, name)
+
+
+class _GroundingTapClient:
+    """Proxy around ``genai.Client`` that observes grounding metadata.
+
+    The parent stream loop drops ``candidates[0].grounding_metadata``; this
+    proxy records the latest maps/search grounding on ``sink`` while yielding
+    every raw event unchanged, so the parent frames are byte-identical.
+    """
+
+    def __init__(self, client: genai.Client, sink: dict[str, Any]) -> None:
+        self._client = client
+        self.aio = _GroundingTapAio(client.aio, sink)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+
 class GeminiModel(_GeminiModel):
+    _reasoning_effort: str | None = None
+    _grounding: dict[str, Any]
+
     def _format_request_content(self, messages: Messages) -> list[genai.types.Content]:
         names: dict[str, str] = {}
         last_cu: str | None = None
@@ -249,6 +301,32 @@ class GeminiModel(_GeminiModel):
         ]
         return super()._format_request_tools(filtered or None)
 
+    def _format_request_config(
+        self,
+        tool_specs: list[ToolSpec] | None,
+        system_prompt: str | None,
+        params: dict[str, Any] | None,
+    ) -> genai.types.GenerateContentConfig:
+        """Merge per-turn ``reasoning_effort`` into ``thinking_config``.
+
+        https://ai.google.dev/gemini-api/docs/thinking#set-budget
+        """
+        effort = self._reasoning_effort
+        if effort is not None:
+            thinking = (params or {}).get("thinking_config") or {}
+            if isinstance(thinking, genai.types.ThinkingConfig):
+                thinking = thinking.model_dump(exclude_none=True)
+            params = {
+                **(params or {}),
+                "thinking_config": {**thinking, "thinking_level": effort},
+            }
+        return super()._format_request_config(tool_specs, system_prompt, params)
+
+    def _get_client(self) -> genai.Client:
+        if not hasattr(self, "_grounding"):
+            self._grounding = {}
+        return _GroundingTapClient(super()._get_client(), sink=self._grounding)  # type: ignore[return-value]
+
     async def stream(
         self,
         messages: Messages,
@@ -257,90 +335,24 @@ class GeminiModel(_GeminiModel):
         tool_choice: ToolChoice | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[StreamEvent, None]:
-        # Identical to strands.models.gemini.GeminiModel.stream except we keep
-        # GroundingMetadata across chunks. generateContent docs put maps sources
-        # on candidates[0].grounding_metadata.grounding_chunks[].maps
-        # (title, uri, placeId) — the last stream event is often usage-only.
+        # Delegate frame production to the parent stream; the grounding tap
+        # client records maps/search GroundingMetadata that the parent loop
+        # drops (candidates[0].grounding_metadata — the last stream event is
+        # often usage-only), and we append it as trailing {"gemini": …} frames.
         # https://ai.google.dev/gemini-api/docs/generate-content/maps-grounding
-        params = copy.deepcopy(self.config.get("params") or {})
-        effort = (kwargs.get("invocation_state") or {}).get("reasoning_effort")
-        if effort is not None:
-            thinking = params.get("thinking_config") or {}
-            if isinstance(thinking, genai.types.ThinkingConfig):
-                thinking = thinking.model_dump(exclude_none=True)
-            params["thinking_config"] = {**thinking, "thinking_level": effort}
-        request = self._format_request(messages, tool_specs, system_prompt, params)
-        client = self._get_client().aio
+        self._reasoning_effort = (kwargs.get("invocation_state") or {}).get("reasoning_effort")
+        self._grounding = {}
         try:
-            response = await client.models.generate_content_stream(**request)
-            yield self._format_chunk({"chunk_type": "message_start"})
-            data_type: str | None = None
-            tool_used = False
-            candidate = None
-            event = None
-            maps = None
-            search = None
-            async for event in response:
-                found_maps = maps_from_grounding(event)
-                if found_maps:
-                    maps = found_maps
-                found_search = search_from_grounding(event)
-                if found_search:
-                    search = found_search
-                candidates = event.candidates
-                candidate = candidates[0] if candidates else None
-                content = candidate.content if candidate else None
-                parts = content.parts if content and content.parts else []
-                # Thought tokens must stream before tool-use frames so the SSE
-                # bridge can emit reasoning-delta before tool-input-start closes
-                # the open reasoning block during native Computer Use loops.
-                for part in parts:
-                    if part.text:
-                        new_data_type = "reasoning_content" if part.thought else "text"
-                        if new_data_type != data_type:
-                            if data_type is not None:
-                                yield self._format_chunk({"chunk_type": "content_stop", "data_type": data_type})
-                            yield self._format_chunk({"chunk_type": "content_start", "data_type": new_data_type})
-                            data_type = new_data_type
-                        yield self._format_chunk(
-                            {
-                                "chunk_type": "content_delta",
-                                "data_type": data_type,
-                                "data": part,
-                            },
-                        )
-                    if part.function_call:
-                        if data_type is not None:
-                            yield self._format_chunk({"chunk_type": "content_stop", "data_type": data_type})
-                            data_type = None
-                        yield self._format_chunk({"chunk_type": "content_start", "data_type": "tool", "data": part})
-                        yield self._format_chunk({"chunk_type": "content_delta", "data_type": "tool", "data": part})
-                        yield self._format_chunk({"chunk_type": "content_stop", "data_type": "tool", "data": part})
-                        tool_used = True
-            if data_type is not None:
-                yield self._format_chunk({"chunk_type": "content_stop", "data_type": data_type})
-            yield self._format_chunk(
-                {
-                    "chunk_type": "message_stop",
-                    "data": "TOOL_USE" if tool_used else (candidate.finish_reason if candidate else "STOP"),
-                }
-            )
-            if search:
+            async for chunk in super().stream(
+                messages, tool_specs, system_prompt, tool_choice, **kwargs
+            ):
+                yield chunk
+            if search := self._grounding.get("search"):
                 yield {"gemini": search}  # type: ignore[typeddict-item]
-            if maps:
+            if maps := self._grounding.get("maps"):
                 yield {"gemini": maps}  # type: ignore[typeddict-item]
-            if event:
-                yield self._format_chunk({"chunk_type": "metadata", "data": event.usage_metadata})
-        except genai.errors.ClientError as error:
-            match error.status:
-                case "RESOURCE_EXHAUSTED" | "UNAVAILABLE":
-                    raise ModelThrottledException(error.message or str(error)) from error
-                case "INVALID_ARGUMENT":
-                    if error.message and "exceeds the maximum number of tokens" in error.message:
-                        raise ContextWindowOverflowException(error.message) from error
-                    raise error
-                case _:
-                    raise error
+        finally:
+            self._reasoning_effort = None
 
 
 __all__ = ["GeminiModel", "maps_from_grounding", "search_from_grounding"]

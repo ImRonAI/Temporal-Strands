@@ -104,10 +104,24 @@ def closable_activity_options(options: dict) -> dict:
         **options,
         "schedule_to_close_timeout": UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE,
     }
-# The think activity streams every model chunk to the thinking topic; same
-# batching Temporal documents for LLM streaming (see workflow.py's
-# streaming_batch_interval note -- this is a history-pressure dial).
-THINK_STREAM_BATCH_INTERVAL = timedelta(milliseconds=200)
+# Activity-side nested streams (think / graph / use_agent / use_skill) publish
+# every nested-agent chunk on the thinking topic. These are multi-minute runs
+# (graph: up to 35 min), not one ~30 s completion, and every flushed batch is a
+# durable Signal in the hosting ChatWorkflow's history: one graph activity on
+# chat-2a72daf5c76ec25f produced 1,769 Signals / 15.5 MB at 200 ms. This is
+# Temporal's documented WorkflowStreamClient default
+# (docs.temporal.io/workflow-streams#tuning). The outer TemporalAgent's own
+# streaming_batch_interval in workflow.py is the documented LLM-completion case
+# and is unaffected.
+THINK_STREAM_BATCH_INTERVAL = timedelta(seconds=2)
+# The think sub-agent runs up to 10 minutes wall-clock (multi-minute nested
+# stream, not a ~30 s completion); the heartbeat keeps Temporal aware the
+# stream is alive between flushed batches. Exactly one automatic attempt: a
+# replayed think is a duplicate inference, so a failed one is deliberately
+# retried by the orchestrator, not blindly replayed.
+THINK_START_TO_CLOSE = timedelta(minutes=10)
+THINK_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
+THINK_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
 # --- Formation graph / sub-agent activities ---
 # A whole formation replay is expensive and non-idempotent (every node call
 # is billable inference), so like the think envelope the graph and use_agent
@@ -141,8 +155,17 @@ AGENT_OPERATION_RETRY_POLICY = RetryPolicy()
 # (the orchestrator can call retrieve_agent_response). Retrieve/list/download
 # are read-only and keep AGENT_OPERATION_RETRY_POLICY's ordinary retries.
 AGENT_CREATE_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
-# Sub-agent run events ride their own topic; batched like the think stream.
-AGENT_RUNS_STREAM_BATCH_INTERVAL = timedelta(milliseconds=200)
+# Sub-agent run events ride their own topic. Unlike the think stream (one
+# short model call), a preset create_* activity streams a background run for
+# many minutes, and every flushed batch is a durable Signal in the hosting
+# ChatWorkflow's history. At 200 ms one turn produced ~1,000 publish Signals /
+# 20 MB (chat-be6529f8005d0b0e): workflow-task replay then exceeded the SDK's
+# 2 s deadlock detector on every attempt, and a 52 MB sibling run was
+# terminated at the server history limit. This is Temporal's documented
+# WorkflowStreamClient default (docs.temporal.io/workflow-streams#tuning:
+# "raise it to amortize Signal cost"; 200 ms is their figure for a ~30 s
+# completion, not a long nested run).
+AGENT_RUNS_STREAM_BATCH_INTERVAL = timedelta(seconds=2)
 # Where download_agent_response_file persists share_file bytes; never inside
 # Temporal payloads. Overridable per deployment.
 AGENT_FILE_STORE_DIR = Path(
@@ -177,3 +200,42 @@ EMBEDDING_GENERATIONS = {
         "encoding": "base64_int8",
     }
 }
+
+# Desktop-only budgets. Existing browser/model activity policy is unchanged.
+DESKTOP_TASK_TIMEOUT = timedelta(minutes=30)
+DESKTOP_MAX_MUTATIONS = 100
+DESKTOP_OBSERVATION_TIMEOUT = timedelta(seconds=30)
+DESKTOP_OBSERVATION_RETRY_POLICY = RetryPolicy(maximum_attempts=3)
+DESKTOP_MUTATION_TIMEOUT = timedelta(seconds=30)
+DESKTOP_MUTATION_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
+DESKTOP_JOB_HEARTBEAT_INTERVAL = timedelta(seconds=10)
+DESKTOP_JOB_HEARTBEAT_TIMEOUT = timedelta(seconds=30)
+DESKTOP_LEASE_TTL = timedelta(minutes=5)
+DESKTOP_RECORD_MAX_BYTES = 65_536
+DESKTOP_SQLITE_TIMEOUT_SECONDS = 5
+DESKTOP_OBSERVATION_MAX_BYTES = 10 * 1024 * 1024
+DESKTOP_MAX_DIMENSION = 16_384
+WORKSPACE_FILE_MAX_BYTES = 1024 * 1024
+WORKSPACE_DIRECTORY_MAX_ENTRIES = 2000
+WORKSPACE_PATH_MAX_BYTES = 4096
+WORKSPACE_PATH_MAX_DEPTH = 32
+WORKSPACE_SEARCH_MAX_FILES = 200
+WORKSPACE_SEARCH_MAX_DIRECTORIES = 200
+WORKSPACE_SEARCH_MAX_PENDING_DIRECTORIES = 200
+WORKSPACE_SEARCH_QUERY_MAX_BYTES = 4096
+WORKSPACE_SEARCH_MAX_BYTES = 8 * 1024 * 1024
+WORKSPACE_SEARCH_MAX_MATCHES = 100
+WORKSPACE_SEARCH_TIMEOUT_SECONDS = 5
+WORKSPACE_UPLOAD_PREFIX = ".gwen-upload-"
+WORKSPACE_SESSION_TTL = timedelta(hours=8)
+WORKSPACE_MAX_PROJECTS = 100
+WORKSPACE_SERVICE_TIMEOUT_SECONDS = 30
+WORKSPACE_AUTH_TIMEOUT_SECONDS = 5
+WORKSPACE_HTTP_MAX_BYTES = 2 * WORKSPACE_FILE_MAX_BYTES
+WORKSPACE_PROJECT_CREATE_ACTION = "project.create"
+WORKSPACE_TOKEN_BYTES = 32
+WORKSPACE_EXCLUDED_NAMES = frozenset({
+    ".git", ".venv", "node_modules", "__pycache__", ".runtime", ".ssh",
+    ".gnupg", ".kilo", ".omo", ".worktrees", ".next",
+    "fair-expanse-493212-h8-138622c839d2.json",
+})

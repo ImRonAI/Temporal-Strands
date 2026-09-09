@@ -99,10 +99,15 @@ async def use_agent_activity(
                 "toolUseId": activity_id,
             }
 
+        # Reference example-3 wiring: the agent that carries use_skill gets
+        # the skills catalog prompt appended so it can only name skills that
+        # exist (agentskills.generate_skills_prompt).
+        from skills_config import augmented_system_prompt
+
         agent = Agent(
             model=model,
             tools=agent_tools,
-            system_prompt=system_prompt,
+            system_prompt=augmented_system_prompt(system_prompt),
             name=label,
             callback_handler=None,
         )

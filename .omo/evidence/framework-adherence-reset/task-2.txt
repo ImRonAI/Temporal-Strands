@@ -1,0 +1,25 @@
+=== Task 2 evidence: THINK_* envelope constants in config.py ===
+Date: 2026-09-08 14:14
+
+=== 1. Failing-first: test before constants added ===
+$ .venv/bin/python -m pytest tests/test_config.py -q
+1 failed, 5 passed in 0.13s
+  FAILED tests/test_config.py::test_think_envelope - ImportError: cannot import name 'THINK_HEARTBEAT_TIMEOUT' from 'config'
+
+=== 2. Passing: test after constants added ===
+$ .venv/bin/python -m pytest tests/test_config.py -q
+6 passed in 0.09s
+
+=== 3. Full suite (out-of-scope pre-existing/concurrent noise excluded) ===
+$ .venv/bin/python -m pytest tests -q
+636 passed, 18 warnings in 22.35s
+  (telemetry collector.example warnings are pre-existing env noise, not failures)
+
+=== 4. Constants present in config.py ===
+122:THINK_START_TO_CLOSE = timedelta(minutes=10)
+123:THINK_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
+124:THINK_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
+
+=== 5. Import wiring in config.py ===
+2:from datetime import timedelta
+6:from temporalio.common import RetryPolicy

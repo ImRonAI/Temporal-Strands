@@ -4,7 +4,7 @@ Runs the activity body with the workflow-stream client and workflow query
 patched out, so formation construction, native event flattening, publishes,
 cleanup, and the return shape are exercised without a Temporal server and
 without paid model calls. Real native SDK executors (Graph/Swarm via the
-sibling ``strands_graph_tool``) run against a scripted model.
+vendored ``graph_tool``) run against a scripted model.
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ def _reset() -> None:
     subagent_support._MODEL_FACTORIES.clear()
     # The sibling tool keeps a process-global manager: leaking entries across
     # tests would mask the cleanup assertions.
-    from strands_graph_tool.graph import _manager
+    from graph_tool import _manager
 
     _manager.graphs.clear()
     yield
@@ -319,7 +319,7 @@ async def test_unknown_tools_fail_clearly() -> None:
 
 @pytest.mark.asyncio
 async def test_one_shot_recursive_execution_streams_and_cleans_up() -> None:
-    from strands_graph_tool.graph import _manager
+    from graph_tool import _manager
 
     model = ScriptedModel()
     stream = FakeStreamClient()
@@ -480,7 +480,7 @@ async def test_model_inheritance_all_nodes_use_session_model() -> None:
 
 @pytest.mark.asyncio
 async def test_node_model_id_selects_a_registered_model() -> None:
-    from strands_graph_tool import configure_models
+    from graph_tool import configure_models
 
     session = ScriptedModel()
     alt = ScriptedModel()
@@ -517,7 +517,7 @@ async def test_unknown_node_model_id_fails_at_create() -> None:
                 topology={"nodes": [{"id": "x", "system_prompt": "s", "model_id": "nope"}]},
                 task="go",
             )
-    from strands_graph_tool.graph import _manager
+    from graph_tool import _manager
 
     assert _manager.graphs == {}
 
@@ -539,7 +539,7 @@ async def test_node_error_yields_error_terminal_state() -> None:
                 topology={"nodes": [{"id": "solo", "system_prompt": "s"}]},
                 task="go",
             )
-    from strands_graph_tool.graph import _manager
+    from graph_tool import _manager
 
     assert _manager.graphs == {}  # cleanup ran despite the failure
 
@@ -561,7 +561,7 @@ async def test_execution_timeout_produces_error_and_cleanup(monkeypatch) -> None
             )
     # The terminal error frame still reaches the frontend.
     assert frames(stream)[-1]["data"]["status"] == "error"
-    from strands_graph_tool.graph import _manager
+    from graph_tool import _manager
 
     assert _manager.graphs == {}
 
@@ -583,7 +583,7 @@ async def test_cancellation_is_not_swallowed_and_cleans_up() -> None:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-    from strands_graph_tool.graph import _manager
+    from graph_tool import _manager
 
     assert _manager.graphs == {}
     # A cancelled terminal frame was published before re-raising.
@@ -666,7 +666,7 @@ async def test_management_actions_pass_through() -> None:
         assert "managed" in listed["content"][0]["text"]
         deleted = await graph_activity(action="delete", graph_id="managed")
         assert deleted["status"] == "success"
-    from strands_graph_tool.graph import _manager
+    from graph_tool import _manager
 
     assert _manager.graphs == {}
 

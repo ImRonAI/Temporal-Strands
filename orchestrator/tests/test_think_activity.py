@@ -1,8 +1,14 @@
-"""Tests for the think activity: strands_tools' think as a streaming activity.
+"""Tests for the think activity: a thin streaming wrapper over strands_tools.think.
+
+The activity owns no prompt text and no ThoughtProcessor of its own — prompt
+construction is delegated to the installed ``strands_tools.think`` module, and
+the persona/methodology prompts arrive as activity arguments (loaded from
+``agent.json``'s ``think`` key by the workflow call site).
 
 Runs the activity body under ``temporalio.testing.ActivityEnvironment`` with
-the workflow-stream client and workflow query patched out, so the cycle loop,
-streaming publishes, and return shape are exercised without a Temporal server.
+the workflow-stream client and the parent-workflow query patched out, so the
+cycle loop, streaming publishes, heartbeats, and return shape are exercised
+without a Temporal server.
 """
 
 from __future__ import annotations
@@ -12,7 +18,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from strands.models.model import Model
-from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
 import think_activity
@@ -63,6 +68,16 @@ class ScriptedModel(Model):
             yield event
 
 
+def prompt_text(call: dict[str, Any]) -> str:
+    """The joined text of the user message a stream() call received."""
+    return "\n".join(
+        block["text"]
+        for message in call["messages"]
+        for block in message["content"]
+        if "text" in block
+    )
+
+
 class FakeTopic:
     def __init__(self) -> None:
         self.published: list[Any] = []
@@ -92,14 +107,17 @@ class FakeStreamClient:
 
 @pytest.fixture(autouse=True)
 def reset_factories() -> None:
-    think_activity._MODEL_FACTORIES.clear()
+    think_activity.set_model_factories({})
     yield
-    think_activity._MODEL_FACTORIES.clear()
+    think_activity.set_model_factories({})
 
 
 async def run_think(
-    model: ScriptedModel,
+    factories: dict[str, Any],
     stream: FakeStreamClient,
+    *,
+    model_id: str = "fake/text",
+    heartbeats: list[Any] | None = None,
     **kwargs: Any,
 ) -> Any:
     """Run the activity under ActivityEnvironment with infra patched out.
@@ -108,11 +126,13 @@ async def run_think(
     activity body only touches activity.client() / from_within_activity when
     it actually executes.
     """
-    think_activity.configure({"fake/text": lambda: model})
+    think_activity.set_model_factories(factories)
     env = ActivityEnvironment()
+    if heartbeats is not None:
+        env.on_heartbeat = lambda *args: heartbeats.append(args)
 
     handle = MagicMock()
-    handle.query = AsyncMock(return_value="fake/text")
+    handle.query = AsyncMock(return_value=model_id)
     client = MagicMock()
     client.get_workflow_handle.return_value = handle
 
@@ -127,14 +147,28 @@ async def run_think(
         return await env.run(think, **kwargs)
 
 
+def test_prompt_construction_is_delegated_to_strands_tools() -> None:
+    """No forked prompt text or processor lives in the module."""
+    import strands_tools.think as upstream
+
+    source = think_activity.__file__
+    with open(source) as handle:
+        text = handle.read()
+    assert "strands_tools.think" in text
+    assert "class ThoughtProcessor" not in text
+    assert "DEFAULT_THINK_SYSTEM_PROMPT" not in text
+    # The module reuses the installed processor rather than redefining it.
+    assert think_activity.ThoughtProcessor is upstream.ThoughtProcessor
+
+
 @pytest.mark.asyncio
-async def test_cycles_chain_and_return_shape_matches_original() -> None:
-    """N cycles run, each conclusion feeds the next, output is the original's."""
+async def test_cycles_chain_and_return_shape_matches_upstream() -> None:
+    """N cycles run, each conclusion feeds the next, output is upstream's."""
     model = ScriptedModel([text_events("first insight"), text_events("second insight")])
     stream = FakeStreamClient()
 
     result = await run_think(
-        model,
+        {"fake/text": lambda: model},
         stream,
         thought="What are Saturn's largest moons?",
         cycle_count=2,
@@ -146,13 +180,62 @@ async def test_cycles_chain_and_return_shape_matches_original() -> None:
     assert "Cycle 1/2:\nfirst insight" in text
     assert "Cycle 2/2:\nsecond insight" in text
 
-    # Cycle 2's prompt chains cycle 1's conclusion, verbatim per the original.
+    # Cycle 2's prompt chains cycle 1's conclusion, verbatim per upstream.
     assert len(model.calls) == 2
     second_prompt = model.calls[1]["messages"]
     assert "Previous cycle concluded: first insight" in str(second_prompt)
     assert "Continue developing these ideas further." in str(second_prompt)
-    # The per-cycle system prompt is the caller's, not the default.
+    # The per-cycle system prompt is the caller's; the module owns no default.
     assert model.calls[0]["system_prompt"] == "You are an astronomer."
+
+
+@pytest.mark.asyncio
+async def test_cycle_prompt_is_byte_identical_to_upstream_builder() -> None:
+    """The cycle prompt comes from strands_tools' create_thinking_prompt."""
+    import strands_tools.think as upstream
+    from strands_tools.utils import console_util
+
+    model = ScriptedModel([text_events("ok")])
+    stream = FakeStreamClient()
+
+    await run_think(
+        {"fake/text": lambda: model},
+        stream,
+        thought="a thought",
+        cycle_count=1,
+        system_prompt="persona",
+        thinking_system_prompt="METHOD X",
+    )
+
+    expected = upstream.ThoughtProcessor({}, console_util.create()).create_thinking_prompt(
+        "a thought", 1, 1, "METHOD X"
+    )
+    assert prompt_text(model.calls[0]) == expected
+
+
+@pytest.mark.asyncio
+async def test_omitted_thinking_prompt_uses_upstream_default_instructions() -> None:
+    """No thinking_system_prompt -> upstream's own default instructions."""
+    import strands_tools.think as upstream
+    from strands_tools.utils import console_util
+
+    model = ScriptedModel([text_events("ok")])
+    stream = FakeStreamClient()
+
+    await run_think(
+        {"fake/text": lambda: model},
+        stream,
+        thought="t",
+        cycle_count=1,
+        system_prompt="",
+    )
+
+    expected = upstream.ThoughtProcessor({}, console_util.create()).create_thinking_prompt(
+        "t", 1, 1, None
+    )
+    assert prompt_text(model.calls[0]) == expected
+    # An empty persona is passed through, not replaced by a forked default.
+    assert model.calls[0]["system_prompt"] in (None, "")
 
 
 @pytest.mark.asyncio
@@ -161,10 +244,12 @@ async def test_every_model_chunk_streams_to_the_thinking_topic() -> None:
     events = text_events("streamed reply")
     model = ScriptedModel([events])
     stream = FakeStreamClient()
+    heartbeats: list[Any] = []
 
     await run_think(
-        model,
+        {"fake/text": lambda: model},
         stream,
+        heartbeats=heartbeats,
         thought="stream me",
         cycle_count=1,
         system_prompt="prompt",
@@ -174,60 +259,70 @@ async def test_every_model_chunk_streams_to_the_thinking_topic() -> None:
 
     assert stream.entered and stream.exited
     assert stream.topics[THINKING_TOPIC].published == events
+    # One beat per streamed chunk keeps long cycles cancel/resume visible.
+    assert len(heartbeats) == len(events)
 
 
 @pytest.mark.asyncio
-async def test_unregistered_model_is_a_nonretryable_error() -> None:
-    """A model id outside the worker catalog fails fast, not forever."""
-    stream = FakeStreamClient()
-    env = ActivityEnvironment()
-
-    handle = MagicMock()
-    handle.query = AsyncMock(return_value="not/registered")
-    client = MagicMock()
-    client.get_workflow_handle.return_value = handle
-
-    with (
-        patch.object(think_activity.activity, "client", return_value=client),
-        patch.object(
-            think_activity.WorkflowStreamClient,
-            "from_within_activity",
-            return_value=stream,
-        ),
-    ):
-        with pytest.raises(ApplicationError) as excinfo:
-            await env.run(
-                think,
-                thought="anything",
-                cycle_count=1,
-                system_prompt="prompt",
-            )
-    assert excinfo.value.non_retryable
-
-
-@pytest.mark.asyncio
-async def test_empty_system_prompt_falls_back_to_the_default_persona() -> None:
-    """No system_prompt -> DEFAULT_THINK_SYSTEM_PROMPT; no thinking_system_prompt
-    -> DEFAULT_THINKING_SYSTEM_PROMPT injected into the cycle prompt."""
-    model = ScriptedModel([text_events("ok")])
+async def test_unregistered_model_returns_an_error_result() -> None:
+    """A model id outside the worker catalog is a reported error, not a raise."""
     stream = FakeStreamClient()
 
-    await run_think(model, stream, thought="t", cycle_count=1, system_prompt="")
-
-    from think_activity import (
-        DEFAULT_THINK_SYSTEM_PROMPT,
-        DEFAULT_THINKING_SYSTEM_PROMPT,
+    result = await run_think(
+        {"fake/text": lambda: ScriptedModel([])},
+        stream,
+        model_id="not/registered",
+        thought="anything",
+        cycle_count=1,
+        system_prompt="prompt",
     )
 
-    assert model.calls[0]["system_prompt"] == DEFAULT_THINK_SYSTEM_PROMPT
-    prompt_text = str(model.calls[0]["messages"])
-    assert "PARALLEL EVIDENCE GATHERING" in prompt_text
-    assert DEFAULT_THINKING_SYSTEM_PROMPT.splitlines()[0] in prompt_text
+    assert result["status"] == "error"
+    assert "not/registered" in result["content"][0]["text"]
 
 
 @pytest.mark.asyncio
-async def test_model_failure_returns_error_result_like_the_original() -> None:
-    """A mid-cycle exception becomes {"status": "error"} per the original."""
+async def test_factory_failure_returns_an_error_result() -> None:
+    """A factory that raises never escapes the activity."""
+
+    def exploding_factory() -> Any:
+        raise RuntimeError("factory exploded")
+
+    stream = FakeStreamClient()
+
+    result = await run_think(
+        {"fake/text": exploding_factory},
+        stream,
+        thought="t",
+        cycle_count=1,
+        system_prompt="p",
+    )
+
+    assert result["status"] == "error"
+    assert "factory exploded" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_empty_thought_still_returns_a_success_envelope() -> None:
+    """Malformed/empty input degrades to an ordinary cycle, not a crash."""
+    model = ScriptedModel([text_events("nothing to add")])
+    stream = FakeStreamClient()
+
+    result = await run_think(
+        {"fake/text": lambda: model},
+        stream,
+        thought="",
+        cycle_count=1,
+        system_prompt="p",
+    )
+
+    assert result["status"] == "success"
+    assert "Cycle 1/1:" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_model_failure_returns_error_result_with_content() -> None:
+    """A mid-cycle exception becomes {"status": "error"} carrying the message."""
 
     class ExplodingModel(ScriptedModel):
         async def stream(
@@ -236,12 +331,22 @@ async def test_model_failure_returns_error_result_like_the_original() -> None:
             raise RuntimeError("provider exploded")
             yield  # pragma: no cover
 
-    model = ExplodingModel([])
     stream = FakeStreamClient()
 
     result = await run_think(
-        model, stream, thought="t", cycle_count=1, system_prompt="p"
+        {"fake/text": lambda: ExplodingModel([])},
+        stream,
+        thought="t",
+        cycle_count=1,
+        system_prompt="p",
     )
 
     assert result["status"] == "error"
+    assert result["content"][0]["text"]
     assert "provider exploded" in result["content"][0]["text"]
+
+
+def test_module_stays_a_thin_wrapper() -> None:
+    """Acceptance gate: the fork is gone and the module stays small."""
+    lines = open(think_activity.__file__).read().splitlines()
+    assert len(lines) < 120, f"{len(lines)} lines; the wrapper must stay under 120"

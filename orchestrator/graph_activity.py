@@ -1,4 +1,4 @@
-"""Sibling ``strands_graph_tool.graph`` as a streaming Temporal activity.
+"""Vendored ``graph_tool.graph`` as a streaming Temporal activity.
 
 Thin ``@activity.defn`` wrapper per the Temporal Strands README (decorate
 non-deterministic tools with ``@activity.defn``, register on the worker,
@@ -67,7 +67,7 @@ from typing import Any, Optional, cast
 from pydantic import BaseModel, ConfigDict, Field
 from strands import Agent
 from strands.types._events import ToolResultEvent, ToolStreamEvent
-from strands_graph_tool.graph import graph as sibling_graph
+from graph_tool import graph as sibling_graph
 from temporalio import activity
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
 from temporalio.exceptions import ApplicationError

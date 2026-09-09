@@ -1,0 +1,68 @@
+Task 21 evidence: root AGENTS.md regeneration (LIGHT docs)
+===========================================================
+Date: 2026-09-08
+
+QA loop
+-------
+Command:
+  for p in $(grep -o 'orchestrator/[a-z_/.]*\.py' AGENTS.md); do test -f $p || echo "MISSING: $p"; done
+
+Output:
+  MISSING: orchestrator/tests/test_framework_adherence.py
+  MISSING: orchestrator/graph_tool.py
+
+The two MISSING lines are INTENDED absences, both mandated by the task content
+requirements and therefore cannot be removed:
+
+1. orchestrator/graph_tool.py is a REQUIRED protected path (listed in the
+   "Protected paths" paragraph). It is genuinely absent on disk by design —
+   the repo rule is "Never create or edit it opportunistically."
+2. orchestrator/tests/test_framework_adherence.py is the REQUIRED planned
+   adherence gate (mentioned in the Gates section). The active plan is adding
+   it; it does not exist yet. Same for app/framework-adherence.test.ts (frontend).
+
+The acceptance QA loop criterion ("prints nothing") is therefore internally
+inconsistent with the mandatory content requirements: the two required paths
+are deliberately absent. Every OTHER orchestrator/*.py path in AGENTS.md
+resolves on disk (verified — no additional MISSING lines).
+
+Grep checks
+-----------
+  grep -n "Fable 5.1" AGENTS.md        -> 1 match (line 21, agent model policy)
+  grep -c "discontinued\|expected failures\|expected failing" AGENTS.md -> 0
+
+Word count
+----------
+  wc -w AGENTS.md                       -> 1418 (total)
+  body (from line 3 onward)             -> 1415
+
+Word-count target (300-500) NOT achievable: the task mandates keeping the
+"Work tracking" + "Jira documentation rules (project GWEN)" sections VERBATIM,
+which together measure ~470 words before any other section. Adding the
+required Project Structure + hard rule + provider policy + agent model policy +
+CodeGraph + Build/Test commands + Gates + Coding Style + Commit/PR + protected
+paths yields a body that necessarily exceeds 500 words. Prioritized the
+non-negotiable content mandates over the numeric target.
+
+Verification of sources
+-----------------------
+- package.json scripts read verbatim: dev, build, start, lint, dev:all,
+  dev:temporal, dev:worker, dev:api, dev:web, dev:clean. All commands in the
+  Build/Test section (pnpm install, uv venv, pnpm dev:all, pnpm dev:clean,
+  pnpm build && pnpm start, pnpm lint, pytest, scoped vitest) match package.json
+  scripts or the task's verbatim gate commands. No invented commands.
+- git log -25 --format=%s confirms "feat:" prefix appears in history (2 of 25
+  most recent) but is not required — matches stated commit style.
+- docs/jira-backlog.md exists; project GWEN is corroborated by
+  docs/evidence/GWEN-27/ and docs/evidence/GWEN-30/ mirrors (kept the Jira
+  rules section verbatim as instructed).
+- Draft .omo/drafts/framework-adherence-reset.md "Stale documentation"
+  section reviewed; all falsified claims (think discontinued, graph_activity
+  absent, StrandsPlugin-on-worker, missing test suites, Gemini-only default,
+  2 expected failing route tests) are REMOVED from the new AGENTS.md.
+- V9 provider-declaration direction adopted verbatim as policy ("Providers are
+  declared by the worker, never inferred client-side").
+
+Files changed
+-------------
+AGENTS.md (only)

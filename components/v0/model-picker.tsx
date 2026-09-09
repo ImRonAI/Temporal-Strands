@@ -1,7 +1,8 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { ArrowLeftIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react"
+import type { PopoverRoot } from "@base-ui/react/popover"
 
 import {
   PromptInputCommand,
@@ -83,6 +84,13 @@ export function ModelPicker({
   const { models, status } = useModels()
   const [open, setOpen] = useState(false)
   const [choosingEffort, setChoosingEffort] = useState(false)
+  const actionsRef = useRef<PopoverRoot.Actions | null>(null)
+
+  const close = () => {
+    actionsRef.current?.close()
+    setOpen(false)
+    setChoosingEffort(false)
+  }
 
   // Grouped by provider so the searchable list still reads as organized —
   // CommandList (below) already caps height and scrolls natively.
@@ -102,7 +110,14 @@ export function ModelPicker({
       : (modelLabel(value) || "Select a model")
 
   return (
-    <Popover onOpenChange={(next) => { setOpen(next); setChoosingEffort(false) }} open={open}>
+    <Popover
+      actionsRef={actionsRef}
+      onOpenChange={(next) => {
+        setOpen(next)
+        setChoosingEffort(false)
+      }}
+      open={open}
+    >
       <PopoverTrigger
         className={cn(
           "flex items-center gap-1.5 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm text-muted-foreground transition-colors outline-none select-none hover:bg-accent hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-expanded:bg-accent aria-expanded:text-foreground",
@@ -124,16 +139,26 @@ export function ModelPicker({
         {choosingEffort && onReasoningEffortChange ? (
           <PromptInputCommand className="bg-transparent" key={`effort-${value}`}>
             <PromptInputCommandList aria-label={`Reasoning effort for ${modelLabel(value)}`}>
-              <PromptInputCommandItem onSelect={() => setChoosingEffort(false)}>
+              <PromptInputCommandItem
+                onSelect={() => setChoosingEffort(false)}
+                onClick={() => setChoosingEffort(false)}
+              >
                 <ArrowLeftIcon className="size-4" /> Back to models
               </PromptInputCommandItem>
               <PromptInputCommandGroup heading={`${modelLabel(value)} / Reasoning effort`}>
                 {["default", ...reasoningLevels(value)].map((effort) => (
-                  <PromptInputCommandItem key={effort} value={effort} onSelect={() => {
-                    onReasoningEffortChange(effort)
-                    setOpen(false)
-                    setChoosingEffort(false)
-                  }}>
+                  <PromptInputCommandItem
+                    key={effort}
+                    value={effort}
+                    onSelect={() => {
+                      onReasoningEffortChange(effort)
+                      close()
+                    }}
+                    onClick={() => {
+                      onReasoningEffortChange(effort)
+                      close()
+                    }}
+                  >
                     <CheckIcon className={cn("size-4", reasoningEffort === effort ? "opacity-100" : "opacity-0")} />
                     {effortLabel(effort)}
                   </PromptInputCommandItem>
@@ -144,49 +169,56 @@ export function ModelPicker({
               <p className="px-3 pb-3 text-xs text-muted-foreground">Only the provider default is verified for this model.</p>
             ) : null}
           </PromptInputCommand>
-        ) : <PromptInputCommand
-          className="bg-transparent"
-          // Open with the CURRENT model highlighted and scrolled into view
-          // (native cmdk defaultValue) instead of the first list item. With
-          // ~60 models the current one usually sits below the list's fold;
-          // starting there keeps the selection visible and clickable without
-          // manual scrolling (clicks on clipped items land outside the
-          // popover and dismiss it as an outside press).
-          defaultValue={value}
-          key="models"
-        >
-          <PromptInputCommandInput placeholder="Search models…" />
-          <PromptInputCommandList className="max-h-80">
-            <PromptInputCommandEmpty>No models found.</PromptInputCommandEmpty>
-            {groups.map(([provider, items]) => (
-              <PromptInputCommandGroup
-                heading={providerLabel(provider)}
-                key={provider}
-              >
-                {items.map((model) => (
-                  <PromptInputCommandItem
-                    key={model.id}
-                    onSelect={(next) => {
-                      onValueChange(next)
-                      if (onReasoningEffortChange) setChoosingEffort(true)
-                      else setOpen(false)
-                    }}
-                    value={model.id}
-                  >
-                    <CheckIcon
-                      className={cn(
-                        "size-4",
-                        value === model.id ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-                    {modelLabel(model.id)}
-                    {onReasoningEffortChange ? <ChevronRightIcon className="ml-auto size-3.5 shrink-0" /> : null}
-                  </PromptInputCommandItem>
-                ))}
-              </PromptInputCommandGroup>
-            ))}
-          </PromptInputCommandList>
-        </PromptInputCommand>}
+        ) : (
+          <PromptInputCommand
+            className="bg-transparent"
+            // Open with the CURRENT model highlighted and scrolled into view
+            // (native cmdk defaultValue) instead of the first list item. With
+            // ~60 models the current one usually sits below the list's fold;
+            // starting there keeps the selection visible and clickable without
+            // manual scrolling (clicks on clipped items land outside the
+            // popover and dismiss it as an outside press).
+            defaultValue={value}
+            key="models"
+          >
+            <PromptInputCommandInput placeholder="Search models…" />
+            <PromptInputCommandList className="max-h-80">
+              <PromptInputCommandEmpty>No models found.</PromptInputCommandEmpty>
+              {groups.map(([provider, items]) => (
+                <PromptInputCommandGroup
+                  heading={providerLabel(provider)}
+                  key={provider}
+                >
+                  {items.map((model) => (
+                    <PromptInputCommandItem
+                      key={model.id}
+                      onSelect={(next) => {
+                        onValueChange(next)
+                        if (onReasoningEffortChange && reasoningLevels(next).length > 0) {
+                          setChoosingEffort(true)
+                        } else {
+                          close()
+                        }
+                      }}
+                      value={model.id}
+                    >
+                      <CheckIcon
+                        className={cn(
+                          "size-4",
+                          value === model.id ? "opacity-100" : "opacity-0"
+                        )}
+                      />
+                      {modelLabel(model.id)}
+                      {onReasoningEffortChange && reasoningLevels(model.id).length > 0 ? (
+                        <ChevronRightIcon className="ml-auto size-3.5 shrink-0" />
+                      ) : null}
+                    </PromptInputCommandItem>
+                  ))}
+                </PromptInputCommandGroup>
+              ))}
+            </PromptInputCommandList>
+          </PromptInputCommand>
+        )}
       </PopoverContent>
     </Popover>
   )

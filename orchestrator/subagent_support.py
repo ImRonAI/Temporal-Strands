@@ -195,13 +195,17 @@ def canonical_tool_name(tool: Any) -> str:
 def base_subagent_tools(model: Any) -> list[Any]:
     """Tools every ephemeral parent/sub agent carries.
 
-    ``use_skill`` (session-model-bound, from the vendored agentskills factory)
-    when the skills catalog is available, plus the Pattern-3 sandbox tools
-    (``file_read`` / ``file_write``). Never includes ``graph`` or
-    ``use_agent`` themselves — recursion is structural, via topology.
+    The two reference agentskills tools when the catalog is available —
+    Pattern 3 ``use_skill(skill_name, request)`` (create_skill_agent_tool)
+    and Pattern 2 ``skill(skill_name)`` (create_skill_tool) — plus the
+    Pattern-3 sandbox tools (``file_read`` / ``file_write``), matching
+    examples 2 and 3 of aws-samples/sample-strands-agents-agentskills.
+    Never includes ``graph`` or ``use_agent`` themselves — recursion is
+    structural, via topology.
     """
     from skills_config import (
         SkillsUnavailable,
+        create_inline_skill_tool,
         create_use_skill_tool,
         skill_subagent_tools,
     )
@@ -209,6 +213,7 @@ def base_subagent_tools(model: Any) -> list[Any]:
     tools: list[Any] = []
     try:
         tools.append(create_use_skill_tool(model))
+        tools.append(create_inline_skill_tool())
     except SkillsUnavailable:
         pass
     tools.extend(skill_subagent_tools())

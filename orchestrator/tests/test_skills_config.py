@@ -128,7 +128,16 @@ def test_skills_loader_exports_tools(monkeypatch, tmp_path) -> None:
     assert skills_loader.skill.tool_name == "skill"
 
 
-def test_augmented_prompt_mentions_loader(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_augmented_prompt_is_reference_skills_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reference wiring: base + "\\n\\n" + agentskills.generate_skills_prompt.
+
+    The prompt must carry the <available_skills> XML catalog (name,
+    description, SKILL.md location per skill) and the use_skill /
+    skill usage policy from SKILLS_SYSTEM_PROMPT — exactly what
+    aws-samples/sample-strands-agents-agentskills examples 2 and 3 build.
+    """
     fixtures = (
         Path(__file__).resolve().parents[2]
         / ".."
@@ -138,5 +147,22 @@ def test_augmented_prompt_mentions_loader(monkeypatch: pytest.MonkeyPatch) -> No
     ).resolve()
     monkeypatch.setenv("SKILLS_DIR", str(fixtures))
     text = skills_config.augmented_system_prompt("Base.")
-    assert "list_skills" in text
+    assert text.startswith("Base.\n\n")
+    assert "<available_skills>" in text
+    assert "<skills_instructions>" in text
     assert "use_skill" in text
+    assert "<name>wf-skill</name>" in text
+
+    import agentskills
+
+    expected = agentskills.generate_skills_prompt(
+        list(skills_config.discovered_skills())
+    )
+    assert text == f"Base.\n\n{expected}"
+
+
+def test_augmented_prompt_without_catalog_is_base(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SKILLS_DIR", str(tmp_path))
+    assert skills_config.augmented_system_prompt("Base.") == "Base."

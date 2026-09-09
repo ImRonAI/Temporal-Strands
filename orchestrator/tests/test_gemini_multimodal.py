@@ -8,6 +8,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from google import genai
+from strands.models.gemini import GeminiModel as _StrandsGeminiModel
+from strands.types.exceptions import ModelThrottledException
 
 from gemini_model import GeminiModel, maps_from_grounding, search_from_grounding
 from workflow import (
@@ -17,6 +20,174 @@ from workflow import (
     TurnVideo,
     turn_content_blocks,
 )
+
+_MESSAGES = [{"role": "user", "content": [{"text": "hi"}]}]
+
+
+def _text_part(text: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        text=text, thought=False, function_call=None, thought_signature=None
+    )
+
+
+def _search_grounding() -> SimpleNamespace:
+    web = SimpleNamespace(title="Caffe Trieste", uri="https://www.caffetrieste.com/")
+    chunk = SimpleNamespace(web=web, image=None, maps=None)
+    return SimpleNamespace(
+        web_search_queries=["best espresso north beach"],
+        grounding_chunks=[chunk],
+    )
+
+
+def _maps_grounding() -> SimpleNamespace:
+    maps = SimpleNamespace(
+        title="Caffe Trieste", uri="https://maps.google.com/?cid=1", place_id="places/ChIJ123"
+    )
+    chunk = SimpleNamespace(web=None, image=None, maps=maps)
+    return SimpleNamespace(
+        google_maps_widget_context_token="tok_1",
+        web_search_queries=[],
+        grounding_chunks=[chunk],
+    )
+
+
+def _events(grounding: SimpleNamespace | None) -> list[SimpleNamespace]:
+    candidate = SimpleNamespace(
+        content=SimpleNamespace(parts=[_text_part("hello")]),
+        finish_reason="STOP",
+        grounding_metadata=grounding,
+    )
+    usage = SimpleNamespace(
+        prompt_token_count=3, total_token_count=10, cached_content_token_count=None
+    )
+    return [
+        SimpleNamespace(candidates=[candidate], usage_metadata=None),
+        SimpleNamespace(candidates=[], usage_metadata=usage),
+    ]
+
+
+def _fake_client(events: list[SimpleNamespace]) -> SimpleNamespace:
+    async def generate_content_stream(**kwargs):
+        async def gen():
+            for event in events:
+                yield event
+
+        return gen()
+
+    return SimpleNamespace(
+        aio=SimpleNamespace(
+            models=SimpleNamespace(generate_content_stream=generate_content_stream)
+        )
+    )
+
+
+async def _collect(model, messages=_MESSAGES):
+    return [frame async for frame in model.stream(messages)]
+
+
+@pytest.mark.asyncio
+async def test_stream_is_thin_wrapper_over_parent_stream(monkeypatch):
+    """The subclass must delegate frame production to super().stream()."""
+    sentinel = [
+        {"messageStart": {"role": "assistant"}},
+        {"messageStop": {"stopReason": "end_turn"}},
+    ]
+
+    async def fake_parent_stream(self, messages, tool_specs=None, system_prompt=None, tool_choice=None, **kwargs):
+        for frame in sentinel:
+            yield frame
+
+    monkeypatch.setattr(_StrandsGeminiModel, "stream", fake_parent_stream)
+
+    async def bypass_guard(**kwargs):
+        raise AssertionError("parent stream bypassed: subclass hit genai client directly")
+
+    client = SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(generate_content_stream=bypass_guard))
+    )
+    model = GeminiModel(client=client, model_id="gemini-3.8-flash")
+    assert await _collect(model) == sentinel
+
+
+@pytest.mark.asyncio
+async def test_stream_yields_parent_frames_unchanged_plus_search_grounding_frame():
+    events = _events(_search_grounding())
+    parent = _StrandsGeminiModel(client=_fake_client(events), model_id="gemini-3.8-flash")
+    parent_frames = await _collect(parent)
+
+    model = GeminiModel(client=_fake_client(events), model_id="gemini-3.8-flash")
+    frames = await _collect(model)
+
+    # Parent frame sequence is a strict, unchanged prefix.
+    assert frames[: len(parent_frames)] == parent_frames
+    assert frames[len(parent_frames) :] == [
+        {
+            "gemini": {
+                "type": "google_search",
+                "queries": ["best espresso north beach"],
+                "results": [
+                    {"title": "Caffe Trieste", "uri": "https://www.caffetrieste.com/"}
+                ],
+            }
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stream_appends_maps_grounding_frame():
+    events = _events(_maps_grounding())
+    parent = _StrandsGeminiModel(client=_fake_client(events), model_id="gemini-3.8-flash")
+    parent_frames = await _collect(parent)
+
+    model = GeminiModel(client=_fake_client(events), model_id="gemini-3.8-flash")
+    frames = await _collect(model)
+
+    assert frames[: len(parent_frames)] == parent_frames
+    assert frames[len(parent_frames) :] == [
+        {
+            "gemini": {
+                "type": "google_maps",
+                "google_maps_widget_context_token": "tok_1",
+                "places": [
+                    {
+                        "title": "Caffe Trieste",
+                        "uri": "https://maps.google.com/?cid=1",
+                        "placeId": "places/ChIJ123",
+                    }
+                ],
+            }
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stream_without_grounding_yields_no_gemini_frames():
+    events = _events(None)
+    parent = _StrandsGeminiModel(client=_fake_client(events), model_id="gemini-3.8-flash")
+    parent_frames = await _collect(parent)
+
+    model = GeminiModel(client=_fake_client(events), model_id="gemini-3.8-flash")
+    frames = await _collect(model)
+
+    assert frames == parent_frames
+    assert not any("gemini" in frame for frame in frames)
+
+
+@pytest.mark.asyncio
+async def test_resource_exhausted_surfaces_as_throttle_via_parent():
+    error = genai.errors.ClientError(
+        429, {"error": {"status": "RESOURCE_EXHAUSTED", "message": "quota"}}
+    )
+
+    async def generate_content_stream(**kwargs):
+        raise error
+
+    client = SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(generate_content_stream=generate_content_stream))
+    )
+    model = GeminiModel(client=client, model_id="gemini-3.8-flash")
+    with pytest.raises(ModelThrottledException):
+        await _collect(model)
 
 
 @pytest.mark.asyncio

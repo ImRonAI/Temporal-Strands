@@ -1,0 +1,126 @@
+# Framework Adherence Reset — Task 22 (LIGHT housekeeping)
+
+Date: 2026-09-08
+Scope: remove empty worktrees under `.kilo/worktrees/`; record untracked/dirty state; run frontend vitest suite. No commits, no code edits.
+
+## Worktree inspection (git worktree list)
+
+| Worktree | Branch | State |
+| --- | --- | --- |
+| `.kilo/worktrees/nickel-yellowhorn` | `nickel-yellowhorn` | DIRTY — left in place |
+| `.kilo/worktrees/nonstop-utensil` | `nonstop-utensil` | CLEAN — removed (`--force`) |
+| `.kilo/worktrees/oasis-streetcar` | `oasis-streetcar` | DIRTY — left in place |
+| `.worktrees/coding-agent-product-reset` | `feature/coding-agent-product-reset` | PROTECTED — never touched |
+
+## Worktrees removed
+
+- `.kilo/worktrees/nonstop-utensil` — clean (`git status --porcelain` empty), removed with `git worktree remove --force`.
+
+## Worktrees left (dirty — NOT removed, per MUST NOT DO)
+
+### `.kilo/worktrees/nickel-yellowhorn`
+`git status --porcelain`:
+```
+ D gwen-01-list-models-tool.png
+ D ide-closed.png
+ D ide-composer-check.png
+ D ide-composer-fixed.png
+ D ide-current.png
+ D ide-live-check.png
+ D ide-live.png
+ D ide-open-split.png
+ D ide-open-wide.png
+ D ide-reopened-final.png
+ D ide-reopened.png
+ D v0-chat.png
+ D v0-chat2.png
+ D v0-full.png
+ D v0-glow.png
+ D v0-home.png
+ D v0-home2.png
+?? orchestrator/.runtime/worker-readiness.json
+```
+- Untracked: `orchestrator/.runtime/worker-readiness.json` → disposition: **user-owned-untracked** (runtime artifact, left in place; do not delete).
+- Deleted tracked images (17 PNGs) → dirty, left in place.
+
+### `.kilo/worktrees/oasis-streetcar`
+`git status --porcelain` (abridged — files under `.opencode/` tracked deletions plus others):
+```
+AD --full-page
+A  .claude/settings.json
+AM .kilo/kilo.json
+D  .opencode/agents/plan-controller.md
+D  .opencode/agents/quality-reviewer.md
+D  .opencode/agents/spec-reviewer.md
+D  .opencode/agents/task-implementer.md
+D  .opencode/commands/plan-amend.md
+D  .opencode/commands/plan-next.md
+D  .opencode/commands/plan-review.md
+D  .opencode/commands/plan-status.md
+D  .opencode/commands/plan-verify.md
+D  .opencode/context/README.md
+D  .opencode/context/plan.md
+D  .opencode/context/tasks/task-01.md .. task-15.md
+D  .opencode/plugins/plan-guard.ts
+D  .opencode/state/ledger.json
+D  .opencode/tests/plan-guard.test.ts
+D  .opencode/workflows/block-and-amend.md
+D  .opencode/workflows/execute-task.md
+D  .opencode/workflows/final-verification.md
+D  .opencode/workflows/review-task.md
+M  AGENTS.md
+MM components/v0/agent-activity.tsx
+A  docs/jira-backlog.md
+AM orchestrator/.runtime/worker-readiness.json
+M  orchestrator/tests/__pycache__/test_perplexity_model.cpython-313-pytest-9.1.1.pyc
+A  orchestrator/tests/__pycache__/test_workflow.cpython-313-pytest-9.1.1.pyc
+A  orchestrator/tests/test_workflow.py
+M  orchestrator/workflow.py
+?? .omo/
+?? docs/evidence/
+```
+- Untracked dirs: `.omo/`, `docs/evidence/` → disposition: **user-owned-untracked**, left in place.
+- Untracked file: `orchestrator/.runtime/worker-readiness.json` → **user-owned-untracked**, left in place.
+- Many tracked modifications/deletions (`.opencode/*` deletions, `AGENTS.md`, `orchestrator/workflow.py`, etc.) → dirty, left in place.
+
+## Untracked file disposition summary
+
+- `nickel-yellowhorn/orchestrator/.runtime/worker-readiness.json` → left-dirty / user-owned-untracked
+- `oasis-streetcar/orchestrator/.runtime/worker-readiness.json` → left-dirty / user-owned-untracked
+- `oasis-streetcar/.omo/` → user-owned-untracked
+- `oasis-streetcar/docs/evidence/` → user-owned-untracked
+- No files removed except the clean `nonstop-utensil` worktree (deleted as a unit).
+
+## Protected paths (verified not touched)
+
+- `.worktrees/coding-agent-product-reset` — untouched.
+- Credential files `fair-expanse-*.json`, `compute.json` — NOT read, NOT moved, NOT staged (names not enumerated from contents; only existence acknowledged).
+- `scripts/gce-startup.sh`, `scripts/start-all.sh` — untouched.
+- `.kilo/plans/*` — untouched.
+
+## Frontend test run (vitest)
+
+Command:
+```
+pnpm exec vitest run --exclude '**/.worktrees/**' --exclude '**/.kilo/**'
+```
+Result:
+```
+Test Files  16 passed (16)
+     Tests  328 passed (328)
+```
+
+Targeted run of the graph-related suite:
+```
+pnpm exec vitest run --exclude '**/.worktrees/**' --exclude '**/.kilo/**' app/api/orchestrator/route.test.ts
+Result:
+Test Files  1 passed (1)
+     Tests  22 passed (22)
+```
+
+Note on expected failures: Repo docs state the two `data-graph-event` failures in `app/api/orchestrator/route.test.ts` are EXPECTED/pre-existing. In this tree they did NOT fail — `route.test.ts` (which still references `data-graph`, 4 occurrences) passed 22/22. Recorded counts reflect actual observed behavior. This discrepancy is flagged as a risk.
+
+## Risks
+
+- `route.test.ts` passed fully (22/22) whereas repo docs expect 2 pre-existing failures asserting `data-graph-event`. Either the graph-event assertions no longer run in this tree or the expected-failure state has changed. Worth confirming against the canonical plan before relying on the docs' failure expectation.
+- `nickel-yellowhorn` and `oasis-streetcar` remain dirty and were intentionally NOT force-removed. Any future removal must resolve staged/unstaged changes first.

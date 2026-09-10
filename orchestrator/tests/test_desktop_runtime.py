@@ -3,9 +3,10 @@
 import asyncio
 import fcntl
 import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from temporalio import activity, workflow
@@ -21,12 +22,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture(autouse=True)
 def forbid_host_desktop(monkeypatch):
+    gui = MagicMock(spec=["size", "click", "moveTo", "mouseDown", "mouseUp", "write",
+                          "dragTo", "press", "keyDown", "keyUp", "hotkey", "scroll", "hscroll"])
+    gui.size.side_effect = AssertionError("Tests must not access the host display")
+    monkeypatch.setitem(sys.modules, "pyautogui", gui)
     monkeypatch.setattr(browser.LocalChromiumBrowser, "browser", MagicMock(
         side_effect=AssertionError("Tests must not execute a browser on the host"),
     ))
     monkeypatch.setattr(browser.ImageGrab, "grab", MagicMock(
         side_effect=AssertionError("Tests must not capture the host display"),
     ))
+    return gui
 
 
 @pytest.fixture
@@ -56,20 +62,24 @@ def test_image_has_an_allowlisted_source_context_and_desktop_dependencies():
     assert "PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright" in dockerfile
     assert "USER desktop" in dockerfile
     assert "HEALTHCHECK" in dockerfile
+    assert "xauth" in dockerfile
+    assert "XAUTHORITY=/home/desktop/.Xauthority" in dockerfile
 
 
 @pytest.mark.asyncio
-async def test_worker_uses_native_pydantic_converter_and_single_activity_slot(monkeypatch):
+@pytest.mark.parametrize("readiness_failure", [False, True])
+async def test_worker_uses_native_pydantic_converter_and_single_activity_slot(monkeypatch, tmp_path, readiness_failure):
     import desktop_worker
     from computer_use_activity import COMPUTER_USE_TOOL_NAMES
     from config import DESKTOP_BROWSER_TASK_QUEUE
 
     monkeypatch.setenv("TEMPORAL_ADDRESS", "test-temporal:7233")
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(tmp_path))
     client = object()
     connect = AsyncMock(return_value=client)
     monkeypatch.setattr(desktop_worker.Client, "connect", connect)
     monkeypatch.setattr(desktop_worker, "telemetry_plugins", lambda: [])
-    verify = MagicMock()
+    verify = MagicMock(side_effect=RuntimeError("Display unavailable") if readiness_failure else None)
     initialize = MagicMock()
     monkeypatch.setattr(desktop_worker, "verify_browser_runtime", verify)
     monkeypatch.setattr(desktop_worker, "initialize_desktop", initialize)
@@ -78,6 +88,13 @@ async def test_worker_uses_native_pydantic_converter_and_single_activity_slot(mo
     monkeypatch.setattr(asyncio.get_running_loop(), "add_signal_handler", MagicMock())
     worker = MagicMock(return_value=AsyncMock())
     monkeypatch.setattr(desktop_worker, "Worker", worker)
+
+    if readiness_failure:
+        with pytest.raises(RuntimeError, match="Display unavailable"):
+            await desktop_worker.main()
+        initialize.assert_not_called()
+        worker.assert_not_called()
+        return
 
     await desktop_worker.main()
 
@@ -91,7 +108,7 @@ async def test_worker_uses_native_pydantic_converter_and_single_activity_slot(mo
     assert options["max_concurrent_activities"] == 1
     assert options["activity_executor"]._max_workers == 1
     assert {activity._Definition.must_from_callable(fn).name for fn in options["activities"]} == {
-        "browser", *COMPUTER_USE_TOOL_NAMES,
+        "browser", "desktop_control", "release_desktop", *COMPUTER_USE_TOOL_NAMES,
     }
     stopped.wait.assert_awaited_once_with()
 
@@ -123,9 +140,17 @@ def test_stock_browser_explicitly_preserves_chromium_sandbox():
 
 
 @pytest.mark.parametrize("failure", [None, "returned_error", "raised_exception"])
-def test_readiness_always_closes_its_disposable_stock_session(monkeypatch, failure):
+def test_readiness_always_closes_its_disposable_stock_session(monkeypatch, forbid_host_desktop, failure):
     import desktop_worker
 
+    monkeypatch.setenv("DISPLAY", ":99")
+    gui = forbid_host_desktop
+    gui.size.side_effect = None
+    gui.size.return_value = (1440, 900)
+    image = MagicMock(size=(1440, 900))
+    image.__enter__.return_value = image
+    grab = MagicMock(return_value=image)
+    monkeypatch.setattr(browser.ImageGrab, "grab", grab)
     stock = MagicMock()
 
     def dispatch(*, browser_input):
@@ -148,6 +173,59 @@ def test_readiness_always_closes_its_disposable_stock_session(monkeypatch, failu
     actions = [item.kwargs["browser_input"].action for item in stock.browser.call_args_list]
     assert [item.type for item in actions] == ["init_session", "close"]
     assert all(item.session_name == "desktop-readiness" for item in actions)
+    gui.size.assert_called_once_with()
+    assert gui.method_calls == [call.size()]
+    grab.assert_called_once_with(xdisplay=":99")
+    image.load.assert_called_once_with()
+    image.__exit__.assert_called_once()
+
+
+@pytest.mark.parametrize("failure", ["import", "xlib", "capture", "dimensions"])
+def test_readiness_rejects_unusable_python_display_before_browser_start(monkeypatch, forbid_host_desktop, failure):
+    import desktop_worker
+
+    monkeypatch.setenv("DISPLAY", ":99")
+    gui = forbid_host_desktop
+    gui.size.side_effect = None
+    gui.size.return_value = (1440, 900)
+    monkeypatch.setitem(sys.modules, "pyautogui", None if failure == "import" else gui)
+    image = MagicMock(size=(0, 0) if failure == "dimensions" else (1440, 900))
+    image.__enter__.return_value = image
+    grab = MagicMock(return_value=image)
+    monkeypatch.setattr(browser.ImageGrab, "grab", grab)
+    if failure == "xlib":
+        gui.size.side_effect = RuntimeError("Xlib unavailable")
+    if failure == "capture":
+        grab.side_effect = OSError("X capture unavailable")
+    constructor = MagicMock()
+    monkeypatch.setattr(desktop_worker, "LocalChromiumBrowser", constructor)
+
+    with pytest.raises((ImportError, RuntimeError, OSError)):
+        desktop_worker.verify_browser_runtime()
+
+    constructor.assert_not_called()
+
+
+@pytest.mark.parametrize("name", ["click", "moveTo", "mouseDown", "mouseUp", "write", "dragTo",
+                                 "press", "keyDown", "keyUp", "hotkey", "scroll", "hscroll"])
+@pytest.mark.parametrize("missing", [True, False])
+def test_readiness_rejects_unusable_input_api_without_gui_side_effects(monkeypatch, forbid_host_desktop, name, missing):
+    import desktop_worker
+
+    gui = forbid_host_desktop
+    if missing:
+        delattr(gui, name)
+    else:
+        setattr(gui, name, None)
+    constructor = MagicMock()
+    monkeypatch.setattr(desktop_worker, "LocalChromiumBrowser", constructor)
+
+    with pytest.raises(RuntimeError, match=f"PyAutoGUI input API unavailable: {name}"):
+        desktop_worker.verify_browser_runtime()
+
+    assert gui.method_calls == []
+    browser.ImageGrab.grab.assert_not_called()
+    constructor.assert_not_called()
 
 
 @pytest.mark.parametrize("system,display", [("Darwin", ":99"), ("Windows", ":99"), ("Linux", None)])
@@ -301,3 +379,17 @@ def test_startup_waits_for_display_and_supervises_all_children():
     assert "-nolisten tcp" in source
     assert "-localhost" in source
     assert "-viewonly" in source
+
+
+def test_startup_authenticates_display_before_launching_any_client():
+    source = (ROOT / "desktop/start-desktop.sh").read_text()
+    assert 'export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"' in source
+    assert source.index("umask 077") < source.index('> "$XAUTHORITY"')
+    assert source.index('chmod 600 "$XAUTHORITY"') < source.index("secrets.token_hex(16)")
+    assert source.index("secrets.token_hex(16)") < source.index('Xvfb "$DISPLAY"')
+    assert "MIT-MAGIC-COOKIE-1" in source
+    assert 'xauth -q -f "$XAUTHORITY" source -' in source
+    assert 'Xvfb "$DISPLAY" -auth "$XAUTHORITY"' in source
+    assert 'x11vnc -display "$DISPLAY" -auth "$XAUTHORITY"' in source
+    assert " -ac" not in source
+    assert "xhost +" not in source

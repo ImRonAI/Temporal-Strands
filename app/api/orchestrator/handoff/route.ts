@@ -8,6 +8,31 @@ const requestSchema = z.object({
   message: "Resume instructions are required",
 })
 
+export async function GET(request: Request) {
+  const headers = { "Cache-Control": "no-store" }
+  const sessionId = new URL(request.url).searchParams.get("sessionId") ?? ""
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId)) {
+    return Response.json({ error: "Invalid desktop session" }, { status: 400, headers })
+  }
+  try {
+    const origin = process.env.ORCHESTRATOR_URL ?? "http://localhost:8787"
+    const response = await fetch(`${origin}/sessions/${sessionId}/desktop-control`, {
+      cache: "no-store",
+      redirect: "error",
+      signal: request.signal,
+    })
+    if (!response.ok) {
+      await response.body?.cancel()
+      return Response.json({ error: "Desktop control status unavailable" }, {
+        status: response.status >= 400 ? response.status : 502, headers,
+      })
+    }
+    return Response.json(await response.json(), { headers })
+  } catch {
+    return Response.json({ error: "Desktop control status unavailable" }, { status: 502, headers })
+  }
+}
+
 export async function POST(request: Request) {
   const body = requestSchema.safeParse(await request.json().catch(() => null))
   if (!body.success) return Response.json({ error: "Invalid handoff request" }, { status: 400 })

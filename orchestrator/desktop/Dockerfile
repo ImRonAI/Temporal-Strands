@@ -14,6 +14,9 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && playwright install --with-deps chromium \
     && chmod -R a+rX /opt/ms-playwright
 
+RUN apt-get update && apt-get install -y --no-install-recommends xauth \
+    && rm -rf /var/lib/apt/lists/*
+
 # Source only; credentials and provider keys never enter this image.
 COPY browser_activity.py desktop_worker.py config.py telemetry.py ./
 COPY computer_use_activity.py desktop_observation.py workspace_state.py ./
@@ -24,6 +27,7 @@ RUN useradd --uid "$DESKTOP_UID" --create-home desktop \
     && chown -R desktop:desktop /opt/orchestrator
 USER desktop
 ENV DISPLAY=:99 \
+    XAUTHORITY=/home/desktop/.Xauthority \
     STRANDS_BROWSER_HEADLESS=false \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/opt/orchestrator

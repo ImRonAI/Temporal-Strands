@@ -238,6 +238,7 @@ type PerplexityNative =
   | {
       type: "mcp_list_tools"
       id: string
+      connector_id?: string | null
       server_label: string
       tools: Array<{ name: string; description?: string | null }>
       error?: string | null
@@ -329,7 +330,7 @@ type OrchestratorEvent =
       | { messageStart: { role: string } }
       | { messageStop: { stopReason: string } }
       | { metadata: unknown }
-      | { perplexity: PerplexityNative }
+      | { perplexity: PerplexityNative | { type: "response.output_item.done"; item: PerplexityNative } }
       | {
           gemini:
             | {
@@ -771,17 +772,20 @@ export async function POST(req: Request) {
             }
 
             if ("perplexity" in event) {
-              const native = event.perplexity
-              // mcp_list_tools is the MCP transport handshake -- the server
-              // announcing its catalog once per connection, identical every
-              // turn. It is not something either agent did.
-              if (native.type === "mcp_list_tools") continue
+              const payload = event.perplexity
+              const native = payload.type === "response.output_item.done" && payload.item.type === "mcp_list_tools"
+                ? payload.item : payload
+              // Healthy catalogs and remote MCP handshakes are not actions.
+              // Only connector empty/error catalogs surface as availability notices.
+              if (native.type === "mcp_list_tools" &&
+                (!native.connector_id || (!native.error && native.tools.length > 0))) continue
               let id: string
               switch (native.type) {
                 case "sandbox_results":
                   id = `sandbox-${native.call_id}`
                   break
                 case "mcp_call":
+                case "mcp_list_tools":
                   id = `mcp-${native.id}`
                   break
                 case "share_file":

@@ -30,10 +30,9 @@ protected route ``app/api/orchestrator/route.ts``:
                      with native ``multiagent_*`` events) published from
                      ``graph_activity``.
 
-The ``think`` tool (strands-agents-tools semantics, ``think_activity.py``) is
-both a model-callable tool (``THINK_TOOL``) and forced ahead of the model on
-every new user prompt by ``_ThinkFirstHook`` (``BeforeInvocationEvent``): its
-notes are folded into the user message as a ``<think_notes>`` text block.
+Think uses the async adaptation in ``think_activity.py``. The model makes a
+mandatory first tool call and chooses effort/cycles; Astra inherits its tools.
+The original activity/hook are retained only for pre-migration workflow replay.
 """
 
 from __future__ import annotations
@@ -48,6 +47,7 @@ from typing import Any
 
 from strands.hooks import HookProvider, HookRegistry
 from strands.hooks.events import (
+    AfterModelCallEvent,
     AfterToolCallEvent,
     BeforeInvocationEvent,
     BeforeModelCallEvent,
@@ -58,6 +58,8 @@ from strands.types.content import Messages
 from strands.types.exceptions import EventLoopException
 from strands.types.interrupt import InterruptResponseContent
 from strands.tools.executors import SequentialToolExecutor
+from strands import tool
+from strands.types.tools import ToolContext
 from temporalio import workflow
 from temporalio.exceptions import ActivityError, ApplicationError
 from temporalio.contrib.strands import TemporalAgent, TemporalMCPClient
@@ -74,6 +76,9 @@ from config import (
     BROWSER_RETRY_POLICY,
     DESKTOP_BROWSER_TASK_QUEUE,
     DESKTOP_MUTATION_TIMEOUT,
+    DESKTOP_MUTATION_RETRY_POLICY,
+    DESKTOP_SCHEDULE_TO_START,
+    DESKTOP_ACTION_SCHEDULE_TO_CLOSE,
     DESKTOP_TASK_TIMEOUT,
     DESKTOP_HANDOFF_TIMEOUT,
     closable_activity_options,
@@ -94,12 +99,14 @@ from config import (
     THINK_HEARTBEAT_TIMEOUT,
     THINK_RETRY_POLICY,
     THINK_START_TO_CLOSE,
+    THINK_REASONING_EFFORTS,
 )
 
 with workflow.unsafe.imports_passed_through():
     import perplexity_operations
     import think_activity
-    from browser_activity import browser_activity
+    from browser_activity import browser_activity, release_desktop
+    from browser_activity import desktop_control as desktop_control_activity
     from computer_use_activity import COMPUTER_USE_ACTIVITIES, COMPUTER_USE_TOOL_NAMES
     from graph_activity import graph_activity
     from load_tool import (
@@ -156,7 +163,8 @@ _USE_AGENT_ACTIVITY_OPTIONS = dict(
 _DESKTOP_ACTIVITY_OPTIONS = dict(
     task_queue=DESKTOP_BROWSER_TASK_QUEUE,
     start_to_close_timeout=DESKTOP_MUTATION_TIMEOUT,
-    schedule_to_close_timeout=DESKTOP_TASK_TIMEOUT,
+    schedule_to_start_timeout=DESKTOP_SCHEDULE_TO_START,
+    schedule_to_close_timeout=DESKTOP_ACTION_SCHEDULE_TO_CLOSE,
     retry_policy=BROWSER_RETRY_POLICY,
     cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
 )
@@ -460,6 +468,9 @@ class ChatInput:
     connected_mcp_servers: list[str] = field(default_factory=list)
     resume_prompt: str = ""
     handoff_run_id: str = ""
+    human_control: bool = False
+    handoff_requested: bool = False
+    desktop_used: bool = False
 
 
 # Formats from the Strands Gemini multimodal docs (image / document / video).
@@ -719,7 +730,9 @@ def _prompt_text_from_message(message: Any) -> str | None:
 
 
 class _ThinkFirstHook(HookProvider):
-    """Runs the ``think`` activity BEFORE the model on each new user prompt.
+    """Require the model's first tool call to be Think, not a fixed pre-turn cycle.
+
+    The BeforeInvocation activity hook below remains for pre-patch replay only.
 
     Two callbacks, both deterministic apart from the dispatched activity:
 
@@ -744,7 +757,7 @@ class _ThinkFirstHook(HookProvider):
       any other activity failure.
     """
 
-    def __init__(self, system_prompt: str, stream: WorkflowStream) -> None:
+    def __init__(self, system_prompt: str, stream: WorkflowStream, *, model_chosen: bool = False) -> None:
         # WHO the nested thinker is, from agent.json's ``think`` key; without
         # one the session's own system prompt is used, as before. The
         # activity resolves the persona/methodology itself from its inputs.
@@ -752,13 +765,21 @@ class _ThinkFirstHook(HookProvider):
         self._stream = stream
         self._applied_offset: int | None = None
         self._turn_start_offset: int | None = None
+        self._model_chosen = model_chosen
+        self._called = False
 
     def begin_turn(self, turn_start_offset: int) -> None:
         """Reset the once-per-turn guard; called at the start of ``turn``."""
         self._applied_offset = None
         self._turn_start_offset = turn_start_offset
+        self._called = False
 
     def register_hooks(self, registry: HookRegistry, **kwargs: object) -> None:
+        if self._model_chosen:
+            registry.add_callback(BeforeModelCallEvent, self._require_think)
+            registry.add_callback(AfterModelCallEvent, self._verify_first_call)
+            registry.add_callback(BeforeToolCallEvent, self._record_call)
+            return
         registry.add_callback(
             BeforeInvocationEvent,
             activity_as_hook(
@@ -770,6 +791,27 @@ class _ThinkFirstHook(HookProvider):
             ),
         )
         registry.add_callback(BeforeModelCallEvent, self._fold_think_notes)
+
+    def _require_think(self, event: BeforeModelCallEvent) -> None:
+        # Select only the required tool name; never decide effort/cycles in code.
+        event.invocation_state["require_think"] = not self._called
+
+    def _verify_first_call(self, event: AfterModelCallEvent) -> None:
+        if self._called or event.stop_response is None:
+            return
+        if event.stop_response.stop_reason not in ("tool_use", "end_turn", "stop_sequence"):
+            # Cancellation/interrupt is not a final response that bypassed Think.
+            return
+        uses = [block["toolUse"] for block in event.stop_response.message.get("content", []) if "toolUse" in block]
+        if not uses or uses[0]["name"] != "think":
+            raise ApplicationError("The first tool call of this turn must be think", non_retryable=True)
+
+    def _record_call(self, event: BeforeToolCallEvent) -> None:
+        if event.tool_use["name"] == "think":
+            self._called = True
+            event.invocation_state["require_think"] = False
+        elif not self._called:
+            event.cancel_tool = "Call think first and choose its effort and cycle_count"
 
     def _input(self, event: BeforeInvocationEvent) -> ThinkInput | None:
         """The think activity input for a fresh user prompt, or None to skip."""
@@ -951,10 +993,13 @@ class ChatWorkflow:
         # for the partial turn and silently show nothing until the next one.
         self._turn_start_offset: int | None = None
         self._approval: str | None = None
-        self._human_control = [False]
-        self._handoff_requested = [False]
+        self._human_control = [input.human_control]
+        self._handoff_requested = [input.handoff_requested]
+        self._desktop_used = input.desktop_used or input.human_control or input.handoff_requested or bool(input.handoff_run_id)
         self._pending_reason: str | None = None
         self._resume_prompt = input.resume_prompt
+        self._model_chosen_think = False
+        self._active_thinker: TemporalAgent | None = None
         self._handoff_run_id = input.handoff_run_id
         self._handoff_rollover = False
         # Installed by _build_agent; turn() resets its once-per-turn flag.
@@ -990,7 +1035,46 @@ class ChatWorkflow:
             ),
             *([_ComputerUseSafetyHook()] if is_gemini else []),
         ]
-        self._think_hook = _ThinkFirstHook(self._system_prompt, self._stream)
+        self._think_hook = _ThinkFirstHook(
+            self._system_prompt, self._stream,
+            model_chosen=getattr(self, "_model_chosen_think", False),
+        )
+        tools = [*PERMANENT_COMMUNITY_TOOLS, THINK_TOOL, *AGENT_API_TOOLS,
+                 *catalog, *extras, *computer_use_tools]
+        if getattr(self, "_model_chosen_think", False):
+            @tool(name="think", context=True)
+            async def think(thought: str, reasoning_effort: str, cycle_count: int,
+                            tool_context: ToolContext, tools: list[str] | None = None,
+                            system_prompt: str | None = None,
+                            thinking_system_prompt: str | None = None, verbose: bool = False):
+                """Async Strands Think on GPT-6-Astra with this agent's tools and context.
+
+                Args:
+                    thought: Question or task to analyze with evidence.
+                    reasoning_effort: Choose minimal, low, medium, high, xhigh, or max for this entire call.
+                    cycle_count: Choose 0-10 cycles. Zero returns immediately without an Astra request.
+                    tools: Omit to inherit all tools except Think; otherwise select tool names.
+                    system_prompt: Optional thinking persona.
+                    thinking_system_prompt: Optional thinking methodology.
+                    verbose: Show cycle details on the configured tool console.
+                """
+                async for event in think_activity.think_async(
+                    thought, cycle_count, reasoning_effort, agent=tool_context.agent,
+                    tools=tools, system_prompt=system_prompt,
+                    thinking_system_prompt=thinking_system_prompt or THINK_METHODOLOGY_PROMPT,
+                    verbose=verbose, invocation_state=tool_context.invocation_state,
+                    hooks=[_ToolResultHook(self._tool_results.publish),
+                           _HumanControlHook(self._human_control, self._handoff_requested, self._handoffs.publish),
+                           *([_ComputerUseSafetyHook()] if is_gemini else []),
+                           _HotLoadHook(self._loaded_tools, self._extra_mcp_servers, self._connected_mcp_servers)],
+                    on_agent=self._set_thinker, resolve_interrupts=self._think_approval,
+                ):
+                    yield event
+            properties = think.tool_spec["inputSchema"]["json"]["properties"]
+            properties["reasoning_effort"]["enum"] = list(THINK_REASONING_EFFORTS)
+            properties["cycle_count"].update(minimum=0, maximum=10)
+            tools = [binding for binding in tools if getattr(binding, "tool_name", None) != "think"]
+            tools.insert(0, think)
         model_options = closable_activity_options(
             dict(
                 start_to_close_timeout=MODEL_START_TO_CLOSE,
@@ -1029,14 +1113,7 @@ class ChatWorkflow:
                     name="agent-api-models",
                 ),
             ],
-            tools=[
-                *PERMANENT_COMMUNITY_TOOLS,
-                THINK_TOOL,
-                *AGENT_API_TOOLS,
-                *catalog,
-                *extras,
-                *computer_use_tools,
-            ],
+            tools=tools,
             hooks=[
                 self._think_hook,
                 _ToolResultHook(self._tool_results.publish),
@@ -1052,6 +1129,25 @@ class ChatWorkflow:
             register_community_tool(agent, rec.path, rec.name)
         self._agent_extra_mcp = tuple(self._extra_mcp_servers)
         return agent
+
+    def _set_thinker(self, agent: Any) -> None:
+        self._active_thinker = agent
+
+    async def _think_approval(self, interrupts: list[Any]) -> list[InterruptResponseContent]:
+        responses = []
+        try:
+            for pending in interrupts:
+                if not self._human_control[0]:
+                    self._pending_reason = pending.reason
+                    self._approvals.publish({"reason": pending.reason})
+                    await workflow.wait_condition(lambda: self._approval is not None or self._human_control[0])
+                responses.append({"interruptResponse": {"interruptId": pending.id,
+                                  "response": "deny" if self._human_control[0] else self._approval}})
+                self._approval = None
+            return responses
+        finally:
+            self._pending_reason = None
+            self._approvals.publish({"reason": None})
 
     def _content_blocks(self, turn: TurnInput) -> list[dict[str, Any]]:
         """Strands ContentBlocks for one turn.
@@ -1114,6 +1210,13 @@ class ChatWorkflow:
                 tool_use = {"toolUseId": f"resume-{workflow.info().run_id}",
                             "name": "take_screenshot", "input": {}}
                 agent.messages.append({"role": "assistant", "content": [{"toolUse": tool_use}]})
+                if workflow.patched("desktop-resume-capture-events-v1"):
+                    events = self._stream.topic(EVENTS_TOPIC)
+                    events.publish({"contentBlockStart": {"start": {"toolUse": {
+                        "toolUseId": tool_use["toolUseId"], "name": tool_use["name"],
+                    }}}})
+                    events.publish({"contentBlockDelta": {"delta": {"toolUse": {"input": "{}"}}}})
+                    events.publish({"contentBlockStop": {}})
                 async for event in capture.stream(tool_use, {}):
                     if "tool_result" in event:
                         agent.messages.append({"role": "user", "content": [{"toolResult": event["tool_result"]}]})
@@ -1251,12 +1354,15 @@ class ChatWorkflow:
     @workflow.signal
     def take_control(self) -> None:
         """User took the browser from the Computer Use preview."""
+        self._desktop_used = True
         if not self._human_control[0]:
             self._handoff_run_id = ""
         self._human_control[0] = True
         self._handoff_requested[0] = True
         if self._agent is not None:
             self._agent.cancel()
+        if self._active_thinker is not None:
+            self._active_thinker.cancel()
         self._handoffs.publish(
             {
                 "active": True,
@@ -1267,9 +1373,45 @@ class ChatWorkflow:
     @workflow.update
     async def claim_control(self) -> None:
         """Acknowledge ownership only after all in-flight turn work has settled."""
+        if workflow.patched("desktop-control-rollover-v1") and self._handoff_rollover:
+            raise ApplicationError("Session is resuming; retry control on the successor run.",
+                                   type="SessionRollingOver", non_retryable=True)
+        if workflow.patched("desktop-release-on-end-v1") and self._done:
+            raise ApplicationError("Session is ending; desktop control cannot be granted.",
+                                   type="SessionEnding", non_retryable=True)
         self.take_control()
         await workflow.wait_condition(lambda: not self._lock.locked(), timeout=DESKTOP_HANDOFF_TIMEOUT)
         self._turn_start_offset = None
+
+    @workflow.update
+    async def desktop_control(self, action: str) -> dict:
+        """Route native ownership/VNC transitions to the owning desktop worker."""
+        if action not in {"take", "release", "prepare_resume", "resume", "status"}:
+            raise ApplicationError("Unknown desktop control action", non_retryable=True)
+        if self._done or self._closing:
+            raise ApplicationError("Session is closing; retry control on the successor run.",
+                                   type="SessionRollingOver", non_retryable=True)
+        if action != "status":
+            if self._agent is None or self._lock.locked():
+                raise ApplicationError("Desktop control is not ready", non_retryable=True)
+            if action == "resume":
+                if self._human_control[0] or not self._handoff_run_id or self._handoff_run_id == workflow.info().run_id:
+                    raise ApplicationError("Desktop resume requires the ready successor run", non_retryable=True)
+            elif not self._human_control[0]:
+                raise ApplicationError("Desktop control requires claimed human ownership", non_retryable=True)
+        options = dict(
+            task_queue=DESKTOP_BROWSER_TASK_QUEUE,
+            start_to_close_timeout=2 * DESKTOP_HANDOFF_TIMEOUT,
+            schedule_to_start_timeout=DESKTOP_HANDOFF_TIMEOUT,
+            schedule_to_close_timeout=DESKTOP_TASK_TIMEOUT,
+            retry_policy=DESKTOP_MUTATION_RETRY_POLICY,
+            cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+        )
+        if action == "status":
+            return await workflow.execute_activity(desktop_control_activity, action, **options)
+        self._desktop_used = True
+        async with self._lock:
+            return await workflow.execute_activity(desktop_control_activity, action, **options)
 
     @workflow.update
     async def relinquish_control(self, message: str) -> str:
@@ -1333,6 +1475,7 @@ class ChatWorkflow:
     async def run(self, input: ChatInput) -> None:
         # Rebuilt here, not in __init__, so a continued run resumes from the
         # messages the previous run carried over (guide Pattern 9).
+        self._model_chosen_think = workflow.patched("think-model-chosen-astra-v1")
         self._agent = self._build_agent(input.messages)
 
         # The test-only threshold ORs with the SDK's own suggestion, never
@@ -1346,9 +1489,10 @@ class ChatWorkflow:
                 and self._completed_turns >= self._rollover_turns
             )
 
+        preserve_control = workflow.patched("desktop-control-rollover-v1")
         await workflow.wait_condition(
             lambda: self._done or self._handoff_rollover
-            or (not self._human_control[0] and should_rollover())
+            or ((preserve_control or not self._human_control[0]) and should_rollover())
         )
 
         # Closed to new turns from here on. all_handlers_finished waits for
@@ -1359,21 +1503,42 @@ class ChatWorkflow:
         # actually converge.
         self._closing = True
 
-        if self._done:
-            # Order matters: detach BEFORE waiting on all_handlers_finished.
-            # The stream's own long-poll is an update handler, so a subscriber
-            # parked in it keeps all_handlers_finished false forever and run()
-            # never returns. detach_pollers() releases in-flight polls and
-            # rejects new ones at the validator, which lets the wait below
-            # settle. The SDK docstring on detach_pollers states this ordering
-            # explicitly.
-            self._stream.detach_pollers()
-            # Let in-flight turn updates finish, or their replies are lost.
-            await workflow.wait_condition(workflow.all_handlers_finished)
-            return
-
+        release_on_end = workflow.patched("desktop-release-on-end-v1")
+        ending = self._done
+        # Detach long-poll updates before draining; otherwise they prevent end
+        # and rollover from ever reaching a quiescent desktop boundary.
         self._stream.detach_pollers()
         await workflow.wait_condition(workflow.all_handlers_finished)
+        if release_on_end:
+            # Native tool uses may be nested in saved delegated evidence. Retain
+            # the fact across rollover even if later message clamping trims it.
+            pending = list(self._agent.messages) if self._agent else []
+            while pending and not self._desktop_used:
+                item = pending.pop()
+                if isinstance(item, dict):
+                    tool_use = item.get("toolUse")
+                    if isinstance(tool_use, dict):
+                        name = tool_use.get("name")
+                        if isinstance(name, str) and (name == "browser" or name in COMPUTER_USE_TOOL_NAMES):
+                            self._desktop_used = True
+                    pending.extend(item.values())
+                elif isinstance(item, list):
+                    pending.extend(item)
+            # end_chat can arrive after rollover has already started draining.
+            ending = self._done
+        if ending:
+            if release_on_end and self._desktop_used:
+                await workflow.execute_activity(
+                    release_desktop,
+                    task_queue=DESKTOP_BROWSER_TASK_QUEUE,
+                    start_to_close_timeout=2 * DESKTOP_HANDOFF_TIMEOUT,
+                    schedule_to_start_timeout=DESKTOP_HANDOFF_TIMEOUT,
+                    schedule_to_close_timeout=DESKTOP_TASK_TIMEOUT,
+                    retry_policy=DESKTOP_MUTATION_RETRY_POLICY,
+                    cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+                )
+            return
+
         agent = self._agent
         messages: Messages = _clamp_tool_results(
             list(agent.messages) if agent else []
@@ -1399,6 +1564,11 @@ class ChatWorkflow:
                     connected_mcp_servers=list(self._connected_mcp_servers),
                     resume_prompt=self._resume_prompt,
                     handoff_run_id=self._handoff_run_id,
+                    # A claim can arrive while handlers drain. Only explicit
+                    # resume releases ownership; history pressure must not.
+                    human_control=preserve_control and not self._handoff_rollover and self._human_control[0],
+                    handoff_requested=preserve_control and not self._handoff_rollover and self._handoff_requested[0],
+                    desktop_used=self._desktop_used,
                 )
             ]
         )

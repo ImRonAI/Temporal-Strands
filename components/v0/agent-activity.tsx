@@ -62,7 +62,13 @@ import {
   ChainOfThoughtSearchResults,
   ChainOfThoughtStep,
 } from "@/components/ai-elements/chain-of-thought"
-import { CodeBlock } from "@/components/ai-elements/code-block"
+import {
+  CodeBlock,
+  CodeBlockActions,
+  CodeBlockCopyButton,
+  CodeBlockHeader,
+  CodeBlockTitle,
+} from "@/components/ai-elements/code-block"
 import {
   FileTree,
   FileTreeFile,
@@ -87,7 +93,12 @@ import {
 } from "@/components/ui/hover-card"
 import {
   Terminal,
+  TerminalActions,
   TerminalContent,
+  TerminalCopyButton,
+  TerminalHeader,
+  TerminalStatus,
+  TerminalTitle,
 } from "@/components/ai-elements/terminal"
 import {
   WebPreview,
@@ -112,13 +123,6 @@ import {
   TaskItemFile,
   TaskTrigger,
 } from "@/components/ai-elements/task"
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ai-elements/tool"
 
 // Pure grouping/binding/projection helpers live in agent-run.ts so the
 // scoped Vitest suite covers them without a DOM test stack.
@@ -130,6 +134,7 @@ import {
   downloadFileMeta,
   groupToolParts,
   isTerminalRunStatus,
+  parseJson,
   partInput,
   partOutputJson,
   projectRunTimeline,
@@ -141,6 +146,7 @@ import {
 } from "./data-observation"
 import { DataObservationPanel } from "./data-observation-panel"
 import { ComputerUseActivity, buildActivitySegments } from "./computer-use-activity"
+import { toolPresentation, thinkSummaryWasStreamed } from "./computer-use"
 import { SkillAgent } from "./skill-agent"
 import type { SkillRunSnapshot } from "./skill-run"
 
@@ -232,12 +238,14 @@ type NativeTool =
     }
   | {
       type: "mcp_list_tools"
+      connector_id?: string | null
       server_label: string
       tools: Array<{ name: string; description?: string | null }>
       error?: string | null
     }
   | {
       type: "mcp_call"
+      connector_id?: string | null
       server_label: string
       name: string
       arguments: string
@@ -1423,16 +1431,37 @@ function NativeToolStep({ native }: { native: NativeTool }) {
         />
       )
 
-    case "mcp_list_tools":
+    case "mcp_list_tools": {
+      const failed = Boolean(native.error) || Boolean(native.connector_id && native.tools.length === 0)
+      const unavailable = Boolean(native.connector_id) && failed
+      const authRequired = native.error === "AUTH_REQUIRED"
       return (
-        <CallTask failed={Boolean(native.error)} icon="folder" title={native.server_label}>
+        <CallTask
+          failed={failed}
+          icon="folder"
+          title={unavailable
+            ? `${native.server_label} · Connector ${authRequired ? "authorization required" : "unavailable"}`
+            : native.server_label}
+        >
           {native.error ? (
             <p className="text-destructive text-xs">{native.error}</p>
           ) : (
             <ResultBadges items={native.tools.map((t) => ({ title: t.name }))} />
           )}
+          {unavailable && (
+            <TaskItem>
+              <p>Connector availability notice, not a performed tool action.</p>
+              <p>{authRequired
+                ? "Ask an API Group administrator to reconnect this connector."
+                : "This connector is unavailable for this request. An API Group administrator can check its setup."}</p>
+              <a href="https://console.perplexity.ai/group/connectors" className="underline" target="_blank" rel="noreferrer">
+                Connector setup
+              </a>
+            </TaskItem>
+          )}
         </CallTask>
       )
+    }
 
     case "mcp_call": {
       // DataCommons / PopHIVE observation payloads render as the blue-glass
@@ -1449,7 +1478,17 @@ function NativeToolStep({ native }: { native: NativeTool }) {
           title={`${native.server_label} · ${native.name}`}
         >
           {native.error ? (
-            <p className="text-destructive text-xs">{native.error}</p>
+            <>
+              <p className="text-destructive text-xs">{native.error}</p>
+              {native.connector_id && native.error === "AUTH_REQUIRED" && (
+                <TaskItem>
+                  Connector authorization required. Ask an API Group administrator to{" "}
+                  <a href="https://console.perplexity.ai/group/connectors" className="underline" target="_blank" rel="noreferrer">
+                    reconnect this connector
+                  </a>.
+                </TaskItem>
+              )}
+            </>
           ) : observation ? (
             <>
               <DataObservationPanel observation={observation} />
@@ -1704,58 +1743,192 @@ function NativeToolStep({ native }: { native: NativeTool }) {
   }
 }
 
-// GenUI: a tool whose string output IS a JSX fragment renders live through
-// JSXPreview instead of as escaped text. Deliberately strict — a leading tag
-// and a closing angle bracket — so prose or JSON never trips it.
-function jsxOutput(part: DynamicToolUIPart): string | null {
-  if (part.state !== "output-available") return null
-  const out = "output" in part ? part.output : undefined
-  if (typeof out !== "string") return null
-  const trimmed = out.trim()
-  return /^<[A-Za-z][^>]*>/.test(trimmed) && trimmed.endsWith(">") ? trimmed : null
+const TERMINAL_TOOL_NAMES = new Set([
+  "shell", "bash", "terminal", "execute", "execute_command", "execute_code", "exec_command", "run_command",
+])
+
+const TOOL_PREVIEW_COMPONENTS = {
+  Artifact, ArtifactHeader, ArtifactTitle, ArtifactDescription, ArtifactContent,
+  TaskItem,
 }
 
+// Only this app-authored source reaches the JSX parser. Tool text, including
+// strings that look like JSX, stays inert in bindings and native text/code children.
+// https://elements.ai-sdk.dev/components/jsx-preview
+const TOOL_RESULT_JSX = `
+  <Artifact className="border-white/10 bg-transparent shadow-none">
+    <ArtifactHeader className="flex-wrap gap-3 border-white/10 bg-blue-400/[0.04]">
+      <div className="min-w-0 flex-1 space-y-1">
+        <ArtifactDescription className="text-[10px] font-medium uppercase tracking-[0.16em] text-blue-200">Tool result</ArtifactDescription>
+        <ArtifactTitle className="break-words">{toolName}</ArtifactTitle>
+      </div>
+      <span className={statusClass} role="status">{statusLabel}</span>
+    </ArtifactHeader>
+    <ArtifactContent className="min-w-0 space-y-4 p-3 sm:p-4">
+      {error && <TaskItem role="alert" className="whitespace-pre-wrap break-words border-l-2 border-destructive/60 pl-3 text-destructive">{error}</TaskItem>}
+      {resultText && <TaskItem className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{resultText}</TaskItem>}
+      {resultCode}
+      {emptyText && <TaskItem className="text-sm text-muted-foreground">{emptyText}</TaskItem>}
+    </ArtifactContent>
+  </Artifact>
+`
+
 function GenericTool({ part, className }: { part: DynamicToolUIPart; className?: string }) {
+  const [selectedFile, setSelectedFile] = useState<string>()
   const input = partInput(part)
-  const jsx = jsxOutput(part)
-  const output = "output" in part ? part.output : undefined
+  const view = toolPresentation(part)
+  const output = parseJson(view.output)
+  const blocks: unknown[] = Array.isArray(output?.content) ? output.content : []
+  const record = (blocks.length === 1 ? parseJson(parseJson(blocks[0])?.json) : null)
+    ?? parseJson(view.text) ?? output
+  const isShell = TERMINAL_TOOL_NAMES.has(part.toolName)
+  const exitCode = isShell && typeof record?.exit_code === "number" ? record.exit_code : undefined
+  const error = view.error || (exitCode !== undefined && exitCode !== 0 ? `Command exited with code ${exitCode}.` : undefined)
+  const preliminary = part.state === "output-available" && part.preliminary === true
+  const isStreaming = !error && (part.state === "input-streaming" || preliminary)
+  const state = error && view.state === "output-available" ? "output-error" : view.state
+  const statusLabel = error ? (state === "output-denied" ? "Denied" : "Failed")
+    : preliminary ? "Receiving result"
+    : state === "output-available" ? "Completed"
+    : state === "input-streaming" ? "Receiving input"
+    : state === "approval-requested" ? "Approval required"
+    : state === "approval-responded" ? "Approval recorded"
+    : "Awaiting result"
+  const statusClass = cn("shrink-0 rounded-md border px-2 py-1 text-[11px] font-medium",
+    error ? "border-destructive/30 bg-destructive/10 text-destructive"
+      : view.terminal && !preliminary ? "border-blue-300/20 bg-blue-400/10 text-blue-200"
+      : "border-violet-300/20 bg-violet-400/10 text-violet-200")
+  const surfaceClass = cn("app-glass app-glass-edge min-w-0 rounded-lg", className)
+  const rawOutput = "output" in part ? part.output : undefined
+  const rawCode = rawOutput === undefined ? "" : typeof rawOutput === "string" ? rawOutput : JSON.stringify(rawOutput, null, 2)
+  const rawLanguage = typeof rawOutput === "string" && !parseJson(rawOutput) ? "log" : "json"
+  const inputCode = input === undefined ? "" : JSON.stringify(input, null, 2)
+  const emptyText = error ? "" : view.terminal && !preliminary
+    ? "Tool finished without output." : "No final result received."
+  const details = (inputCode || rawCode) && (
+    <Task defaultOpen={false} className="border-t border-white/10 p-3">
+      <TaskTrigger title="Input and raw result" className="w-full text-left" />
+      <TaskContent>
+        {[{ title: "Input", code: inputCode, language: "json" }, { title: "Raw result", code: rawCode, language: rawLanguage }].map(({ title, code, language }) => code && (
+          <CodeBlock key={title} code={code} language={language === "log" ? "log" : "json"} className="max-h-64 overflow-auto border-white/10 bg-black/15">
+            <CodeBlockHeader className="sticky top-0 z-10">
+              <CodeBlockTitle>{title}</CodeBlockTitle>
+              <CodeBlockActions><CodeBlockCopyButton aria-label={`Copy ${title.toLowerCase()}`} /></CodeBlockActions>
+            </CodeBlockHeader>
+          </CodeBlock>
+        ))}
+      </TaskContent>
+    </Task>
+  )
+
+  if (isShell) {
+    // Structured stdio is a known execution shape; everything else stays verbatim.
+    const hasStdio = typeof record?.stdout === "string" || typeof record?.stderr === "string"
+    const terminalText = hasStdio
+      ? [record?.stdout, record?.stderr].filter(value => typeof value === "string" && value.length > 0).join("\n")
+      : view.text || (view.output === undefined ? "" : JSON.stringify(view.output, null, 2))
+    const terminalOutput = [terminalText, error && error !== terminalText ? error : "", exitCode !== undefined ? `Exit code: ${exitCode}` : ""].filter(Boolean).join("\n")
+    return (
+      <Terminal className={cn(surfaceClass, "bg-zinc-950/80")} output={terminalOutput} isStreaming={isStreaming} autoScroll data-tool-presentation="terminal" data-tool-state={state}>
+        <TerminalHeader className="flex-wrap gap-2 border-white/10">
+          <TerminalTitle className="min-w-0 break-all text-zinc-200">{part.toolName}</TerminalTitle>
+          <TerminalActions>
+            <span className={statusClass} role="status">{statusLabel}</span>
+            <TerminalStatus><span className="sr-only">Streaming</span></TerminalStatus>
+            <TerminalCopyButton aria-label="Copy terminal output" disabled={!terminalOutput} />
+          </TerminalActions>
+        </TerminalHeader>
+        <TerminalContent className="max-h-80 text-xs" />
+        {!terminalOutput && <p className="px-4 pb-3 text-xs text-zinc-400">{emptyText}</p>}
+        {details}
+      </Terminal>
+    )
+  }
+
+  if (part.toolName === "file_read" && !error) {
+    const path = typeof input?.path === "string" ? input.path : typeof input?.file_path === "string" ? input.file_path : ""
+    const mode = input?.mode
+    const fileTexts = blocks.length ? blocks.map(block => parseJson(block)?.text).filter((text): text is string => typeof text === "string")
+      : typeof record?.content === "string" ? [record.content] : typeof view.output === "string" ? [view.output] : []
+    // Stock file_read view mode labels each content block; stats/search are not source files.
+    const files = fileTexts.flatMap(text => {
+      const labeled = /^Content of ([^\n]+):\n([\s\S]*)$/.exec(text)
+      if ((mode === "view" || mode === undefined) && labeled) return [{ path: labeled[1], content: labeled[2] }]
+      if (path && (mode === undefined || mode === "lines" || mode === "chunk")) return [{ path, content: text }]
+      if (path && mode === "view" && typeof record?.content === "string") return [{ path, content: text }]
+      return []
+    })
+    const found = mode === "find" ? /^Found (\d+) files:\n([\s\S]*)$/.exec(view.text) : null
+    const paths = found ? found[2].split("\n").filter(Boolean) : []
+    if (found && Number(found[1]) === paths.length) {
+      return (
+        <Artifact className={surfaceClass} data-tool-presentation="files" data-tool-state={state}>
+          <ArtifactHeader className="flex-wrap gap-2 border-white/10 bg-blue-400/[0.04]">
+            <ArtifactTitle>Files found</ArtifactTitle><span className={statusClass} role="status">{statusLabel}</span>
+          </ArtifactHeader>
+          <ArtifactContent className="min-w-0">
+            {paths.length ? <FileTree className="max-h-80 overflow-auto border-white/10 bg-transparent" selectedPath={selectedFile} onSelect={setSelectedFile} aria-label="Found files">
+              {paths.map((filePath, index) => <FileTreeFile key={`${filePath}-${index}`} name={filePath} path={filePath} />)}
+            </FileTree> : <ArtifactDescription>No matching files.</ArtifactDescription>}
+          </ArtifactContent>
+          {details}
+        </Artifact>
+      )
+    }
+    if (files.length) {
+      return (
+        <Artifact className={surfaceClass} data-tool-presentation="file" data-tool-state={state}>
+          <ArtifactHeader className="flex-wrap gap-2 border-white/10 bg-blue-400/[0.04]">
+            <ArtifactTitle>File content</ArtifactTitle><span className={statusClass} role="status">{statusLabel}</span>
+          </ArtifactHeader>
+          <ArtifactContent className="min-w-0 space-y-3 p-3">
+            {files.map((file, index) => <CodeBlock key={`${file.path}-${index}`} code={file.content} language={CODE_EXTENSIONS[file.path.split(".").pop()?.toLowerCase() ?? ""] ?? "log"} showLineNumbers className="max-h-80 overflow-auto border-white/10 bg-black/15">
+              <CodeBlockHeader className="sticky top-0 z-10 gap-2">
+                <CodeBlockTitle className="min-w-0 break-all font-mono text-xs">{file.path}</CodeBlockTitle>
+                <CodeBlockActions><CodeBlockCopyButton aria-label={`Copy ${file.path}`} /></CodeBlockActions>
+              </CodeBlockHeader>
+            </CodeBlock>)}
+          </ArtifactContent>
+          {details}
+        </Artifact>
+      )
+    }
+  }
+
+  const resultText = view.text && view.text !== error && !parseJson(view.text) ? view.text : ""
+  const resultJson = !resultText && view.output !== undefined && !error ? JSON.stringify(record ?? view.output, null, 2) : ""
+  // The installed parser's registry requires components with optional props.
+  // Bind native elements with required props rather than casting away their types.
+  const resultCode = resultJson ? (
+    <CodeBlock code={resultJson} language="json" className="max-h-80 overflow-auto border-white/10 bg-black/15">
+      <CodeBlockHeader className="sticky top-0 z-10">
+        <CodeBlockTitle>Result</CodeBlockTitle>
+        <CodeBlockActions><CodeBlockCopyButton aria-label="Copy result" /></CodeBlockActions>
+      </CodeBlockHeader>
+    </CodeBlock>
+  ) : null
   return (
-    <Tool className={cn("border-white/10 backdrop-blur-sm", className ?? "bg-white/[0.02]")}>
-      <ToolHeader state={part.state} type="dynamic-tool" toolName={part.toolName} />
-      <ToolContent>
-        {input !== undefined && <ToolInput input={input} />}
-        {jsx ? (
-          // Documented usage (ai-sdk.dev/elements/components/jsx-preview):
-          // JSXPreview wraps JSXPreviewContent + JSXPreviewError; the parser
-          // renders the string, the error child surfaces parse failures.
-          <JSXPreview
-            className="min-h-80 p-4"
-            components={GMP_MAP}
-            jsx={jsx}
-          >
-            <JSXPreviewContent />
-            <JSXPreviewError />
-          </JSXPreview>
-        ) : (
-          (part.state === "output-available" || part.state === "output-error") && (
-            <ToolOutput
-              errorText={part.state === "output-error" ? part.errorText : undefined}
-              output={output}
-            />
-          )
-        )}
-        {part.toolName === "list_agent_response_files" && <ListFilesArtifacts part={part} />}
-      </ToolContent>
-    </Tool>
+    <div className={surfaceClass} data-tool-presentation="jsx" data-tool-state={state}>
+      <JSXPreview jsx={TOOL_RESULT_JSX} components={TOOL_PREVIEW_COMPONENTS} isStreaming={isStreaming}
+        bindings={{ toolName: part.toolName, statusLabel, statusClass, error, resultText, resultCode,
+          emptyText: resultText || resultJson ? "" : emptyText }}>
+        <JSXPreviewContent />
+        <JSXPreviewError className="m-3" />
+      </JSXPreview>
+      {details}
+      {part.toolName === "list_agent_response_files" && !error && <div className="p-3"><ListFilesArtifacts part={part} /></div>}
+    </div>
   )
 }
 
 export function AgentActivity({
   parts,
   isThinking,
+  sessionId,
 }: {
   parts: UIMessage["parts"]
   isThinking: boolean
+  sessionId?: string
 }) {
   const reasoningParts = parts.filter(isReasoningUIPart)
   // The think tool never renders as a generic tool card: the reasoning
@@ -1853,6 +2026,7 @@ export function AgentActivity({
                 key={`computer-use-${segment.index}`}
                 parts={segment.parts}
                 isThinking={isThinking}
+                sessionId={sessionId}
               />
             )
           }
@@ -1928,15 +2102,18 @@ export function AgentActivity({
                 renderNative={event => <NativeToolStep native={event as NativeTool} />} />
             }
             if (part.toolName === "think") {
-              if (part.state === "output-error") {
+              const result = toolPresentation(part)
+              if (result.error || (result.terminal && result.text && !thinkSummaryWasStreamed(result.text, parts))) {
                 return (
                   <ChainOfThoughtStep
                     icon={BrainIcon}
                     key={part.toolCallId}
-                    label="Thinking"
-                    status="pending"
+                    label={result.error ? (result.state === "output-denied" ? "Thinking denied" : "Thinking failed") : "Thinking result"}
+                    status="complete"
+                    role={result.error ? "alert" : undefined}
+                    className={result.error ? "text-destructive" : undefined}
                   >
-                    <p className="text-destructive text-xs">{part.errorText}</p>
+                    <MessageResponse>{result.error || result.text}</MessageResponse>
                   </ChainOfThoughtStep>
                 )
               }

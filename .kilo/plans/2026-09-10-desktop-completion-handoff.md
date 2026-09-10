@@ -1,5 +1,47 @@
 # Desktop completion handoff
 
+## Later Think execution decision and evidence (September 10)
+
+The user subsequently rejected the separate shared-tools Think implementation
+and completed a one-question-at-a-time interview. Implemented contract now:
+async adaptation in `orchestrator/think_activity.py::think_async`, upstream
+`ThoughtProcessor.create_thinking_prompt`, default parent tool inheritance
+excluding recursive Think, always `openai/gpt-6-astra` through the existing
+Perplexity factory (same native API tools/settings). The orchestrator makes
+Think the first tool call per user turn and selects effort and 0-10 cycles.
+Zero cycles returns immediately without an Astra request; one effort applies
+per call, all cycle context is retained within that call, subsequent calls use
+the current parent conversation, and conclusions plus tool evidence return to
+the parent. Errors are ordinary tool results; no heuristic effort selection,
+model fallback or automatic zero-cycle substitution. Accepted/echoed live API
+efforts: minimal, low, medium, high, xhigh, max; distinct internal effects are
+not proven by acceptance alone.
+
+Removed `ChatWorkflow._run_think`, the rejected `_shared_think` path and
+`tests/test_think_shared_tools.py`. Native tool/context binding and safety hooks
+stay in the workflow. `think-model-chosen-astra-v1` gates new behavior; old Think
+activity/hook remain only for replay of pre-migration histories, not new turns.
+Do not mistake their `tools=[]` legacy code for the new implementation.
+
+Real UI session `chat-c5077b4164fa7676`: "Hey there!" produced a model-chosen
+Think call with minimal/0 and no thinking-model activity; a second prompt asked
+Think to verify Astra via the inherited `list_agent_models` tool while choosing
+its own effort/cycles. It selected low/1, executed that tool and returned live
+evidence to the outer response. History confirms `model_name=openai/gpt-6-astra`,
+`streaming_topic=thinking`, `reasoning_effort=low` around the actual tool activity.
+Original Run ID `01a08cd7-5f0a-79cf-9a63-2b6f4864904e` continued as new to
+`15cc49a2-18cf-4145-bf61-69276b2c5c22` with unchanged Workflow ID. This verifies
+Think, NOT the full desktop/HITL acceptance sequence.
+
+Targeted Think/provider/workflow/observation run: 223 passed, 1 Linux-only skip
+before additional repeated-call/error tests. Full backend: 971 passed, 2 failed,
+2 skipped; failures were adherence checks on `compare_workflow.py` timedelta
+and `desktop_observation.py`'s existing empty except. Frontend: 435 passed, 2
+adherence failures (protected compare route streaming primitives, preset ID in
+a comment). TypeScript and scoped desktop contracts pass; full lint still sees
+errors in the existing sibling Kilo worktrees. Recheck current state rather than
+using these as blanket completion claims.
+
 ## Assignment and read order
 
 The user requested a fresh instance to finish the desktop feature, not another broad plan or an architecture reset. This file is the continuation context. A subsequent urgent request to restore **all Perplexity Agent API models in the picker** was implemented and verified before this handoff; preserve that fix.
@@ -163,3 +205,28 @@ Watch the actual noVNC iframe. Take control during work, make a visible human ch
 Prove unchanged application session/Workflow ID, changed Run ID, retained tabs/context, fresh screenshot, applied steering once, and complete ordered Task/ChainOfThought events. Repeat with computer-use including an action outside the browser page (e.g. a disposable desktop editor), plus stale connections, held inputs, reconnect and worker loss. Screenshots only in UI or successful navigation alone do not prove the agent sees pixels or takeover works. Do not disable takeover or remove noVNC/Think to claim completion.
 
 Existing PNGs such as `desktop-ui-working.png` and `novnc-desktop-connected.png` document a REMOVED custom implementation. Keep them as history, never cite them as acceptance for this replacement. Until the full sequence passes on current code, desktop completion remains open.
+
+## September 10 native desktop implementation update
+
+Current source replaces the stale gaps above: source-only image allowlist, pinned desktop dependencies, Xauth-cookie display, sandboxed headed Chromium, supervised services, single-slot native desktop worker, physical PyAutoGUI inputs, trusted screenshot manifests and request-local provider image hydration, private image proxy, durable session-ID UI wiring, native Task screenshot evidence, and authoritative takeover/reconnect state.
+
+Important live finding: Linux flock over Colima virtiofs did NOT exclude a host flock. Consequently all control mutations now execute in `browser_activity.desktop_control` via the native workflow update and desktop queue, not host locks. Host status and evidence reads are read-only. Native worker liveness is probed through a container-local lifetime lock, never through a host lock.
+
+`pnpm build:desktop` explicitly builds the image. `pnpm dev:desktop` only starts a verified content-hash-labeled image; stale/missing images fail with rebuild instructions. It does not silently build every startup. The launcher excludes macOS resource-fork files from its allowlisted tar context.
+
+Real diagnostic evidence, NOT complete acceptance:
+
+- Earlier real Perplexity UI run on workflow `chat-6189f37c1b65e992` ran browser init, navigate and physical click on `desktop-browser`; canvas pixels revealed `VISION-842910`. Two 1440px screenshots decoded in the UI. Human VNC key events changed the note to `ORIGINAL-NOTEHUMAN`.
+- That run found rollover ownership loss, incomplete terminal action delivery, and view-only reconnect denial. Source fixes include persisted desktop handoff fields, lifecycle release, native ownership transitions and a bounded native stream completion drain. Do not call the earlier run a successful full sequence.
+- A later real Temporal-native probe `desktop-native-probe-20260910` executed take -> release -> prepare_resume -> resume, typed `DESKTOP-INPUT-VERIFIED` into Mousepad, captured PNG pixels, and released ownership. Native receipt at end was viewonly=1, deny=0, client_count=0, pointer_mask=0. This was a direct activity probe, NOT a model-driven UI editor test.
+- Normal-configured UI requests on `http://127.0.0.1:3002` fail before desktop execution with `Managed connector "connector_googledrive" is not connected.` Workflow `chat-ddecf753a8239ac5` has no pending activities after the failure was made nonretryable. The UI now shows the actionable API Group setup URL instead of generic `Workflow update failed`. Configured connectors were NOT removed and no test-only connector override was used.
+- https://docs.perplexity.ai/docs/agent-api/tools/connectors.md documents the standard IDs and API Group authorization at https://console.perplexity.ai/group/connectors. It says disconnected connectors should produce an empty catalog rather than fail; the observed provider failure conflicts with that behavior. No public connector-list/status API was found. The real console is behind an interactive Cloudflare check; do not bypass it or claim authorization.
+- The persistent hero seen in the QA browser was caused by the QA tab being hidden with paused animations. `agent-browser ... tab t1` foregrounded it and rendered the actual conversation. No UI source bug was established for that symptom.
+
+Latest passing checks: 631 scoped backend desktop/provider-boundary tests; 169 desktop UI tests; 120 workflow/control tests with one real-browser opt-in skipped; `pnpm exec tsc --noEmit`; `pnpm check:desktop`; `git diff --check`. Full gates remain NOT green: latest full backend stops at preexisting `compare_workflow.py:81` timedelta adherence failure after 559 passed/1 skipped; full frontend retains two adherence failures in the compare route and model-catalog comment; lint retains unrelated `.kilo/worktrees` failures. Do not suppress those gates.
+
+Evidence is under the approved temp directory `.../T/kilo/`: `desktop-acceptance-observations.json`, `desktop-acceptance-final/acceptance-human-edit.png`, `desktop-native-control-final/`, `desktop-history-evidence.py`, `desktop-native-probe.py`. Final visible error screenshot: `/Users/tims-stuff/.agent-browser/tmp/screenshots/screenshot-1789080700084.png`. No final success evidence exists.
+
+Check actual processes before continuing: isolated acceptance used Temporal 7235, API 8789, Next 3002 with `.next-desktop-acceptance`, fixture 8799. Primary 3000/8787 stack belongs to other work and was preserved. After session-bound removal, the final image `ab85eaf88849` was rebuilt and started as a tracked persistent process `bgp_08d874722001Z6vWrwEecGtdQe`; Docker reported running/healthy UID501 and logs confirmed `Desktop worker polling 'desktop-browser'`. Recheck runtime rather than relying on this snapshot. No cloud resources or commits were created. Think remains the separate agent's scope and was preserved.
+
+Remaining finish gate: restore verified image/runtime, resolve the real API Group connector authorization without removing capabilities, then repeat the complete literal UI sequence including fresh post-human pixels, same-ID/new-run steering, all action/Think updates, and the non-browser editor task. Feature remains incomplete until this passes.

@@ -71,6 +71,22 @@ describe("native browser computer-use timeline", () => {
     artifact_id: "879a4f76-2f47-4039-b5ca-30c8bba286bf", generation: "1", sha256: "a".repeat(64),
     width: 1280, height: 720, mime_type: "image/png",
   }
+  it("forwards the durable session through AgentActivity into actual screenshot thumbnails", () => {
+    const sessionId = "chat-c8a5830d3a78e208"
+    const parts: UIMessage["parts"] = [{
+      ...action("browser", "browser-screenshot-call"),
+      input: { browser_input: { action: { type: "screenshot", session_name: "browser-session-name" } } },
+      output: { status: "success", content: [{ text: JSON.stringify({ action: "screenshot", observation }) }] },
+    }]
+    const html = renderToStaticMarkup(<AgentActivity parts={parts} isThinking={false} sessionId={sessionId} />)
+    const images = html.match(/<img\b[^>]*>/g) ?? []
+    expect(images).toHaveLength(1)
+    expect(images[0]).toContain(`src="/api/orchestrator/desktop-image?session_id=${sessionId}&amp;artifact_id=${observation.artifact_id}"`)
+    expect(images[0]).not.toContain("browser-session-name")
+    expect(images[0]).not.toContain("browser-screenshot-call")
+    expect(renderToStaticMarkup(<AgentActivity parts={parts} isThinking={false} />)).not.toContain("<img ")
+  })
+
   it("renders every action with native TaskItem and session-scoped screenshot evidence", () => {
     const parts: DynamicToolUIPart[] = ["navigate", "click", "screenshot"].map((action, index) => ({
       type: "dynamic-tool",

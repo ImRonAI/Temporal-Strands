@@ -531,6 +531,177 @@ async def test_agent_api_params_pass_through_to_the_wire() -> None:
     assert params == original
 
 
+@pytest.fixture
+def think_spec():
+    from strands import tool
+
+    @tool
+    def think(thought: str, reasoning_effort: str, cycle_count: int) -> str:
+        """Think with model-selected effort and cycles."""
+        raise AssertionError("Request-shaping tests must not execute Think")
+
+    return think.tool_spec
+
+
+@pytest.mark.asyncio
+async def test_require_think_forces_native_choice_without_synthesizing_arguments(think_spec) -> None:
+    arguments = json.dumps({
+        "thought": "Compare the evidence", "reasoning_effort": "low", "cycle_count": 3,
+    })
+    recorder = Recorder(sse(
+        CREATED,
+        function_call_added(name="think", arguments=arguments),
+        function_call_done(name="think", arguments=arguments),
+        COMPLETED,
+    ))
+    model = build(recorder)
+    messages = [{"role": "user", "content": [{"text": "Investigate this task"}]}]
+    state = {"require_think": True, "reasoning_effort": "high"}
+    before = copy.deepcopy((messages, state, think_spec, model.get_config()))
+
+    events = await collect(
+        model, messages, tool_specs=[think_spec], tool_choice={"auto": {}},
+        invocation_state=state,
+    )
+
+    assert len(recorder.requests) == 1
+    assert recorder.request["tool_choice"] == {"type": "function", "name": "think"}
+    assert recorder.request["input"] == [{
+        "role": "user", "content": [{"type": "input_text", "text": "Investigate this task"}],
+    }]
+    assert recorder.request["tools"] == [{
+        "type": "function", "name": "think", "description": think_spec["description"],
+        "parameters": think_spec["inputSchema"]["json"],
+    }]
+    assert recorder.request["reasoning"] == {"effort": "high"}
+    assert "invocation_state" not in recorder.request
+    assert "require_think" not in recorder.request
+    assert tool_use_inputs(events) == {"call_1": arguments}
+    assert (messages, state, think_spec, model.get_config()) == before
+
+    recorder.body = sse(CREATED, text_delta("continue"), COMPLETED)
+    await collect(
+        model, messages, tool_specs=[think_spec], tool_choice={"auto": {}},
+        invocation_state={"require_think": False},
+    )
+    assert len(recorder.requests) == 2
+    assert recorder.request["tool_choice"] == "auto"
+    assert "reasoning" not in recorder.request
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kwargs,expected_choice", [
+    pytest.param({}, None, id="sdk-default"),
+    pytest.param({"tool_choice": {"auto": {}}}, "auto", id="no-state"),
+    pytest.param(
+        {"tool_choice": {"auto": {}}, "invocation_state": {}}, "auto", id="empty-state",
+    ),
+    pytest.param(
+        {"tool_choice": {"auto": {}}, "invocation_state": {"require_think": False}},
+        "auto", id="cleared-flag",
+    ),
+])
+async def test_without_require_think_preserves_sdk_auto_choice(think_spec, kwargs, expected_choice) -> None:
+    recorder = Recorder(sse(COMPLETED))
+    await collect(build(recorder), tool_specs=[think_spec], **kwargs)
+
+    if expected_choice is None:
+        assert "tool_choice" not in recorder.request
+    else:
+        assert recorder.request["tool_choice"] == expected_choice
+    assert recorder.request["input"] == []
+    assert "invocation_state" not in recorder.request
+    assert "require_think" not in recorder.request
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effort", ["minimal", "low", "medium", "high", "xhigh", "max"])
+async def test_astra_invocation_reasoning_effort_is_honored_without_leaking(think_spec, effort) -> None:
+    params = {"reasoning": {"effort": "medium"}}
+    recorder = Recorder(sse(COMPLETED))
+    model = build(recorder, model_id="openai/gpt-6-astra", params=params)
+    before = copy.deepcopy(model.get_config())
+    await collect(
+        model, tool_specs=[think_spec], tool_choice={"auto": {}},
+        invocation_state={"reasoning_effort": effort, "require_think": False},
+    )
+
+    assert recorder.request["model"] == "openai/gpt-6-astra"
+    assert recorder.request["reasoning"] == {"effort": effort}
+    assert recorder.request["tool_choice"] == "auto"
+    assert "reasoning_effort" not in recorder.request
+    assert model.get_config() == before
+
+    await collect(model, tool_specs=[think_spec], tool_choice={"auto": {}})
+    assert recorder.request["reasoning"] == params["reasoning"] == {"effort": "medium"}
+    assert model.get_config() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("connector_override", [False, True], ids=["unconfigured", "explicit-config"])
+async def test_astra_factory_matches_live_model_native_requests(monkeypatch, connector_override) -> None:
+    # Import the real worker factories without loading the protected .env.local.
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
+    from config import BUILTIN_SKILLS, CONNECTORS, MAX_STEPS_CEILING, THINK_MODEL_ID
+    import run_worker
+
+    monkeypatch.setenv("DATACOMMONS_MCP_URL", "https://dc.example/mcp")
+    monkeypatch.setenv("DC_API_KEY", "dc-test-key")
+    monkeypatch.setenv("POPHIVE_MCP_URL", "https://pophive.example/mcp")
+    monkeypatch.delenv("PERPLEXITY_CONNECTOR_IDS", raising=False)
+    connectors = [{"type": "connector", **connector} for connector in CONNECTORS]
+    if connector_override:
+        monkeypatch.setenv("PERPLEXITY_CONNECTOR_IDS", "drive=connector_test_drive,github=connector_test_github")
+        connectors = [
+            {"type": "connector", "server_label": "drive", "id": "connector_test_drive"},
+            {"type": "connector", **CONNECTORS[1], "id": "connector_test_github"},
+        ]
+    expected_tools = [
+        {"type": name} for name in ("web_search", "fetch_url", "people_search", "finance_search", "sandbox")
+    ] + [
+        {
+            "type": "mcp", "server_label": "datacommons", "server_url": "https://dc.example/mcp",
+            "headers": {"X-API-Key": "dc-test-key"},
+            "allowed_tools": [
+                "search_indicators", "search_child_indicators", "get_variable_metadata",
+                "get_observations", "get_child_observations",
+            ],
+        },
+        {"type": "mcp", "server_label": "pophive", "server_url": "https://pophive.example/mcp"},
+        *connectors,
+    ]
+    assert THINK_MODEL_ID == "openai/gpt-6-astra"
+    regular_id = "google/gemini-3.8-flash"
+    factories, _ = run_worker.build_perplexity_factories("pplx-test", [THINK_MODEL_ID, regular_id])
+    astra, regular, fresh_astra = factories[THINK_MODEL_ID](), factories[regular_id](), factories[THINK_MODEL_ID]()
+    assert astra is not regular and astra is not fresh_astra and regular is not fresh_astra
+    recorder = Recorder(sse(COMPLETED))
+
+    for model in (astra, regular, fresh_astra):
+        assert isinstance(model, PerplexityModel)
+        monkeypatch.setattr(model, "_transport", httpx.MockTransport(recorder.handler))
+        await collect(model, system_prompt="Use the available tools and cite evidence.")
+        request = recorder.request
+        assert request["tools"] == expected_tools
+        assert request["instructions"] == "Use the available tools and cite evidence."
+        assert request["max_steps"] == MAX_STEPS_CEILING
+        assert request["skills"] == [dict(skill) for skill in BUILTIN_SKILLS]
+        assert request["stream"] is True and request["store"] is True and request["background"] is True
+        assert request["max_output_tokens"] == run_worker.max_output_tokens_for(request["model"])
+
+    assert [request["model"] for request in recorder.requests] == [THINK_MODEL_ID, regular_id, THINK_MODEL_ID]
+    # Output ceilings are provider-specific; all other request settings match.
+    comparable = [
+        {key: value for key, value in request.items() if key not in ("model", "max_output_tokens")}
+        for request in recorder.requests
+    ]
+    assert comparable[0] == comparable[1] == comparable[2]
+    astra.get_config()["params"]["tools"][-1]["id"] = "changed-test-connector"
+    assert regular.get_config()["params"]["tools"] == expected_tools
+    assert fresh_astra.get_config()["params"]["tools"] == expected_tools
+    assert factories[THINK_MODEL_ID]().get_config()["params"]["tools"] == expected_tools
+
+
 @pytest.mark.asyncio
 async def test_messages_and_tool_history_use_the_parent_formatter() -> None:
     recorder = Recorder(sse(COMPLETED))
@@ -740,12 +911,12 @@ async def test_function_call_arguments_do_not_leak_into_the_next_turn() -> None:
     recorder = Recorder(sse(CREATED, function_call_added(), function_call_done(), COMPLETED))
     model = build(recorder)
     await collect(model)
-    assert model._call_arguments == {"call_1": '{"q": "x"}'}
+    assert model._invocation.get() is None
 
     recorder.body = sse(CREATED, text_delta("plain"), COMPLETED)
     second = await collect(model)
 
-    assert model._call_arguments == {}
+    assert model._invocation.get() is None
     assert tool_use_inputs(second) == {}
 
 
@@ -949,7 +1120,10 @@ async def test_non_sse_responses_are_not_tapped() -> None:
     with pytest.raises(Exception) as caught:
         await collect(build(recorder))
 
-    assert not isinstance(caught.value, ApplicationError)
+    assert isinstance(caught.value, ApplicationError)
+    assert caught.value.non_retryable
+    assert "boom" in str(caught.value)
+    assert len(recorder.requests) == 1
 
 
 @pytest.mark.asyncio
@@ -970,6 +1144,42 @@ async def test_re_running_the_same_model_does_not_leak_native_frames() -> None:
 # ---------------------------------------------------------------------------
 # Failure mapping (parent's classify_openai_error)
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_mode", ["http", "stream"])
+async def test_configured_connector_failure_propagates_without_dropping_tools(monkeypatch, failure_mode):
+    import openai
+
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
+    import run_worker
+
+    monkeypatch.setenv("PERPLEXITY_CONNECTOR_IDS", "google_drive=connector_googledrive")
+    factories, _ = run_worker.build_perplexity_factories("pplx-test", [])
+    model = factories["preset:high"]()
+    tools = copy.deepcopy(model.get_config()["params"]["tools"])
+    message = 'Managed connector "connector_googledrive" is not connected.'
+    error = {"code": "external_connector_error", "type": "invalid_request_error", "message": message}
+    requests = []
+
+    def fail_request(request):
+        requests.append(json.loads(request.content))
+        if failure_mode == "http":
+            return httpx.Response(400, json={"error": error})
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=sse(
+            CREATED, {"type": "response.failed", "response": response_obj(status="failed", error=error)},
+        ))
+
+    monkeypatch.setattr(model, "_transport", httpx.MockTransport(fail_request))
+    with pytest.raises(ApplicationError) as caught:
+        await collect(model)
+    assert "connector_googledrive" in str(caught.value)
+    assert caught.value.non_retryable is True
+    assert len(requests) == 2
+    assert not any(tool.get("id") == "connector_googledrive" for tool in requests[1]["tools"])
+    assert requests[0]["tools"] == tools
+    assert any(tool.get("id") == "connector_googledrive" for tool in tools)
+    assert model.get_config()["params"]["tools"] == tools
 
 
 @pytest.mark.asyncio
@@ -1028,13 +1238,16 @@ async def test_http_429_raises_model_throttled_through_the_parent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_http_401_propagates_the_sdk_error() -> None:
+async def test_http_401_preserves_sdk_cause_without_temporal_retries() -> None:
     import openai
 
     recorder = Recorder(b"", status=401)
 
-    with pytest.raises(openai.AuthenticationError):
+    with pytest.raises(ApplicationError) as caught:
         await collect(build(recorder))
+    assert caught.value.non_retryable
+    assert isinstance(caught.value.__cause__, openai.AuthenticationError)
+    assert len(recorder.requests) == 1
 
 
 # ---------------------------------------------------------------------------

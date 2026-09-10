@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 import pytest
 from perplexity import (
+    APIError,
     AuthenticationError,
     BadRequestError,
     InternalServerError,
@@ -117,16 +118,20 @@ class FakeResponses:
         self.cancelled = cancelled
         self.files = files or FakeFiles()
         self.request: dict[str, Any] | None = None
+        self.create_calls: list[dict[str, Any]] = []
         self.retrieve_calls: list[str] = []
         self.cancel_calls: list[str] = []
 
     async def create(self, **request: Any) -> Any:
         self.request = request
+        self.create_calls.append(request)
         if self.error:
             raise self.error
 
         async def stream() -> Any:
             for item in self.events:
+                if isinstance(item, Exception):
+                    raise item
                 yield item
 
         return stream()
@@ -199,7 +204,8 @@ class FakeStreamClient:
 
 
 @pytest.fixture(autouse=True)
-def reset_client_factory() -> Any:
+def reset_client_factory(monkeypatch) -> Any:
+    monkeypatch.delenv("PERPLEXITY_CONNECTOR_IDS", raising=False)
     perplexity_operations.configure(None)
     yield
     perplexity_operations.configure(None)
@@ -254,7 +260,8 @@ async def test_each_preset_sends_its_fixed_preset_and_forced_flags(activity_fn, 
         assert absent not in request
     # skills defaults to the builtin office suite when the caller passes none.
     assert request["skills"] == [dict(skill) for skill in config.BUILTIN_SKILLS]
-    # tools defaults to the shared native array, connectors included.
+    # tools defaults to the same native array as the worker, without fabricated
+    # connector authorization when there is no explicit connector configuration.
     assert request["tools"] == agent_api_tools.native_tools()
 
 
@@ -553,20 +560,39 @@ async def test_connector_tool_type_is_accepted() -> None:
 
 
 @pytest.mark.asyncio
-async def test_default_tools_include_dashboard_connectors() -> None:
+async def test_default_tools_work_without_connector_config() -> None:
+    client = FakeClient(events=[completed()])
+    await run_activity(create_fast_agent_response, client, input="q")
+    assert client.responses.request["tools"] == agent_api_tools.native_tools()
+    assert [tool["id"] for tool in client.responses.request["tools"] if tool["type"] == "connector"] == [
+        connector["id"] for connector in config.CONNECTORS
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("activity_fn", "preset"), PRESET_ACTIVITIES)
+async def test_default_tools_include_explicitly_configured_connectors(monkeypatch, activity_fn, preset) -> None:
     """When the caller sends no tools, the request carries the shared native
     array, dashboard connectors included."""
+    monkeypatch.setenv(
+        "PERPLEXITY_CONNECTOR_IDS",
+        "google_drive=connector_googledrive,linear=connector_linear",
+    )
     client = FakeClient(events=[completed()])
 
-    await run_activity(create_fast_agent_response, client, input="q")
+    await run_activity(activity_fn, client, input="q")
 
     request = client.responses.request
     assert request is not None
+    assert request["preset"] == preset
+    assert request["background"] is True
+    assert request["stream"] is True
     assert request["tools"] == agent_api_tools.native_tools()
     connector_ids = [
         tool["id"] for tool in request["tools"] if tool.get("type") == "connector"
     ]
-    assert connector_ids == ["connector_googledrive", "connector_github"]
+    assert connector_ids == ["connector_googledrive", "connector_linear"]
+    assert len(client.responses.create_calls) == 1
 
 
 @pytest.mark.asyncio
@@ -710,7 +736,7 @@ async def test_terminal_projection_is_serializable() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("code", "non_retryable"),
-    [("invalid_request_error", True), ("server_error", False)],
+    [("invalid_request_error", True), ("server_error", False), ("stream_disconnected", False)],
 )
 async def test_response_failed_classification(code, non_retryable) -> None:
     failure = event(
@@ -722,6 +748,178 @@ async def test_response_failed_classification(code, non_retryable) -> None:
     with pytest.raises(ApplicationError) as caught:
         await run_activity(create_fast_agent_response, client, input="q")
     assert caught.value.non_retryable is non_retryable
+    assert len(client.responses.create_calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("as_mapping", [False, True])
+@pytest.mark.parametrize("with_event_error", [False, True])
+@pytest.mark.parametrize(
+    ("code", "message", "non_retryable"),
+    [
+        ("AUTH_REQUIRED", "Access unavailable", True),
+        ("CONNECTOR_DISCONNECTED", "Access unavailable", True),
+        ("CONNECTOR_NOT_CONNECTED", "Access unavailable", True),
+        ("ACCESS_DENIED", "Access unavailable", True),
+        ("server_error", "Connector google_drive: authentication required", True),
+        ("server_error", "Connector google_drive is disconnected", True),
+        ("server_error", "Upstream temporarily unavailable", False),
+    ],
+)
+async def test_response_failed_uses_response_error_and_preserves_identity(
+    as_mapping, with_event_error, code, message, non_retryable, caplog
+) -> None:
+    detail = {
+        "message": message,
+        "code": code,
+        "connector_id": "connector_googledrive",
+        "server_label": "google_drive",
+    }
+    failure = event(
+        "response.failed",
+        response=response_obj(
+            status="failed", error=detail if as_mapping else SimpleNamespace(**detail)
+        ),
+        sequence_number=1,
+    )
+    if with_event_error:
+        failure.error = SimpleNamespace(message="generic event error", code="server_error")
+    client = FakeClient(events=[failure])
+    with pytest.raises(ApplicationError) as caught:
+        await run_activity(create_fast_agent_response, client, input="q")
+    assert caught.value.non_retryable is non_retryable
+    assert message in caught.value.message
+    assert "connector_googledrive" in caught.value.message
+    assert "google_drive" in caught.value.message
+    assert "generic event error" not in caught.value.message
+    assert "reconnect" not in caught.value.message.lower()
+    assert len(client.responses.create_calls) == 1
+    assert not caplog.records
+
+
+@pytest.mark.asyncio
+async def test_response_failed_without_error_still_reports_failure() -> None:
+    client = FakeClient(events=[event("response.failed", sequence_number=1)])
+    with pytest.raises(ApplicationError, match="Perplexity response failed"):
+        await run_activity(create_fast_agent_response, client, input="q")
+    assert len(client.responses.create_calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("label", ["google_drive", "linear"])
+@pytest.mark.parametrize(
+    "code", ["AUTH_REQUIRED", "TOKEN_EXPIRED", "CONNECTOR_DISCONNECTED", "PERMISSION_DENIED"]
+)
+async def test_inband_connector_auth_continues_without_replay_or_secret_logging(
+    label, code, caplog
+) -> None:
+    tools = [
+        {"type": "connector", "id": "connector_googledrive", "server_label": "google_drive"},
+        {"type": "connector", "id": "connector_linear", "server_label": "linear"},
+        {"type": "sandbox"},
+    ]
+    item = SimpleNamespace(
+        type="mcp_call",
+        id="call_1",
+        server_label=label,
+        name="create_issue",
+        arguments='{"title":"private-issue-title"}',
+        error=f"{code}: Bearer secret-access-token https://auth.example/?token=secret-link",
+        output="private-connector-output",
+    )
+    events = [
+        event("response.output_item.done", item=item, sequence_number=1),
+        event("response.output_text.delta", delta="Using available evidence", sequence_number=2),
+        completed(response_obj(output=[item, message_item("Completed with available evidence")]), sequence_number=3),
+    ]
+    client = FakeClient(events=events)
+
+    result, stream, heartbeats = await run_activity(
+        create_fast_agent_response, client, input="q", tools_json=json.dumps(tools)
+    )
+
+    assert result["status"] == "completed"
+    assert result["output_text"] == "Completed with available evidence"
+    assert result["output"][0]["error"] == item.error
+    assert client.responses.create_calls == [client.responses.request]
+    assert client.responses.request["tools"] == tools
+    assert [envelope["event"] for envelope in stream.topics[AGENT_RUNS_TOPIC].published] == [
+        perplexity_operations._to_data(value) for value in events
+    ]
+    assert heartbeats[-1][0] == {"response_id": "resp_1", "sequence_number": 3}
+    assert len(caplog.records) == 1
+    connector_id = next(tool["id"] for tool in tools if tool.get("server_label") == label)
+    assert caplog.records[0].getMessage().startswith(
+        f"Perplexity connector id={connector_id} label={label} code={code}"
+    )
+    for secret in ("secret-access-token", "secret-link", "private-issue-title", "private-connector-output", "https://auth.example"):
+        assert secret not in caplog.text
+    assert "reconnect" not in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_only", [False, True])
+async def test_completed_empty_connector_catalog_is_diagnostic_only(terminal_only, caplog) -> None:
+    tools = [{"type": "connector", "id": "connector_linear", "server_label": "linear"}]
+    empty = SimpleNamespace(type="mcp_list_tools", id="list_1", server_label="linear", tools=[])
+    events = [] if terminal_only else [
+        event("response.output_item.added", item=empty, sequence_number=0),
+        event("response.output_item.done", item=empty, sequence_number=1),
+    ]
+    events.append(completed(response_obj(output=[empty, message_item("Available result")])))
+    client = FakeClient(events=events)
+
+    result, stream, _ = await run_activity(
+        create_medium_agent_response, client, input="q", tools_json=json.dumps(tools)
+    )
+
+    assert result["status"] == "completed"
+    assert result["output"][0]["tools"] == []
+    assert len(client.responses.create_calls) == 1
+    assert len(stream.topics[AGENT_RUNS_TOPIC].published) == len(events)
+    assert len(caplog.records) == 1
+    assert caplog.records[0].getMessage().startswith(
+        "Perplexity connector id=connector_linear label=linear code=EMPTY_TOOL_CATALOG"
+    )
+    assert "auth" not in caplog.text.lower()
+    assert "reconnect" not in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_added_empty_connector_catalog_is_not_a_failure_diagnostic(caplog) -> None:
+    tools = [{"type": "connector", "id": "connector_linear", "server_label": "linear"}]
+    client = FakeClient(events=[
+        event("response.output_item.added", item=SimpleNamespace(
+            type="mcp_list_tools", id="list_1", server_label="linear", tools=[]
+        )),
+        completed(response_obj(output=[SimpleNamespace(
+            type="mcp_list_tools", id="list_1", server_label="linear", tools=[{"name": "search"}]
+        )])),
+    ])
+    await run_activity(create_fast_agent_response, client, input="q", tools_json=json.dumps(tools))
+    assert not caplog.records
+
+
+@pytest.mark.asyncio
+async def test_connector_diagnostics_are_bounded_and_do_not_log_unknown_error_text(caplog) -> None:
+    connector_id = "connector_" + "x" * 200
+    label = "l" * 64
+    item = SimpleNamespace(
+        type="mcp_call", id="private-call-id", server_label=label,
+        error="Bearer secret-access-token " + "private-payload" * 1000,
+    )
+    client = FakeClient(events=[completed(response_obj(output=[item] * 20))])
+    await run_activity(
+        create_fast_agent_response, client, input="q",
+        tools_json=json.dumps([{"type": "connector", "id": connector_id, "server_label": label}]),
+    )
+    assert len(caplog.records) == 1
+    assert caplog.records[0].getMessage().startswith(
+        f"Perplexity connector id={connector_id[:128]} label={label} code=MCP_CALL_ERROR"
+    )
+    assert len(caplog.records[0].getMessage()) < 500
+    for secret in ("secret-access-token", "private-payload", "private-call-id"):
+        assert secret not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -732,6 +930,7 @@ async def test_stream_without_authoritative_completion_is_retryable() -> None:
     with pytest.raises(ApplicationError, match="authoritative") as caught:
         await run_activity(create_fast_agent_response, client, input="q")
     assert caught.value.non_retryable is False
+    assert len(client.responses.create_calls) == 1
 
 
 @pytest.mark.asyncio
@@ -743,6 +942,7 @@ async def test_non_completed_terminal_status_is_retryable() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("during_iteration", [False, True])
 @pytest.mark.parametrize(
     ("error_type", "status_code", "non_retryable"),
     [
@@ -752,14 +952,72 @@ async def test_non_completed_terminal_status_is_retryable() -> None:
         (InternalServerError, 500, False),
     ],
 )
-async def test_create_http_failure_classification(error_type, status_code, non_retryable) -> None:
+async def test_create_http_failure_classification(error_type, status_code, non_retryable, during_iteration) -> None:
     request = httpx.Request("POST", "https://api.perplexity.ai/v1/agent")
     response = httpx.Response(status_code, request=request)
     error = error_type("failure", response=response, body=None)
-    client = FakeClient(error=error)
+    client = FakeClient(events=[error]) if during_iteration else FakeClient(error=error)
     with pytest.raises(ApplicationError) as caught:
         await run_activity(create_fast_agent_response, client, input="q")
     assert caught.value.non_retryable is non_retryable
+    assert caught.value.__cause__ is error
+    assert len(client.responses.create_calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("during_iteration", [False, True])
+@pytest.mark.parametrize(
+    ("body", "non_retryable"),
+    [
+        ({"error": {"code": "AUTH_REQUIRED", "message": "Access unavailable", "server_label": "linear", "connector_id": "connector_linear"}}, True),
+        ({"error": {"code": "CONNECTOR_DISCONNECTED", "message": "Access unavailable", "server_label": "linear", "connector_id": "connector_linear"}}, True),
+        ({"error": {"code": "TOKEN_EXPIRED", "message": "Access unavailable", "server_label": "linear", "connector_id": "connector_linear"}}, True),
+        ({"error": {"code": "server_error", "message": "Connector linear is not connected"}}, True),
+        ({"error": {"code": "server_error", "message": "Connection interrupted after connector_linear write"}}, False),
+    ],
+)
+async def test_sdk_api_error_classified_without_replaying_ambiguous_create(
+    during_iteration, body, non_retryable, caplog
+) -> None:
+    request = httpx.Request("POST", "https://api.perplexity.ai/v1/agent", headers={"Authorization": "Bearer secret-api-key"})
+    error = APIError("secret-error-envelope", request, body=body)
+    emitted = [
+        event("response.created", response=response_obj(status="in_progress"), sequence_number=0),
+        event("response.output_item.done", item=SimpleNamespace(
+            type="mcp_call", id="call_1", server_label="linear", name="create_issue",
+            arguments='{"title":"private-title"}', output="Created issue", error=None,
+        ), sequence_number=1),
+    ] if during_iteration else []
+    client = FakeClient(events=[*emitted, error]) if during_iteration else FakeClient(error=error)
+    perplexity_operations.configure(lambda: client)
+    env = ActivityEnvironment()
+    heartbeats = []
+    env.on_heartbeat = lambda *details: heartbeats.append(details)
+    stream = FakeStreamClient()
+    with patch.object(perplexity_operations.WorkflowStreamClient, "from_within_activity", return_value=stream):
+        with pytest.raises(ApplicationError) as caught:
+            await env.run(create_fast_agent_response, input="q")
+
+    assert caught.value.non_retryable is non_retryable
+    assert body["error"]["message"] in caught.value.message
+    assert "linear" in caught.value.message
+    if body["error"].get("connector_id"):
+        assert "connector_linear" in caught.value.message
+    assert "reconnect" not in caught.value.message.lower()
+    assert caught.value.__cause__ is error
+    assert stream.entered and stream.exited
+    assert [envelope["event"] for envelope in stream.topics[AGENT_RUNS_TOPIC].published] == [
+        perplexity_operations._to_data(value) for value in emitted
+    ]
+    assert heartbeats[-1][0] == {
+        "response_id": "resp_1" if during_iteration else None,
+        "sequence_number": 1 if during_iteration else None,
+    }
+    assert len(client.responses.create_calls) == 1
+    assert not client.responses.retrieve_calls
+    assert "secret-api-key" not in caplog.text
+    assert "secret-error-envelope" not in caplog.text
+    assert "private-title" not in caplog.text
 
 
 # --- retrieve / files -------------------------------------------------------

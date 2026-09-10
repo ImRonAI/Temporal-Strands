@@ -10,7 +10,7 @@ import json
 import os
 import stat
 import tempfile
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Iterator, Literal
@@ -67,10 +67,8 @@ def _artifact_directory(namespace: str, workflow_id: str, *, create: bool = Fals
     root_fd = os.open(root, flags)
     try:
         if create:
-            try:
+            with suppress(FileExistsError):
                 os.mkdir(scope, mode=0o700, dir_fd=root_fd)
-            except FileExistsError:
-                pass
         scope_fd = os.open(scope, flags, dir_fd=root_fd)
         try:
             yield root_fd, scope_fd
@@ -94,14 +92,14 @@ def _read_artifact(directory: int, name: str, limit: int) -> bytes:
         return data
 
 
-def _check_runtime(root: int, ref: ObservationRef, namespace: str, workflow_id: str, *, storing: bool = False) -> dict[str, Any]:
+def _check_runtime(root: int, ref: ObservationRef, namespace: str, workflow_id: str, *, storing: bool = False, for_display: bool = False) -> dict[str, Any]:
     runtime = json.loads(_read_artifact(root, "runtime.json", 4096))
     if (
         not isinstance(runtime, dict)
         or type(runtime.get("epoch")) is not int
-        or runtime["epoch"] != ref.desktop_epoch
+        or (not for_display and runtime["epoch"] != ref.desktop_epoch)
         or runtime.get("owner") != {"namespace": namespace, "workflow_id": workflow_id}
-        or runtime.get("mode") not in ({"agent", "stopping"} if storing else {"agent"})
+        or (not for_display and runtime.get("mode") not in ({"agent", "stopping"} if storing else {"agent"}))
     ):
         raise StateConflict("Desktop observation is not owned by the current agent runtime")
     return runtime
@@ -169,7 +167,7 @@ def store_observation(
     return ref
 
 
-def resolve_observation(ref: ObservationRef, *, namespace: str, workflow_id: str) -> bytes:
+def resolve_observation(ref: ObservationRef, *, namespace: str, workflow_id: str, for_display: bool = False) -> bytes:
     """Read exact stored pixels only after scope, runtime and integrity checks."""
     ref = ObservationRef.model_validate(ref.model_dump())
     artifact = UUID(ref.artifact_id)
@@ -177,7 +175,7 @@ def resolve_observation(ref: ObservationRef, *, namespace: str, workflow_id: str
         raise ValueError("Observation artifact must be a canonical UUID4")
     _check_image_size(ref.width, ref.height)
     with _artifact_directory(namespace, workflow_id) as (root, directory):
-        runtime = _check_runtime(root, ref, namespace, workflow_id)
+        runtime = _check_runtime(root, ref, namespace, workflow_id, for_display=for_display)
         manifest = json.loads(_read_artifact(directory, f"{ref.artifact_id}.json", 16_384))
         if manifest != {
             "namespace": namespace, "workflow_id": workflow_id, "observation": ref.model_dump(mode="json"),
@@ -193,9 +191,22 @@ def resolve_observation(ref: ObservationRef, *, namespace: str, workflow_id: str
             image.verify()
         with Image.open(io.BytesIO(data)) as image:
             image.load()
-        if _check_runtime(root, ref, namespace, workflow_id) != runtime:
+        if _check_runtime(root, ref, namespace, workflow_id, for_display=for_display) != runtime:
             raise StateConflict("Desktop runtime changed while resolving observation")
         return data
+
+
+def observation_image(artifact_id: str, *, namespace: str, workflow_id: str) -> bytes:
+    """Display immutable evidence from this owner's history, not fresh model input."""
+    artifact = UUID(artifact_id)
+    if artifact.version != 4 or str(artifact) != artifact_id:
+        raise ValueError("Observation artifact must be a canonical UUID4")
+    with _artifact_directory(namespace, workflow_id) as (_, directory):
+        manifest = json.loads(_read_artifact(directory, f"{artifact_id}.json", 16_384))
+    ref = ObservationRef.model_validate(manifest["observation"])
+    if ref.artifact_id != artifact_id:
+        raise ValueError("Observation artifact does not match manifest")
+    return resolve_observation(ref, namespace=namespace, workflow_id=workflow_id, for_display=True)
 
 
 def latest_observation(messages: list[dict[str, Any]]) -> tuple[str, str, ObservationRef] | None:
@@ -206,22 +217,36 @@ def latest_observation(messages: list[dict[str, Any]]) -> tuple[str, str, Observ
     """
     from computer_use_activity import COMPUTER_USE_TOOL_NAMES
 
-    names: dict[str, str] = {}
-    latest: tuple[str, str, dict[str, Any]] | None = None
-    for message in messages:
-        for block in message.get("content") or []:
-            if not isinstance(block, dict):
+    def find_result(items, *, include_think):
+        names = {}
+        latest = None
+        for message in items:
+            if not isinstance(message, dict):
                 continue
-            tool = block.get("toolUse")
-            if message.get("role") == "assistant" and isinstance(tool, dict):
-                names[tool["toolUseId"]] = tool["name"]
-            result = block.get("toolResult")
-            if message.get("role") != "user" or not isinstance(result, dict):
-                continue
-            call_id = result.get("toolUseId")
-            name = names.get(call_id)
-            if name == "browser" or name in COMPUTER_USE_TOOL_NAMES:
-                latest = call_id, name, result
+            for block in message.get("content") or []:
+                if not isinstance(block, dict):
+                    continue
+                tool = block.get("toolUse")
+                if message.get("role") == "assistant" and isinstance(tool, dict):
+                    names[tool["toolUseId"]] = tool["name"]
+                result = block.get("toolResult")
+                if message.get("role") != "user" or not isinstance(result, dict):
+                    continue
+                call_id = result.get("toolUseId")
+                name = names.get(call_id)
+                if name == "browser" or name in COMPUTER_USE_TOOL_NAMES:
+                    latest = call_id, name, result
+                elif name == "think" and include_think:
+                    # Only our correlated Think tool's native structured evidence,
+                    # never JSON parsed from arbitrary page text/tool strings.
+                    for evidence in result.get("content") or []:
+                        data = evidence.get("json") if isinstance(evidence, dict) else None
+                        nested = data.get("messages") if isinstance(data, dict) else None
+                        if isinstance(nested, list):
+                            latest = find_result(nested, include_think=False) or latest
+        return latest
+
+    latest = find_result(messages, include_think=True)
     if latest is None:
         return None
     call_id, name, result = latest

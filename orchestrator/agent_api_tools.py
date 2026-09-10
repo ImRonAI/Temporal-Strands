@@ -9,13 +9,14 @@ API stays unchanged.
 
 Members built here, in order: the static ``NATIVE_TOOLS`` union members,
 one ``{"type": "mcp"}`` entry per configured remote server, then one
-``{"type": "connector"}`` entry per dashboard-authorized connector
+``{"type": "connector"}`` entry per configured connector
 (``config.CONNECTORS``, overridable via ``PERPLEXITY_CONNECTOR_IDS``).
 """
 
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 from config import CONNECTORS
@@ -27,7 +28,7 @@ from config import CONNECTORS
 #
 #   web_search      fetch_url       people_search
 #   finance_search  sandbox         mcp (one entry per server URL)
-#   connector       (one entry per dashboard-authorized connector)
+#   connector       (one entry per explicitly configured connector)
 #
 # With sandbox enabled the model loads the pplx_sdk skill and searches from
 # inside sandbox code, so results arrive as sandbox_results rather than
@@ -66,8 +67,8 @@ MCP_SERVERS: dict[str, dict[str, Any]] = {
     "pophive": {"url_env": "POPHIVE_MCP_URL"},
 }
 
-# Optional override for config.CONNECTORS: comma-separated label=id pairs,
-# e.g. "google_drive=connector_googledrive,github=connector_github".
+# Explicit API Group setup: comma-separated label=id pairs copied from the
+# portal after authorization, not evidence of a live connection by itself.
 CONNECTOR_IDS_ENV = "PERPLEXITY_CONNECTOR_IDS"
 
 
@@ -100,23 +101,43 @@ def mcp_tools() -> list[dict[str, Any]]:
 
 
 def connector_tools() -> list[dict[str, Any]]:
-    """A native {"type": "connector"} entry per dashboard-authorized connector.
+    """Configured native connectors; IDs do not prove API Group authorization.
 
-    Connectors are authorized in the Perplexity dashboard; the request only
-    references the connector id. ``PERPLEXITY_CONNECTOR_IDS`` (comma-separated
-    ``label=id`` pairs) replaces ``config.CONNECTORS`` entirely when set;
-    malformed pairs are skipped.
+    The public OpenAPI and installed SDK expose no connector list/status API.
+    Keep the configured connector capabilities intact; service IDs and factory
+    construction do not establish authorization for the API Group.
+    https://docs.perplexity.ai/docs/agent-api/tools/connectors
+
+    The existing override replaces the connector selection, retaining metadata
+    for matching configured labels. Invalid entries fail, never silently drop.
     """
     override = os.environ.get(CONNECTOR_IDS_ENV)
-    if override:
-        connectors: list[dict[str, str]] = []
-        for pair in override.split(","):
-            label, _, connector_id = pair.partition("=")
-            label, connector_id = label.strip(), connector_id.strip()
-            if label and connector_id:
-                connectors.append({"id": connector_id, "server_label": label})
-        return [{"type": "connector", **connector} for connector in connectors]
-    return [{"type": "connector", **connector} for connector in CONNECTORS]
+    if not override or not override.strip():
+        return [{"type": "connector", **connector} for connector in CONNECTORS]
+    defaults = {connector["server_label"]: connector for connector in CONNECTORS}
+    tools: list[dict[str, Any]] = []
+    labels_seen: set[str] = set()
+    for index, pair in enumerate(override.split(","), start=1):
+        label, _, connector_id = pair.partition("=")
+        label, connector_id = label.strip(), connector_id.strip()
+        if (
+            not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", label)
+            or not connector_id
+            or label in labels_seen
+        ):
+            raise ValueError(
+                f"Invalid {CONNECTOR_IDS_ENV} entry {index}: expected a unique "
+                "1-64 character alphanumeric/underscore/hyphen label and a "
+                "nonempty portal connector ID (label=id). No entries were skipped."
+            )
+        labels_seen.add(label)
+        tools.append({
+            "type": "connector",
+            **defaults.get(label, {}),
+            "id": connector_id,
+            "server_label": label,
+        })
+    return tools
 
 
 def native_tools() -> list[dict[str, Any]]:

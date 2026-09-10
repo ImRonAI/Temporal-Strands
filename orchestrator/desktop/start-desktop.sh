@@ -21,7 +21,16 @@ trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
-Xvfb "$DISPLAY" -screen 0 1440x900x24 -nolisten tcp &
+# Every X client shares a fresh private cookie; never put it in argv or logs.
+umask 077
+export DISPLAY="${DISPLAY:-:99}"
+export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
+: > "$XAUTHORITY"
+chmod 600 "$XAUTHORITY"
+python -c 'import os, secrets; print("add", os.environ["DISPLAY"], "MIT-MAGIC-COOKIE-1", secrets.token_hex(16))' \
+    | xauth -q -f "$XAUTHORITY" source -
+
+Xvfb "$DISPLAY" -auth "$XAUTHORITY" -screen 0 1440x900x24 -nolisten tcp &
 pids+=("$!")
 for ((attempt=0; attempt<30; attempt++)); do
     xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break
@@ -34,7 +43,7 @@ pids+=("$!")
 
 # Input starts fenced (view-only). The API grants/revokes through x11vnc's
 # native remote-control commands on handoff.
-x11vnc -display "$DISPLAY" -localhost -rfbport 5900 -forever -shared -viewonly -nopw -nosel -noclipboard -nosetclipboard -nosetprimary -noxrandr -clear_all &
+x11vnc -display "$DISPLAY" -auth "$XAUTHORITY" -localhost -rfbport 5900 -forever -shared -viewonly -nopw -nosel -noclipboard -nosetclipboard -nosetprimary -noxrandr -clear_all &
 pids+=("$!")
 
 websockify --web=/usr/share/novnc 6080 127.0.0.1:5900 &

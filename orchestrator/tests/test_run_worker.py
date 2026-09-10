@@ -11,14 +11,19 @@ import ast
 import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import run_worker
+with patch("dotenv.load_dotenv", return_value=False):
+    import run_worker
+
+import agent_api_tools
 from config import (
     BUILTIN_SKILLS,
+    CONNECTORS,
     DEFAULT_MODEL_ID,
     GEMINI_MODEL_IDS,
     PERPLEXITY_PRESETS,
@@ -56,6 +61,15 @@ def _patch_catalog(monkeypatch: pytest.MonkeyPatch, ids: list[str]) -> None:
         return sorted(set(ids))
 
     monkeypatch.setattr(run_worker, "fetch_model_ids", fake_fetch)
+
+
+@pytest.fixture
+def explicit_connectors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise explicit operator configuration, not inferred authorization."""
+    monkeypatch.setenv(
+        "PERPLEXITY_CONNECTOR_IDS",
+        "google_drive=connector_googledrive,github=connector_github",
+    )
 
 
 # --- provider-declaring catalog --------------------------------------------------
@@ -211,7 +225,7 @@ def test_mcp_tools_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 # --- connectors -----------------------------------------------------------------
 
 
-def test_native_tools_include_both_dashboard_connectors() -> None:
+def test_native_tools_preserve_explicit_connector_labels_and_descriptions(explicit_connectors) -> None:
     connectors = [
         tool for tool in run_worker.native_tools() if tool["type"] == "connector"
     ]
@@ -229,7 +243,7 @@ def test_connector_tools_env_override_replaces_config(
 ) -> None:
     monkeypatch.setenv(
         "PERPLEXITY_CONNECTOR_IDS",
-        "drive_alt=connector_drivealt, gh_alt=connector_ghalt,malformed",
+        "drive_alt=connector_drivealt, gh_alt=connector_ghalt",
     )
     connectors = run_worker.connector_tools()
     assert connectors == [
@@ -238,10 +252,111 @@ def test_connector_tools_env_override_replaces_config(
     ]
 
 
+@pytest.mark.parametrize("override", [None, "", "   "])
+def test_missing_connector_config_keeps_other_tools(monkeypatch, override, caplog) -> None:
+    if override is not None:
+        monkeypatch.setenv("PERPLEXITY_CONNECTOR_IDS", override)
+    monkeypatch.setenv("DATACOMMONS_MCP_URL", "https://dc.example/mcp")
+    monkeypatch.setenv("DC_API_KEY", "private-mcp-key")
+    monkeypatch.setenv("POPHIVE_MCP_URL", "https://pophive.example/mcp")
+    factories, _ = run_worker.build_perplexity_factories("private-api-key", CATALOG_IDS)
+    tools = run_worker.native_tools()
+    assert tools == [*run_worker.NATIVE_TOOLS, *run_worker.mcp_tools(), *run_worker.connector_tools()]
+    assert [tool["type"] for tool in tools] == [
+        "web_search", "fetch_url", "people_search", "finance_search", "sandbox", "mcp", "mcp", "connector", "connector", "connector",
+    ]
+    for factory in factories.values():
+        assert factory().get_config()["params"]["tools"] == tools
+    message = caplog.text
+    assert "authorization status unverified" in message
+    assert "google_drive" in message and "github" in message
+    assert "https://console.perplexity.ai/group/connectors" in message
+    assert "private-api-key" not in message and "private-mcp-key" not in message
+
+
+@pytest.mark.parametrize("override", [
+    "malformed",
+    "google_drive=connector_googledrive,malformed",
+    "google_drive=",
+    "=connector_googledrive",
+    "bad label=connector_googledrive",
+    f"{'x' * 65}=connector_googledrive",
+    "github=connector_github,github=another-id",
+    "github=connector_github,",
+])
+def test_invalid_connector_selection_never_silently_drops_entries(monkeypatch, override) -> None:
+    monkeypatch.setenv("PERPLEXITY_CONNECTOR_IDS", override)
+    with pytest.raises(ValueError, match="No entries were skipped") as caught:
+        run_worker.build_perplexity_factories("not-a-real-key", CATALOG_IDS)
+    assert override not in str(caught.value)
+    assert "not-a-real-key" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_startup_accepts_missing_connector_config(monkeypatch, caplog) -> None:
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "not-a-real-key")
+    monkeypatch.setenv("GOOGLE_API_KEY", "not-a-real-google-key")
+    _patch_catalog(monkeypatch, CATALOG_IDS)
+
+    factories, catalog, default = await run_worker.assemble_model_factories()
+    assert list(factories) == [*PRESET_IDS, *SORTED_CATALOG, *GEMINI_MODEL_IDS]
+    assert [entry.id for entry in catalog] == list(factories)
+    assert default == DEFAULT_MODEL_ID
+    assert "authorization status unverified" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_startup_rejects_malformed_explicit_connectors_before_catalog_io(monkeypatch) -> None:
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "not-a-real-key")
+    monkeypatch.setenv("GOOGLE_API_KEY", "not-a-real-google-key")
+    monkeypatch.setenv("PERPLEXITY_CONNECTOR_IDS", "google_drive=")
+
+    async def unexpected_fetch(api_key):
+        pytest.fail("Connector setup must be checked before catalog I/O")
+
+    monkeypatch.setattr(run_worker, "fetch_model_ids", unexpected_fetch)
+    with pytest.raises(SystemExit, match="Invalid PERPLEXITY_CONNECTOR_IDS"):
+        await run_worker.assemble_model_factories()
+
+
+def test_all_factories_share_explicit_tools_without_claiming_authorization(
+    monkeypatch, explicit_connectors, caplog,
+) -> None:
+    monkeypatch.setenv("DATACOMMONS_MCP_URL", "https://dc.example/mcp")
+    monkeypatch.setenv("DC_API_KEY", "private-mcp-key")
+    monkeypatch.setenv("POPHIVE_MCP_URL", "https://pophive.example/mcp")
+    tools = run_worker.native_tools()
+    factories, _ = run_worker.build_perplexity_factories("private-api-key", CATALOG_IDS)
+    # Factories capture startup configuration, not a per-inference fallback.
+    monkeypatch.delenv("PERPLEXITY_CONNECTOR_IDS")
+    for factory in factories.values():
+        assert factory().get_config()["params"]["tools"] == tools
+    assert [tool["type"] for tool in tools] == [
+        "web_search", "fetch_url", "people_search", "finance_search", "sandbox",
+        "mcp", "mcp", "connector", "connector",
+    ]
+    assert "authorization status unverified" in caplog.text
+    assert "google_drive" in caplog.text and "github" in caplog.text
+    assert "private-api-key" not in caplog.text and "private-mcp-key" not in caplog.text
+
+
+def test_explicit_selection_reports_omitted_labels(monkeypatch, caplog) -> None:
+    monkeypatch.setenv("PERPLEXITY_CONNECTOR_IDS", "github=opaque-portal-id")
+    factories, _ = run_worker.build_perplexity_factories("private-api-key", [])
+    connectors = [
+        tool for tool in factories["preset:high"]().get_config()["params"]["tools"]
+        if tool["type"] == "connector"
+    ]
+    assert connectors == [{"type": "connector", **CONNECTORS[1], "id": "opaque-portal-id"}]
+    assert "configuration missing" in caplog.text and "google_drive" in caplog.text
+    assert "opaque-portal-id" not in caplog.text
+    assert agent_api_tools.CONNECTORS == CONNECTORS
+
+
 @pytest.mark.parametrize(
     "model_id", ["preset:high", "anthropic/claude-opus-5"]
 )
-def test_model_params_tools_include_connectors(model_id: str) -> None:
+def test_model_params_tools_include_connectors(model_id: str, explicit_connectors) -> None:
     """Both preset and catalog params carry the connector entries."""
     tools = run_worker.native_tools()
     params = run_worker.model_params(model_id, tools)
@@ -357,8 +472,14 @@ def test_workflow_tool_specs_include_all_registered_tools() -> None:
         assert expected in names, f"missing {expected}"
 
 
-def test_validate_outbound_tools_accepts_current_registry() -> None:
+def test_validate_outbound_tools_accepts_current_registry(monkeypatch) -> None:
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "pplx-test")
     run_worker.validate_outbound_tools()  # must not raise
+
+
+def test_validate_outbound_tools_accepts_gemini_only_without_connectors(monkeypatch) -> None:
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-test")
+    run_worker.validate_outbound_tools()
 
 
 # --- installed strands_tools package (no symlink farm) --------------------------

@@ -1113,6 +1113,99 @@ describe("POST per-turn model switching", () => {
   })
 })
 
+describe("POST connector availability", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  async function postNative(payloads: Record<string, unknown>[]) {
+    const frames = [
+      ...payloads.map((perplexity) => ({ topic: "events", perplexity })),
+      { topic: "events", contentBlockDelta: { delta: { text: "Independent work continues." } } },
+      { done: true, reply: "Independent work continues." },
+    ]
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join(""),
+      { headers: { "Content-Type": "text/event-stream" } }
+    )))
+    const response = await POST(new Request("http://localhost/api/orchestrator", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "session-1",
+        messages: [{ id: "message-1", role: "user", parts: [{ type: "text", text: "Check project updates" }] }],
+      }),
+    }))
+    return (await response.text()).split("\n")
+      .filter((line) => line.startsWith("data: ") && !line.includes("[DONE]"))
+      .map((line): Record<string, unknown> => JSON.parse(line.slice(6)))
+  }
+
+  const catalog = {
+    type: "mcp_list_tools",
+    id: "catalog-1",
+    connector_id: "connector_github",
+    server_label: "github",
+    tools: [],
+  }
+  const completed = (item: Record<string, unknown>) => ({
+    type: "response.output_item.done", output_index: 0, sequence_number: 2, item,
+  })
+
+  it.each(["completed", "direct"])("preserves an empty %s connector catalog as native availability, not an action", async (shape) => {
+    const chunks = await postNative([shape === "completed" ? completed(catalog) : catalog])
+    expect(chunks.filter((chunk) => chunk.type === "data-native-tool")).toEqual([
+      { type: "data-native-tool", id: "mcp-catalog-1", data: catalog },
+    ])
+    expect(chunks.some((chunk) => String(chunk.type).startsWith("tool-"))).toBe(false)
+    expect(chunks.some((chunk) => chunk.type === "error")).toBe(false)
+    expect(chunks.findIndex((chunk) => chunk.type === "data-native-tool"))
+      .toBeLessThan(chunks.findIndex((chunk) => chunk.type === "text-delta"))
+  })
+
+  it("preserves a direct harness notice before independent work continues", async () => {
+    const notice = {
+      ...catalog,
+      id: "availability-connector_github",
+      error: "Connector unavailable for this request. Continue independent work; do not claim access to it.",
+    }
+    const chunks = await postNative([notice])
+    expect(chunks.filter((chunk) => chunk.type === "data-native-tool")).toEqual([
+      { type: "data-native-tool", id: "mcp-availability-connector_github", data: notice },
+    ])
+    expect(chunks.some((chunk) => String(chunk.type).startsWith("tool-"))).toBe(false)
+    expect(chunks.findIndex((chunk) => chunk.type === "data-native-tool"))
+      .toBeLessThan(chunks.findIndex((chunk) => chunk.type === "text-delta"))
+  })
+
+  it.each(["AUTH_REQUIRED", "CONNECTOR_UNAVAILABLE", "unexpected catalog error"])("preserves completed connector catalog error %s even with tools", async (error) => {
+    const item = { ...catalog, tools: [{ name: "search" }], error }
+    const chunks = await postNative([completed(item)])
+    expect(chunks.filter((chunk) => chunk.type === "data-native-tool")).toEqual([
+      { type: "data-native-tool", id: "mcp-catalog-1", data: item },
+    ])
+  })
+
+  it("suppresses healthy connector catalogs and remote MCP handshakes, including remote errors", async () => {
+    const items = [
+      { ...catalog, tools: [{ name: "search" }], error: null },
+      { ...catalog, connector_id: undefined },
+      { ...catalog, connector_id: null, tools: [{ name: "search" }] },
+      { ...catalog, connector_id: undefined, error: "AUTH_REQUIRED" },
+    ]
+    const chunks = await postNative(items.flatMap((item) => [item, completed(item)]))
+    expect(chunks.filter((chunk) => chunk.type === "data-native-tool")).toEqual([])
+  })
+
+  it("preserves unknown remote MCP calls and their errors unchanged", async () => {
+    const call = { type: "mcp_call", id: "remote-1", server_label: "custom-server", name: "custom_tool", arguments: "{}", error: "Unknown remote error" }
+    const chunks = await postNative([call])
+    expect(chunks.filter((chunk) => chunk.type === "data-native-tool")).toEqual([
+      { type: "data-native-tool", id: "mcp-remote-1", data: call },
+    ])
+  })
+})
+
 describe("POST Gemini Google Maps grounding", () => {
   afterEach(() => {
     vi.unstubAllGlobals()

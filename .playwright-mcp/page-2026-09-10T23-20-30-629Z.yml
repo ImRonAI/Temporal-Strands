@@ -1,0 +1,141 @@
+- generic [active] [ref=f1e1]:
+  - main [ref=f1e2]:
+    - generic [ref=f1e3]:
+      - generic [ref=f1e4]: v0 / studio
+      - navigation [ref=f1e9]:
+        - button "Community" [ref=f1e10]
+        - button "Pricing" [ref=f1e11]
+        - button "Enterprise" [ref=f1e12]
+        - button "Docs" [ref=f1e13]
+      - generic [ref=f1e14]:
+        - button "Compare models" [ref=f1e15] [cursor=pointer]
+        - button "Sign in" [ref=f1e16]
+        - button "Start building" [ref=f1e17]
+    - generic [ref=f1e19]:
+      - generic [ref=f1e21]:
+        - log [ref=f1e22]:
+          - generic [ref=f1e24]:
+            - paragraph [ref=f1e29]: "UI renderer verification fixture: returned Think failure, shell output, file content, structured result and desktop action."
+            - generic [ref=f1e33]:
+              - button "Chain of Thought" [expanded] [ref=f1e35]
+              - generic [ref=f1e48]:
+                - generic [ref=f1e60]:
+                  - generic [ref=f1e61]: Thinking
+                  - paragraph [ref=f1e63]: This is a renderer fixture, not an agent execution. Each result below uses the matching native presentation.
+                - alert [ref=f1e64]:
+                  - generic [ref=f1e75]:
+                    - generic [ref=f1e76]: Thinking failed
+                    - paragraph [ref=f1e78]: "Astra request failed: provider unavailable. This returned error must remain visible."
+                - generic [ref=f1e84]:
+                  - generic [ref=f1e85]: shell
+                  - generic [ref=f1e86]:
+                    - generic [ref=f1e87]:
+                      - generic [ref=f1e88]: shell
+                      - generic [ref=f1e91]:
+                        - status [ref=f1e92]: Completed
+                        - button "Copy terminal output" [ref=f1e93]
+                    - code [ref=f1e96]: "Checking local fixture... All renderer assertions passed. Exit code: 0"
+                    - button [ref=f1e98]:
+                      - paragraph [ref=f1e103] [cursor=pointer]: Input and raw result
+                - generic [ref=f1e111]:
+                  - generic [ref=f1e112]: file_read
+                  - generic [ref=f1e113]:
+                    - generic [ref=f1e114]:
+                      - paragraph [ref=f1e115]: File content
+                      - status [ref=f1e116]: Completed
+                    - generic [ref=f1e118]:
+                      - generic [ref=f1e119]:
+                        - generic [ref=f1e120]: src/fixture.ts
+                        - button "Copy src/fixture.ts" [ref=f1e122]
+                      - code [ref=f1e125]:
+                        - generic [ref=f1e126]: export const verification = "native components";
+                    - button [ref=f1e129]:
+                      - paragraph [ref=f1e134] [cursor=pointer]: Input and raw result
+                - generic [ref=f1e142]:
+                  - generic [ref=f1e143]: catalog_lookup
+                  - generic [ref=f1e147]:
+                    - generic [ref=f1e148]:
+                      - generic [ref=f1e149]:
+                        - paragraph [ref=f1e150]: Tool result
+                        - paragraph [ref=f1e151]: catalog_lookup
+                      - status [ref=f1e152]: Completed
+                    - generic [ref=f1e153]:
+                      - generic [ref=f1e154]:
+                        - generic [ref=f1e155]:
+                          - generic [ref=f1e156]: Result
+                          - button "Copy result" [ref=f1e158]
+                        - code [ref=f1e161]:
+                          - generic [ref=f1e162]: "{"
+                          - generic [ref=f1e163]: "\"name\": \"Native UI verification\","
+                          - generic [ref=f1e164]: "\"capabilities\": ["
+                          - generic [ref=f1e165]: "\"Typed props\","
+                          - generic [ref=f1e166]: "\"Keyboard accessible\","
+                          - generic [ref=f1e167]: "\"Copy original result\""
+                          - generic [ref=f1e168]: "],"
+                          - generic [ref=f1e169]: "\"status\": \"ready\","
+                          - generic [ref=f1e170]: "\"count\": 3"
+                          - generic [ref=f1e171]: "}"
+                      - button [ref=f1e173]:
+                        - paragraph [ref=f1e178] [cursor=pointer]: Input and raw result
+                - generic [ref=f1e186]:
+                  - generic [ref=f1e187]: custom_renderer
+                  - generic [ref=f1e191]:
+                    - generic [ref=f1e192]:
+                      - generic [ref=f1e193]:
+                        - paragraph [ref=f1e194]: Tool result
+                        - paragraph [ref=f1e195]: custom_renderer
+                      - status [ref=f1e196]: Completed
+                    - generic [ref=f1e197]:
+                      - generic [ref=f1e198]: "<button onClick={() => alert(\"should never run\")}>Untrusted JSX remains text</button>"
+                      - button [ref=f1e200]:
+                        - paragraph [ref=f1e205] [cursor=pointer]: Input and raw result
+                - generic [ref=f1e208]:
+                  - button [expanded] [ref=f1e209]:
+                    - paragraph [ref=f1e214] [cursor=pointer]: Computer use · 1/1 actions finished
+                  - generic [ref=f1e219]:
+                    - button "Browser activity" [expanded] [ref=f1e221]
+                    - generic [ref=f1e241]:
+                      - generic [ref=f1e242]: click
+                      - generic [ref=f1e243]: Completed
+                      - paragraph [ref=f1e245]: Clicked at (120, 80). Renderer fixture only.
+                      - button [ref=f1e247]:
+                        - paragraph [ref=f1e252] [cursor=pointer]: Action details
+        - generic [ref=f1e255]:
+          - button "Open IDE" [ref=f1e256]
+          - group [ref=f1e259]:
+            - group [ref=f1e260]
+            - textbox "Ask for a change, or start something new…" [ref=f1e262]
+            - group [ref=f1e263]:
+              - generic [ref=f1e264]:
+                - button [ref=f1e265]
+                - button "High (preset)" [ref=f1e266]
+                - button "Web preview" [pressed] [ref=f1e270]
+              - button "Submit" [disabled]
+      - generic [ref=f1e274]:
+        - generic [ref=f1e275]:
+          - generic [ref=f1e276]:
+            - paragraph [ref=f1e281]: Linux desktop
+            - generic [ref=f1e282]: Recovery required
+          - generic [ref=f1e283]:
+            - button "Take control" [disabled]
+            - button "Close browser preview" [disabled]:
+              - generic [aria-hidden]: Close
+              - generic: Close
+        - generic [ref=f1e285]:
+          - generic [ref=f1e286]:
+            - button "Reconnect viewer" [disabled]
+            - textbox "Enter URL..."
+            - button "Fullscreen" [ref=f1e287]
+          - iframe [ref=f1e289]:
+            - generic [ref=f2e1]:
+              - generic [ref=f2e3]:
+                - heading "no VNC" [level=1] [ref=f2e4]: noVNC
+                - button "Settings" [ref=f2e5] [cursor=pointer]
+                - generic:
+                  - option "None" [selected]
+                  - option "Local Scaling"
+                  - option "Remote Resizing"
+              - textbox [ref=f2e9]
+          - paragraph [ref=f1e290]: Desktop viewer via noVNC. Input disabled until desktop control is verified.
+  - button "Open Next.js Dev Tools" [ref=f1e296] [cursor=pointer]
+  - alert [ref=f1e300]

@@ -352,6 +352,8 @@ class GeminiModel(_GeminiModel):
         # often usage-only), and we append it as trailing {"gemini": …} frames.
         # https://ai.google.dev/gemini-api/docs/generate-content/maps-grounding
         self._reasoning_effort = (kwargs.get("invocation_state") or {}).get("reasoning_effort")
+        if (kwargs.get("invocation_state") or {}).get("require_think"):
+            tool_choice = {"tool": {"name": "think"}}
         self._grounding = {}
         try:
             async for chunk in super().stream(

@@ -144,6 +144,14 @@ _NON_RETRYABLE_FAILURE_MARKERS = (
     "unsupported",
     "not_found",
 )
+# Only recognizable access failures are extracted from free-text connector errors.
+_CONNECTOR_ACCESS_ERROR_RE = re.compile(
+    r"\b(?:AUTH[ _]REQUIRED|AUTHENTICATION[ _]REQUIRED|AUTHORIZATION[ _]REQUIRED|"
+    r"UNAUTHENTICATED|UNAUTHORIZED|PERMISSION[ _]DENIED|ACCESS[ _]DENIED|FORBIDDEN|"
+    r"CONNECTOR[ _]DISCONNECTED|CONNECTOR[ _]NOT[ _]CONNECTED|INVALID[ _]GRANT|"
+    r"TOKEN[ _]EXPIRED|TOKEN[ _]REVOKED|CREDENTIALS[ _]EXPIRED)\b",
+    re.IGNORECASE,
+)
 
 # --- worker client wiring ----------------------------------------------------
 
@@ -184,17 +192,47 @@ def _invalid(message: str) -> ApplicationError:
 
 
 def _raise_sdk_error(error: Exception) -> None:
-    raise _operation_error(
-        str(error), non_retryable=isinstance(error, _NON_RETRYABLE_SDK_ERRORS)
-    ) from error
+    body = getattr(error, "body", None)
+    if isinstance(body, Mapping):
+        detail = body.get("error", body)
+        if isinstance(detail, Mapping):
+            body = {**body, **detail}
+        elif isinstance(detail, str):
+            body = {**body, "message": detail}
+    if not isinstance(body, Mapping):
+        body = {"message": body or str(error)}
+    try:
+        _raise_failed(
+            {**body, "message": body.get("message") or str(error)},
+            non_retryable=isinstance(error, _NON_RETRYABLE_SDK_ERRORS),
+        )
+    except ApplicationError as failure:
+        raise failure from error
 
 
-def _raise_failed(error: Any) -> None:
-    code = str(
-        getattr(error, "code", None) or getattr(error, "type", None) or ""
-    ).lower()
-    non_retryable = any(marker in code for marker in _NON_RETRYABLE_FAILURE_MARKERS)
-    message = str(getattr(error, "message", None) or "Perplexity response failed")
+def _raise_failed(error: Any, *, non_retryable: bool = False) -> None:
+    data = _to_data(error)
+    if not isinstance(data, Mapping):
+        data = {"message": data if isinstance(data, str) else None}
+    code = f"{data.get('code') or ''} {data.get('type') or ''}".lower()
+    message = str(data.get("message") or "Perplexity response failed")
+    identity = ", ".join(
+        f"{key}={data[key]}"
+        for key in ("connector_id", "server_label")
+        if data.get(key)
+    )
+    connector_disconnected = (
+        bool(identity) or "connector" in message.lower()
+    ) and any(term in message.lower() for term in ("disconnected", "not connected"))
+    non_retryable = (
+        non_retryable
+        or any(marker in code for marker in _NON_RETRYABLE_FAILURE_MARKERS)
+        or bool(_CONNECTOR_ACCESS_ERROR_RE.search(code))
+        or bool(_CONNECTOR_ACCESS_ERROR_RE.search(message))
+        or connector_disconnected
+    )
+    if identity:
+        message = f"{message} ({identity})"
     raise _operation_error(message, non_retryable=non_retryable)
 
 
@@ -640,6 +678,12 @@ async def _run_create(
     last_sequence: Any = None
     terminal: Any = None
     failure: Any = None
+    connectors = {
+        tool["server_label"]: tool["id"]
+        for tool in request.get("tools", [])
+        if tool.get("type") == "connector"
+    }
+    logged_connector_diagnostics: set[tuple[str, str]] = set()
 
     # Pulse only if a heartbeat timeout is configured. With Temporal's default
     # (no heartbeat timeout) a silent stream is not killed for missing beats.
@@ -656,12 +700,7 @@ async def _run_create(
         pulse = asyncio.ensure_future(_pulse())
     try:
         async with stream_client:
-            try:
-                events = await client.responses.create(**request)
-            except ApplicationError:
-                raise
-            except perplexity.APIError as error:
-                _raise_sdk_error(error)
+            events = await client.responses.create(**request)
             async for event in events:
                 response = getattr(event, "response", None)
                 event_response_id = getattr(response, "id", None)
@@ -669,6 +708,7 @@ async def _run_create(
                     response_id = event_response_id
                 sequence_number = getattr(event, "sequence_number", None)
                 last_sequence = sequence_number
+                event_data = _to_data(event)
                 topic.publish(
                     {
                         "activity": activity_name,
@@ -677,14 +717,63 @@ async def _run_create(
                         "attempt": info.attempt,
                         "sequence_number": sequence_number,
                         "response_id": response_id,
-                        "event": _to_data(event),
+                        "event": event_data,
                     }
                 )
                 event_type = getattr(event, "type", None)
                 if event_type == "response.completed":
                     terminal = response
                 elif event_type == "response.failed":
-                    failure = getattr(event, "error", None)
+                    failure = (
+                        getattr(response, "error", None)
+                        or getattr(event, "error", None)
+                        or {}
+                    )
+                # MCP failures are already visible to the model in-band. Log
+                # metadata only; neither these nor an empty catalog fail a run.
+                items = []
+                if event_type in (
+                    "response.output_item.added", "response.output_item.done"
+                ):
+                    items = [event_data.get("item")]
+                elif event_type == "response.completed":
+                    items = (event_data.get("response") or {}).get("output") or []
+                for item in items:
+                    if not isinstance(item, Mapping):
+                        continue
+                    label = item.get("server_label")
+                    if not isinstance(label, str) or label not in connectors:
+                        continue
+                    item_type = item.get("type")
+                    if item_type not in ("mcp_call", "mcp_list_tools"):
+                        continue
+                    item_error = item.get("error")
+                    diagnostic_code = None
+                    if item_error:
+                        match = _CONNECTOR_ACCESS_ERROR_RE.search(str(item_error))
+                        diagnostic_code = (
+                            match.group().upper().replace(" ", "_")
+                            if match else f"{item_type.upper()}_ERROR"
+                        )
+                    elif (
+                        item_type == "mcp_list_tools"
+                        and item.get("tools") == []
+                        and event_type != "response.output_item.added"
+                    ):
+                        diagnostic_code = "EMPTY_TOOL_CATALOG"
+                    if (
+                        diagnostic_code
+                        and (label, diagnostic_code) not in logged_connector_diagnostics
+                    ):
+                        logged_connector_diagnostics.add((label, diagnostic_code))
+                        activity.logger.warning(
+                            "Perplexity connector id=%s label=%s code=%s",
+                            re.sub(r"[^A-Za-z0-9_-]", "?", connectors[label][:128]),
+                            label[:64],
+                            diagnostic_code,
+                        )
+    except perplexity.APIError as error:
+        _raise_sdk_error(error)
     finally:
         if pulse is not None:
             pulse.cancel()

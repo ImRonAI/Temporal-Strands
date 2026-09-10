@@ -15,6 +15,7 @@ fair-expanse-493212-h8-138622c839d2.json
 # Common ignores
 node_modules
 .next/
+.next-desktop-acceptance/
 .DS_Store
 .worktrees/
 # Graph tool durable state (SQLite store + session dirs)

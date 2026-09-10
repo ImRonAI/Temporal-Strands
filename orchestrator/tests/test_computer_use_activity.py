@@ -1,7 +1,7 @@
 """Physical desktop action contracts, with no host input or browser execution."""
 
 import sys
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -23,12 +23,12 @@ def desktop(monkeypatch, tmp_path):
     browser.initialize_desktop()
     # Import substitutes are installed before the activity's lazy imports. Even
     # importing the real PyAutoGUI module could connect to the host display.
-    gui = MagicMock()
+    gui = MagicMock(spec=["size", "click", "moveTo", "mouseDown", "mouseUp", "write",
+                          "dragTo", "press", "keyDown", "keyUp", "hotkey", "scroll", "hscroll"])
     gui.size.return_value = (1440, 900)
     monkeypatch.setitem(sys.modules, "pyautogui", gui)
-    cursor_module = ModuleType("strands_tools.cursor")
-    cursor_module.cursor = MagicMock(return_value={"status": "success", "content": []})
-    monkeypatch.setitem(sys.modules, "strands_tools.cursor", cursor_module)
+    # The container's PyPI distribution does not ship this host-fork module.
+    monkeypatch.setitem(sys.modules, "strands_tools.cursor", None)
     stock = MagicMock()
     stock.browser.return_value = {"status": "success", "content": []}
     monkeypatch.setattr(cua, "_browser", stock)
@@ -37,7 +37,7 @@ def desktop(monkeypatch, tmp_path):
     monkeypatch.setattr(cua, "capture_desktop", capture)
     sleep = MagicMock()
     monkeypatch.setattr(cua.time, "sleep", sleep)
-    return SimpleNamespace(gui=gui, cursor=cursor_module.cursor, browser=stock,
+    return SimpleNamespace(gui=gui, browser=stock,
                            capture=capture, observation=observation, sleep=sleep)
 
 
@@ -80,10 +80,10 @@ def test_shipped_names_and_legacy_aliases_remain_native_activities():
     ("click", "left", 1), ("click_at", "left", 1), ("double_click", "left", 2),
     ("triple_click", "left", 3), ("middle_click", "middle", 1), ("right_click", "right", 1),
 ])
-def test_click_uses_stock_cursor_and_full_display_coordinates(desktop, action, button, clicks):
+def test_click_uses_pyautogui_and_full_display_coordinates(desktop, action, button, clicks):
     result = cua.execute_computer_use(action, {"x": 500, "y": 999, "intent": "Open editor"})
 
-    desktop.cursor.assert_called_once_with(action="click", x=720, y=899, button=button, clicks=clicks)
+    desktop.gui.click.assert_called_once_with(720, 899, button=button, clicks=clicks, interval=0.0)
     desktop.browser.browser.assert_not_called()
     with browser.desktop_state() as state:
         desktop.capture.assert_called_once_with(state["epoch"])
@@ -92,9 +92,9 @@ def test_click_uses_stock_cursor_and_full_display_coordinates(desktop, action, b
 
 
 @pytest.mark.parametrize("action", ["move", "hover_at"])
-def test_move_uses_stock_cursor(desktop, action):
+def test_move_uses_pyautogui(desktop, action):
     cua.execute_computer_use(action, {"x": 0, "y": 500})
-    desktop.cursor.assert_called_once_with(action="move", x=0, y=450)
+    desktop.gui.moveTo.assert_called_once_with(0, 450)
 
 
 @pytest.mark.parametrize("action,method", [("mouse_down", "mouseDown"), ("mouse_up", "mouseUp")])
@@ -102,21 +102,19 @@ def test_held_mouse_input_is_physical(desktop, action, method):
     cua.execute_computer_use(action, {"x": 250, "y": 500})
     desktop.gui.moveTo.assert_called_once_with(360, 450)
     getattr(desktop.gui, method).assert_called_once_with()
-    desktop.cursor.assert_not_called()
 
 
 @pytest.mark.parametrize("action", ["type", "type_text_at"])
 def test_type_focuses_and_replaces_with_linux_shortcut(desktop, action):
     cua.execute_computer_use(action, {"x": 500, "y": 250, "text": "search", "press_enter": True})
     assert desktop.gui.method_calls == [call.size(), call.click(720, 225),
-                                       call.hotkey("ctrl", "a"), call.press("enter")]
-    desktop.cursor.assert_called_once_with(action="type_text", text="search")
+                                       call.hotkey("ctrl", "a"), call.write("search", interval=0.0),
+                                       call.press("enter")]
 
 
 def test_type_without_coordinates_preserves_focused_desktop_application(desktop):
     cua.execute_computer_use("type", {"text": "note", "press_enter": False})
-    desktop.cursor.assert_called_once_with(action="type_text", text="note")
-    assert desktop.gui.method_calls == [call.size()]
+    assert desktop.gui.method_calls == [call.size(), call.write("note", interval=0.0)]
     desktop.browser.browser.assert_not_called()
 
 
@@ -125,9 +123,9 @@ def test_type_without_coordinates_preserves_focused_desktop_application(desktop)
     {"x": 100, "y": 200, "destination_x": 500, "destination_y": 999},
 ])
 def test_drag_accepts_shipped_coordinate_names(desktop, args):
-    cua.execute_computer_use("drag_and_drop", args)
+    cua.execute_computer_use("drag_and_drop", {**args, "duration": 100})
     desktop.gui.moveTo.assert_called_once_with(144, 180)
-    desktop.cursor.assert_called_once_with(action="drag", to_x=720, to_y=899)
+    desktop.gui.dragTo.assert_called_once_with(720, 899, duration=0.5, button="left")
 
 
 @pytest.mark.parametrize("key,expected", [("Escape", "esc"), ("Control", "ctrl"), ("Meta", "win")])
@@ -135,7 +133,7 @@ def test_drag_accepts_shipped_coordinate_names(desktop, args):
 def test_keyboard_names_map_to_linux_keys(desktop, action, key, expected):
     cua.execute_computer_use(action, {"key": key})
     if action == "press_key":
-        desktop.cursor.assert_called_once_with(action="press_key", key=expected)
+        desktop.gui.press.assert_called_once_with(expected)
     else:
         getattr(desktop.gui, "keyDown" if action == "key_down" else "keyUp").assert_called_once_with(expected)
 
@@ -147,7 +145,7 @@ def test_keyboard_names_map_to_linux_keys(desktop, action, key, expected):
 ])
 def test_hotkey_preserves_list_and_legacy_string_inputs(desktop, action, args):
     cua.execute_computer_use(action, args)
-    desktop.cursor.assert_called_once_with(action="hotkey", keys=["ctrl", "l"])
+    desktop.gui.hotkey.assert_called_once_with("ctrl", "l")
 
 
 @pytest.mark.parametrize("direction,expected", [("up", 3), ("down", -3), ("left", -3), ("right", 3)])
@@ -156,15 +154,16 @@ def test_scroll_dispatches_physical_vertical_and_horizontal_input(desktop, direc
     desktop.gui.moveTo.assert_called_once_with(720, 450)
     if direction in {"left", "right"}:
         desktop.gui.hscroll.assert_called_once_with(expected)
-        desktop.cursor.assert_not_called()
+        desktop.gui.scroll.assert_not_called()
     else:
-        desktop.cursor.assert_called_once_with(action="scroll", amount=expected)
+        desktop.gui.scroll.assert_called_once_with(expected)
+        desktop.gui.hscroll.assert_not_called()
 
 
 @pytest.mark.parametrize("magnitude,expected", [(0, -1), (100_000, -30)])
 def test_scroll_magnitude_is_bounded(desktop, magnitude, expected):
     cua.execute_computer_use("scroll_document", {"magnitude": magnitude})
-    desktop.cursor.assert_called_once_with(action="scroll", amount=expected)
+    desktop.gui.scroll.assert_called_once_with(expected)
 
 
 @pytest.mark.parametrize("action,args,seconds", [
@@ -179,7 +178,6 @@ def test_wait_is_bounded_and_observes_after_waiting(desktop, action, args, secon
 
 def test_screenshot_returns_observation_without_host_browser_or_input(desktop):
     result = cua.execute_computer_use("take_screenshot", {"intent": "See the editor"})
-    desktop.cursor.assert_not_called()
     desktop.browser.browser.assert_not_called()
     assert desktop.gui.method_calls == [call.size()]
     assert result["observation"] == desktop.observation
@@ -198,7 +196,7 @@ def test_navigation_reuses_the_shared_browser_session(desktop, action, expected)
     assert request.action.type == expected
     assert request.action.session_name == "shared-browser-session"
     desktop.browser.browser.assert_called_once()
-    desktop.cursor.assert_not_called()
+    assert desktop.gui.method_calls == [call.size()]
 
 
 def test_navigation_initializes_stock_session_only_once(desktop):
@@ -213,24 +211,28 @@ def test_navigation_initializes_stock_session_only_once(desktop):
 @pytest.mark.parametrize("action,args,match", [
     ("click", {"x": 1000, "y": 0}, "coordinates"),
     ("type", {"text": "x" * 10_001}, "10000"),
+    ("hotkey", {"keys": []}, "at least one key"),
     ("unsupported", {}, "Unsupported desktop action"),
 ])
 def test_invalid_input_never_reaches_physical_input(desktop, action, args, match):
     with pytest.raises(ValueError, match=match):
         cua.execute_computer_use(action, args)
-    desktop.cursor.assert_not_called()
     desktop.browser.browser.assert_not_called()
     desktop.capture.assert_not_called()
     assert desktop.gui.method_calls == [call.size()]
 
 
-@pytest.mark.parametrize("action,backend", [("click", "cursor"), ("navigate", "browser")])
-def test_stock_tool_errors_are_non_retryable_and_fence_following_actions(desktop, action, backend):
-    target = desktop.cursor if backend == "cursor" else desktop.browser.browser
-    target.return_value = {"status": "error", "content": [{"text": "uncertain native input"}]}
-    with pytest.raises(ApplicationError, match="uncertain native input") as error:
+@pytest.mark.parametrize("action", ["click", "navigate"])
+def test_native_input_and_browser_errors_fence_following_actions(desktop, action):
+    target = desktop.gui.click if action == "click" else desktop.browser.browser
+    if action == "click":
+        target.side_effect = RuntimeError("uncertain native input")
+    else:
+        target.return_value = {"status": "error", "content": [{"text": "uncertain native input"}]}
+    with pytest.raises(RuntimeError if action == "click" else ApplicationError, match="uncertain native input") as error:
         cua.execute_computer_use(action, {})
-    assert error.value.non_retryable
+    if action == "navigate":
+        assert error.value.non_retryable
     desktop.capture.assert_not_called()
     with browser.desktop_state() as state:
         assert state["mode"] == "recovery"

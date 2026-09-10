@@ -1,0 +1,33 @@
+[     152ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[     199ms] [LOG] [HMR] connected @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[    8476ms] [ERROR] Failed to load resource: the server responded with a status of 502 (Bad Gateway) @ http://127.0.0.1:3002/api/models:0
+[   35590ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   35605ms] [LOG] [HMR] connected @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   48371ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   48550ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ http://localhost:6080/vnc.html?autoconnect=true&resize=scale&reconnect=true&view_only=true:0
+[   48563ms] [ERROR] Failed to load resource: the server responded with a status of 404 (File not found) @ http://localhost:6080/package.json:0
+[   48564ms] [ERROR] Couldn't fetch package.json: Error: 404 File not found @ http://localhost:6080/app/ui.js:74
+[   49173ms] [LOG] [Fast Refresh] done in 914ms @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   51885ms] [WARNING] The resource http://localhost:6080/app/images/warning.svg was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally. @ http://localhost:6080/vnc.html?autoconnect=true&resize=scale&reconnect=true&view_only=true:0
+[   51885ms] [WARNING] The resource http://localhost:6080/app/images/error.svg was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally. @ http://localhost:6080/vnc.html?autoconnect=true&resize=scale&reconnect=true&view_only=true:0
+[  103870ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  104465ms] [LOG] [Fast Refresh] done in 669ms @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  111463ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  111804ms] [LOG] [Fast Refresh] done in 448ms @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  134335ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  135058ms] [LOG] [Fast Refresh] done in 839ms @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  179071ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  179549ms] [LOG] [Fast Refresh] done in 584ms @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  194605ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  194651ms] [LOG] [Fast Refresh] done in 147ms @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  195636ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  195678ms] [LOG] [HMR] connected @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  201677ms] [ERROR] Failed to load resource: the server responded with a status of 502 (Bad Gateway) @ http://127.0.0.1:3002/api/models:0
+[  235500ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  235844ms] [LOG] [Fast Refresh] done in 448ms @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  238254ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  238692ms] [LOG] [Fast Refresh] done in 514ms @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  284788ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  285195ms] [LOG] [Fast Refresh] done in 508ms @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  292435ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  292742ms] [LOG] [Fast Refresh] done in 407ms @ http://127.0.0.1:3002/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489

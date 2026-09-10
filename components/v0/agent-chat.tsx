@@ -420,6 +420,7 @@ export function AgentChat({
                         {message.role === "assistant" && (
                           <AgentActivity
                             parts={message.parts}
+                            sessionId={sessionId}
                             isThinking={
                               (status === "streaming" || status === "submitted") &&
                               messageIndex === messages.length - 1
@@ -486,7 +487,7 @@ export function AgentChat({
                   <MessageShell key="awaiting-assistant" reduce={reduce}>
                     <Message from="assistant">
                       <MessageContent>
-                        <AgentActivity parts={[]} isThinking />
+                        <AgentActivity parts={[]} isThinking sessionId={sessionId} />
                       </MessageContent>
                     </Message>
                   </MessageShell>
@@ -605,6 +606,7 @@ export function AgentChat({
                 >
                   <ComputerUsePreviewPanel
                     preview={browserPreview}
+                    sessionId={sessionId}
                     isStreaming={status === "streaming"}
                     status={status}
                     pendingApproval={pendingApproval}

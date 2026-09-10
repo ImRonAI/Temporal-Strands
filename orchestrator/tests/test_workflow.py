@@ -17,6 +17,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import copy
+import os
+import platform
 import time
 import unittest.mock
 from collections import deque
@@ -37,6 +40,7 @@ from temporalio.exceptions import ApplicationError
 from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
+from config import DESKTOP_BROWSER_TASK_QUEUE, THINK_MODEL_ID
 
 import think_activity
 from load_tool import mcp_client_activity, run_loaded_tool
@@ -48,7 +52,22 @@ TASK_QUEUE = "test-chat-workflow"
 
 @activity.defn(name="list_agent_models")
 async def stub_list_agent_models() -> dict[str, Any]:
+    CATALOG_CALLS.append(activity.info().workflow_id)
     return {"object": "list", "data": []}
+
+
+@activity.defn(name="take_screenshot")
+async def stub_desktop_screenshot(*arguments) -> dict:
+    return {"status": "success", "content": [{"text": "Fresh screenshot from test desktop worker"}]}
+
+
+DESKTOP_RELEASES: list[tuple[str, str, str]] = []
+
+
+@activity.defn(name="release_desktop")
+async def stub_release_desktop() -> None:
+    info = activity.info()
+    DESKTOP_RELEASES.append((info.workflow_id, info.workflow_run_id, info.task_queue))
 
 
 GRAPH_FAILURE = "topology with a non-empty 'nodes' list is required for create action"
@@ -69,6 +88,10 @@ async def stub_failing_graph(
 # under the workflow lock, so call order is deterministic within a test.
 SCRIPTS: deque[list[dict[str, Any]]] = deque()
 REASONING_STATES: list[dict[str, Any]] = []
+THINK_REQUESTS: deque[dict[str, Any]] = deque()
+THINK_SCRIPTS: deque[list[dict[str, Any]]] = deque()
+THINK_CALLS: list[dict[str, Any]] = []
+CATALOG_CALLS: list[str] = []
 
 
 class Tracker:
@@ -101,6 +124,16 @@ def text_events(reply: str) -> list[dict[str, Any]]:
     ]
 
 
+def tool_call_events(name: str, tool_id: str, arguments: dict) -> list[dict[str, Any]]:
+    return [
+        {"messageStart": {"role": "assistant"}},
+        {"contentBlockStart": {"start": {"toolUse": {"toolUseId": tool_id, "name": name}}}},
+        {"contentBlockDelta": {"delta": {"toolUse": {"input": json.dumps(arguments)}}}},
+        {"contentBlockStop": {}}, {"messageStop": {"stopReason": "tool_use"}},
+        {"metadata": {"usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2}, "metrics": {"latencyMs": 1}}},
+    ]
+
+
 class ScriptedModel(Model):
     """Pops the next scripted event list per stream() call."""
 
@@ -119,6 +152,13 @@ class ScriptedModel(Model):
     async def stream(
         self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
+        if (kwargs.get("invocation_state") or {}).get("require_think"):
+            arguments = THINK_REQUESTS.popleft() if THINK_REQUESTS else {
+                "thought": "Analyze the user request", "cycle_count": 1, "reasoning_effort": "minimal",
+            }
+            for event in tool_call_events("think", "initial-think", arguments):
+                yield event
+            return
         TRACKER.active += 1
         REASONING_STATES.append(dict(kwargs.get("invocation_state") or {}))
         TRACKER.max_active = max(TRACKER.max_active, TRACKER.active)
@@ -147,6 +187,12 @@ class AltScriptedModel(ScriptedModel):
     async def stream(
         self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
+        if (kwargs.get("invocation_state") or {}).get("require_think"):
+            for event in tool_call_events("think", "alt-initial-think", {
+                "thought": "Analyze the user request", "cycle_count": 0, "reasoning_effort": "minimal",
+            }):
+                yield event
+            return
         if not ALT_SCRIPTS:
             raise ApplicationError(
                 "alt test script exhausted: a model call arrived with no scripted reply",
@@ -192,7 +238,9 @@ class ThinkModel(Model):
     async def stream(
         self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
-        for event in text_events(THINK_NOTES):
+        THINK_CALLS.append({"messages": copy.deepcopy(messages), "tools": copy.deepcopy(tool_specs),
+                            "invocation_state": dict(kwargs.get("invocation_state") or {})})
+        for event in THINK_SCRIPTS.popleft() if THINK_SCRIPTS else text_events(THINK_NOTES):
             yield event
 
 
@@ -202,6 +250,7 @@ async def client() -> AsyncGenerator[Client, None]:
         "fake/text": lambda: ScriptedModel(),
         "fake/alt": lambda: AltScriptedModel(),
         "fake/broken": lambda: BrokenModel(),
+        THINK_MODEL_ID: lambda: ThinkModel(),
     }
     env = await WorkflowEnvironment.start_local(
         plugins=[
@@ -228,12 +277,15 @@ async def client() -> AsyncGenerator[Client, None]:
                 think_activity.think,
                 stub_list_agent_models,
                 stub_failing_graph,
-                browser_activity,
             ],
             workflow_runner=UnsandboxedWorkflowRunner(),
             activity_executor=ThreadPoolExecutor(max_workers=1),
         )
-        async with worker:
+        async with worker, Worker(
+            env.client, task_queue=DESKTOP_BROWSER_TASK_QUEUE,
+            activities=[stub_desktop_screenshot, stub_release_desktop, browser_activity],
+            activity_executor=ThreadPoolExecutor(max_workers=1),
+        ):
             yield env.client
     finally:
         think_activity.configure({})
@@ -242,8 +294,13 @@ async def client() -> AsyncGenerator[Client, None]:
 
 @pytest.fixture(autouse=True)
 def reset_scripts() -> None:
+    DESKTOP_RELEASES.clear()
     SCRIPTS.clear()
     ALT_SCRIPTS.clear()
+    THINK_REQUESTS.clear()
+    THINK_SCRIPTS.clear()
+    THINK_CALLS.clear()
+    CATALOG_CALLS.clear()
     TRACKER.reset()
 
 
@@ -299,15 +356,72 @@ async def test_turn_replies_and_history_is_queryable(client: Client) -> None:
     assert reply == "first reply"
     assert await handle.query(ChatWorkflow.model_id) == "fake/text"
     messages = await handle.query(ChatWorkflow.messages)
-    assert [m["role"] for m in messages] == ["user", "assistant"]
+    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"]
     assert "first reply" in assistant_texts(messages)
 
-    # The think-first hook ran before the model and folded its notes into the
-    # user message as a <think_notes> block.
-    user_text = str(messages[0]["content"])
-    assert "<think_notes>" in user_text
-    assert THINK_NOTES in user_text
+    # The model chooses a mandatory Think call; notes return as its tool result,
+    # not an automatically injected, hardcoded pre-turn cycle.
+    assert messages[1]["content"][0]["toolUse"]["name"] == "think"
+    assert messages[1]["content"][0]["toolUse"]["input"]["reasoning_effort"] == "minimal"
+    assert THINK_NOTES in str(messages[2]["content"])
 
+    await handle.signal(ChatWorkflow.end_chat)
+    await handle.result()
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_think_zero_cycles_skips_astra_and_first_call_parameters_are_model_chosen(client: Client):
+    handle = await start_session(client, "chat-zero-think")
+    THINK_REQUESTS.append({"thought": "Greeting", "cycle_count": 0, "reasoning_effort": "minimal"})
+    SCRIPTS.append(text_events("Hello"))
+    assert await asyncio.wait_for(handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="Hey there")), 15) == "Hello"
+    assert THINK_CALLS == []
+    calls = [block["toolUse"] for message in await handle.query(ChatWorkflow.messages) for block in message["content"] if "toolUse" in block]
+    assert calls[0]["input"]["cycle_count"] == 0
+    assert CATALOG_CALLS == [handle.id]  # Existing workflow bootstrap catalog refresh only.
+    await handle.signal(ChatWorkflow.end_chat)
+    await handle.result()
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_astra_uses_inherited_tool_and_returns_evidence_with_retained_cycle_context(client: Client):
+    handle = await start_session(client, "chat-astra-evidence")
+    THINK_REQUESTS.append({"thought": "Inspect catalog", "cycle_count": 2, "reasoning_effort": "high"})
+    THINK_SCRIPTS.extend([tool_call_events("list_agent_models", "think-catalog", {}), text_events("cycle one"), text_events("cycle two")])
+    SCRIPTS.append(text_events("Evidence received"))
+    assert await asyncio.wait_for(handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="Use catalog")), 15) == "Evidence received"
+    assert CATALOG_CALLS == [handle.id, handle.id]  # Bootstrap, then Think's inherited tool.
+    assert len(THINK_CALLS) == 3
+    for request in THINK_CALLS:
+        assert "think" not in {spec["name"] for spec in request["tools"]}
+        assert {"browser", "take_screenshot", "graph", "use_skill", "list_agent_models"}.issubset({spec["name"] for spec in request["tools"]})
+        assert request["invocation_state"]["reasoning_effort"] == "high"
+        assert "require_think" not in request["invocation_state"]
+    assert "think-catalog" in str(THINK_CALLS[-1]["messages"])
+    assert "cycle one" in str(THINK_CALLS[-1]["messages"])
+    messages = await handle.query(ChatWorkflow.messages)
+    think_result = messages[2]["content"][0]["toolResult"]
+    assert "think-catalog" in str(think_result)
+    assert "cycle two" in str(think_result)
+    history = await handle.fetch_history()
+    names = [event.activity_task_scheduled_event_attributes.activity_type.name for event in history.events if event.HasField("activity_task_scheduled_event_attributes")]
+    assert "list_agent_models" in names
+    assert "think" not in names
+    await handle.signal(ChatWorkflow.end_chat)
+    await handle.result()
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_later_explicit_think_call_uses_same_native_contract(client: Client):
+    handle = await start_session(client, "chat-later-think")
+    THINK_REQUESTS.append({"thought": "Initial classification", "cycle_count": 0, "reasoning_effort": "minimal"})
+    SCRIPTS.extend([tool_call_events("think", "later-think", {"thought": "Inspect evidence", "cycle_count": 1, "reasoning_effort": "medium"}), text_events("Complete")])
+    THINK_SCRIPTS.extend([tool_call_events("list_agent_models", "later-catalog", {}), text_events("Later result")])
+    assert await asyncio.wait_for(handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="Interleave")), 15) == "Complete"
+    assert len(THINK_CALLS) == 2
+    assert "initial-think" in str(THINK_CALLS[0]["messages"])
+    assert "later-think" not in str(THINK_CALLS[0]["messages"])
+    assert THINK_CALLS[0]["invocation_state"]["reasoning_effort"] == "medium"
     await handle.signal(ChatWorkflow.end_chat)
     await handle.result()
 
@@ -325,27 +439,30 @@ async def test_take_control_waits_for_turn_and_blocks_new_turns(client: Client) 
 
     await poll(turn_started)
 
-    await handle.execute_update("claim_control")
+    await asyncio.wait_for(handle.execute_update("claim_control"), 15)
 
 
     assert (await handle.query("control_status"))["human_control"] is True
     assert await handle.query(ChatWorkflow.turn_start_offset) is None
-    await turn.result()
+    await asyncio.wait_for(turn.result(), 15)
     with pytest.raises(WorkflowUpdateFailedError):
         await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="must not run"))
+    assert DESKTOP_RELEASES == []
+    run_id = (await handle.query("control_status"))["run_id"]
     await handle.signal(ChatWorkflow.end_chat)
     await handle.result()
+    assert DESKTOP_RELEASES == [(handle.id, run_id, DESKTOP_BROWSER_TASK_QUEUE)]
 
 
 @pytest.mark.asyncio(loop_scope="module")
 async def test_relinquish_continues_as_new_preserving_session(client: Client) -> None:
     handle = await start_session(client, "chat-browser-relinquish")
     SCRIPTS.append(text_events("before handoff"))
-    await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="initial task"))
-    await handle.execute_update("claim_control")
+    await asyncio.wait_for(handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="initial task")), 15)
+    await asyncio.wait_for(handle.execute_update("claim_control"), 15)
     before = await handle.query(ChatWorkflow.messages)
 
-    old_run = await handle.execute_update("relinquish_control", "I signed in; continue")
+    old_run = await asyncio.wait_for(handle.execute_update("relinquish_control", "I signed in; continue"), 15)
 
     async def successor_ready():
         state = await handle.query("control_status")
@@ -353,16 +470,18 @@ async def test_relinquish_continues_as_new_preserving_session(client: Client) ->
 
     state = await poll(successor_ready)
     assert state["human_control"] is False
-    assert await handle.execute_update("relinquish_control", "I signed in; continue") == old_run
+    assert await asyncio.wait_for(handle.execute_update("relinquish_control", "I signed in; continue"), 15) == old_run
     assert await handle.query(ChatWorkflow.session_id) == "chat-browser-relinquish"
     assert await handle.query(ChatWorkflow.messages) == before
     SCRIPTS.append(text_events("continued work"))
-    assert await handle.execute_update(
+    assert await asyncio.wait_for(handle.execute_update(
         ChatWorkflow.turn, TurnInput(prompt="I signed in; continue")
-    ) == "continued work"
+    ), 15) == "continued work"
     assert "before handoff" in assistant_texts(await handle.query(ChatWorkflow.messages))
+    assert DESKTOP_RELEASES == []
     await handle.signal(ChatWorkflow.end_chat)
-    await handle.result()
+    await asyncio.wait_for(handle.result(), 15)
+    assert DESKTOP_RELEASES == [(handle.id, state["run_id"], DESKTOP_BROWSER_TASK_QUEUE)]
 
 
 def browser_events(tool_id: str, action: dict[str, Any]) -> list[dict[str, Any]]:
@@ -377,10 +496,11 @@ def browser_events(tool_id: str, action: dict[str, Any]) -> list[dict[str, Any]]
 
 
 @pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.skipif(platform.system() != "Linux" or not os.environ.get("DISPLAY"),
+                    reason="Real headed browser requires the isolated Linux desktop; never launch on the Mac")
 async def test_browser_survives_handoff_rollover(client: Client, monkeypatch, tmp_path) -> None:
     import json
 
-    monkeypatch.setenv("STRANDS_BROWSER_HEADLESS", "true")
     monkeypatch.setenv("STRANDS_BROWSER_USER_DATA_DIR", str(tmp_path))
     handle = await start_session(client, "chat-real-browser-handoff")
     session = "browser-handoff-session"
@@ -441,7 +561,7 @@ async def test_concurrent_turns_are_serialized(client: Client) -> None:
     messages = await handle.query(ChatWorkflow.messages)
     # Strictly alternating: user, assistant, user, assistant. Interleaved
     # turns would break this ordering.
-    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"]
+    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"] * 2
 
     await handle.signal(ChatWorkflow.end_chat)
     await handle.result()
@@ -557,9 +677,9 @@ async def test_turn_model_id_switches_the_factory_for_the_next_turn(
     # the new value.
     assert await handle.query(ChatWorkflow.model_id) == "fake/alt"
 
-    # The rebuild carried the conversation: four alternating messages.
+    # Each turn includes the mandatory Think call/result before the response.
     messages = await handle.query(ChatWorkflow.messages)
-    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"]
+    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"] * 2
     texts = assistant_texts(messages)
     assert "from the first model" in texts
     assert "from the second model" in texts
@@ -659,7 +779,7 @@ async def test_continue_as_new_preserves_the_session(client: Client) -> None:
     assert "turn-one" not in texts, "rollover replayed the previous turn's frames"
 
     messages = await latest.query(ChatWorkflow.messages)
-    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"]
+    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"] * 2
 
     await latest.signal(ChatWorkflow.end_chat)
     await latest.result()

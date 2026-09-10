@@ -64,6 +64,12 @@ class ScriptedModel(Model):
     async def stream(
         self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
+        if (kwargs.get("invocation_state") or {}).get("require_think"):
+            for event in tool_use_events("hotload-initial-think", "think", {
+                "thought": "Analyze request", "cycle_count": 0, "reasoning_effort": "minimal",
+            }):
+                yield event
+            return
         if not SCRIPTS:
             raise ApplicationError(
                 "test script exhausted: a model call arrived with no scripted reply",

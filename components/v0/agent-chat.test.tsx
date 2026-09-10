@@ -205,14 +205,17 @@ vi.mock("@/components/v0/agent-activity", () => ({
   AgentActivity: ({
     parts,
     isThinking,
+    sessionId,
   }: {
     parts: unknown[]
     isThinking?: boolean
+    sessionId?: string
   }) => (
     <div
       data-testid="agent-activity"
       data-thinking={String(Boolean(isThinking))}
       data-part-count={parts.length}
+      data-session-id={sessionId}
     />
   ),
 }))
@@ -618,6 +621,38 @@ describe("AgentChat approval flow", () => {
     expect(html).toContain('data-testid="computer-use-preview-panel"')
     expect(html).toContain('data-pending-approval="Take over the browser?"')
     expect(html).not.toContain("Approval needed")
+  })
+})
+
+describe("AgentChat desktop session wiring", () => {
+  it("forwards the durable chat ID to the preview and every activity across turns", () => {
+    const sessionId = "chat-c8a5830d3a78e208"
+    h.computerUsePreviewResult = { open: true, sessionId: "browser-session-name" }
+    setChat({
+      status: "streaming",
+      messages: [
+        { id: "a1", role: "assistant", parts: [sessionPart(sessionId), textPart("Opened desktop")] },
+        { id: "u2", role: "user", parts: [textPart("Continue")] },
+        { id: "a2", role: "assistant", parts: [textPart("Inspecting screenshot")] },
+      ],
+    })
+
+    const html = render()
+    expect(h.previewPanelProps.at(-1)?.sessionId).toBe(sessionId)
+    expect(h.previewPanelProps.at(-1)?.preview).toBe(h.computerUsePreviewResult)
+    expect([...html.matchAll(/data-session-id="([^"]+)"/g)].map(match => match[1]))
+      .toEqual([sessionId, sessionId])
+    expect(html).not.toContain('data-session-id="browser-session-name"')
+  })
+
+  it("never substitutes a browser session name when the durable ID has not arrived", () => {
+    h.computerUsePreviewResult = { open: true, sessionId: "browser-session-name" }
+    setChat({ messages: [{ id: "a1", role: "assistant", parts: [textPart("Opening desktop")] }] })
+
+    const html = render()
+    expect(h.previewPanelProps).toHaveLength(1)
+    expect(h.previewPanelProps[0].sessionId).toBeUndefined()
+    expect(html).not.toContain("data-session-id=")
   })
 })
 

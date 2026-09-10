@@ -10,8 +10,9 @@ import {
 } from "@/components/ai-elements/chain-of-thought"
 import { MessageResponse } from "@/components/ai-elements/message"
 import { Task, TaskContent, TaskItem, TaskTrigger } from "@/components/ai-elements/task"
-import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "@/components/ai-elements/tool"
-import { COMPUTER_USE_TOOL_NAMES, computerUseFailed, computerUseFields, stripComputerUseScreenshot } from "./computer-use"
+import { getStatusBadge } from "@/components/ai-elements/tool"
+import { CodeBlock, CodeBlockHeader, CodeBlockTitle, CodeBlockActions, CodeBlockCopyButton } from "@/components/ai-elements/code-block"
+import { COMPUTER_USE_TOOL_NAMES, computerUseFields, stripComputerUseScreenshot, toolPresentation, thinkSummaryWasStreamed } from "./computer-use"
 
 type Part = UIMessage["parts"][number]
 export type ActivitySegment =
@@ -87,25 +88,42 @@ export function ComputerUseActivity({ parts, isThinking, sessionId }: {
               }
               if (!isDynamicToolUIPart(part)) return null
               const { action, intent, url, observation } = computerUseFields(part)
-              const label = part.toolName === "think" ? "Think" : intent || (action === "navigate" && url ? `navigate: ${url}` : action.replaceAll("_", " "))
-              const failed = part.state === "output-error" || (part.state === "output-available" && computerUseFailed(part.output))
-              const state = failed ? "output-error" : part.state
-              const finished = ["output-available", "output-error", "output-denied"].includes(state)
+              const result = toolPresentation(part)
+              if (part.toolName === "think") {
+                if (!result.error && (!result.terminal || !result.text || thinkSummaryWasStreamed(result.text, parts))) return null
+                return (
+                  <ChainOfThoughtStep key={part.toolCallId} icon={BrainIcon}
+                    label={result.error ? (result.state === "output-denied" ? "Thinking denied" : "Thinking failed") : "Thinking result"}
+                    status="complete" role={result.error ? "alert" : undefined}
+                    className={result.error ? "text-destructive" : undefined}>
+                    <MessageResponse>{result.error || result.text}</MessageResponse>
+                  </ChainOfThoughtStep>
+                )
+              }
+              const label = intent || (action === "navigate" && url ? `navigate: ${url}` : action.replaceAll("_", " "))
+              const state = result.state
+              const finished = result.terminal
               return (
                 <TaskItem key={part.toolCallId} data-computer-action={part.toolName === "think" ? undefined : part.toolCallId} data-action-state={state}>
-                  <ChainOfThoughtStep icon={part.toolName === "think" ? BrainIcon : MousePointer2Icon} label={label}
+                  <ChainOfThoughtStep icon={MousePointer2Icon} label={label} role={result.error ? "alert" : undefined}
                     status={finished ? "complete" : isThinking ? "active" : "pending"}>
                     {!finished && !isThinking ? (
                       <p className="text-xs text-amber-600">No final result received. Execution may still be running; do not repeat this action blindly.</p>
                     ) : null}
-                    <Tool defaultOpen>
-                      <ToolHeader type="dynamic-tool" toolName={part.toolName} title={label} state={state} />
-                      <ToolContent>
-                        <ToolInput input={stripComputerUseScreenshot(part.input ?? {})} />
-                        {finished ? <ToolOutput output={"output" in part ? stripComputerUseScreenshot(part.output) : undefined}
-                          errorText={part.state === "output-error" ? part.errorText : failed ? "Browser action failed" : undefined} /> : null}
-                      </ToolContent>
-                    </Tool>
+                    {getStatusBadge(state)}
+                    {result.error ? <MessageResponse className="text-destructive">{result.error}</MessageResponse>
+                      : result.text ? <MessageResponse>{result.text}</MessageResponse> : null}
+                    <Task defaultOpen={false}>
+                      <TaskTrigger title="Action details" />
+                      <TaskContent keepMounted>
+                        <CodeBlock code={JSON.stringify(stripComputerUseScreenshot(part.input ?? {}), null, 2)} language="json">
+                          <CodeBlockHeader><CodeBlockTitle>Parameters</CodeBlockTitle><CodeBlockActions><CodeBlockCopyButton aria-label="Copy action parameters" /></CodeBlockActions></CodeBlockHeader>
+                        </CodeBlock>
+                        {result.output !== undefined ? <CodeBlock code={typeof result.output === "string" ? String(stripComputerUseScreenshot(result.output)) : JSON.stringify(stripComputerUseScreenshot(result.output), null, 2)} language="json">
+                          <CodeBlockHeader><CodeBlockTitle>Result</CodeBlockTitle><CodeBlockActions><CodeBlockCopyButton aria-label="Copy action result" /></CodeBlockActions></CodeBlockHeader>
+                        </CodeBlock> : null}
+                      </TaskContent>
+                    </Task>
                     {observation && sessionId ? (
                       <ChainOfThoughtImage caption={label}>
                         <Image alt={label} width={observation.width} height={observation.height}

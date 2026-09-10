@@ -149,6 +149,30 @@ def test_inflight_capture_can_finish_while_stopping_but_cannot_feed_model(artifa
         resolve_image(ref)
 
 
+def test_evidence_remains_visible_during_takeover_but_is_not_model_input(artifact_store):
+    root, runtime = artifact_store
+    ref = store_image()
+    original = resolve_image(ref)
+    (root / "runtime.json").write_text(json.dumps({**runtime, "mode": "human", "epoch": 8}))
+    assert desktop_observation.observation_image(ref.artifact_id, namespace="test", workflow_id="chat-1") == original
+    with pytest.raises(StateConflict):
+        resolve_image(ref)
+    with pytest.raises((StateConflict, OSError)):
+        desktop_observation.observation_image(ref.artifact_id, namespace="test", workflow_id="other")
+
+
+def test_evidence_checks_integrity_and_owner(artifact_store):
+    root, runtime = artifact_store
+    ref = store_image()
+    png, _ = artifact_paths(root, ref)
+    png.write_bytes(b"x" * ref.byte_size)
+    with pytest.raises(ValueError, match="integrity"):
+        desktop_observation.observation_image(ref.artifact_id, namespace="test", workflow_id="chat-1")
+    (root / "runtime.json").write_text(json.dumps({**runtime, "owner": None}))
+    with pytest.raises(StateConflict):
+        desktop_observation.observation_image(ref.artifact_id, namespace="test", workflow_id="chat-1")
+
+
 @pytest.mark.parametrize("scope", [{"namespace": "other"}, {"workflow_id": "other"}])
 def test_resolve_rejects_cross_scope(artifact_store, scope):
     ref = store_image()
@@ -330,4 +354,27 @@ def test_latest_result_missing_observation_cannot_reuse_old_pixels(artifact_stor
     with pytest.raises(ValueError, match="missing"):
         desktop_observation.latest_observation(messages)
     messages[-1]["content"][-1]["toolResult"]["status"] = "error"
+    assert desktop_observation.latest_observation(messages) is None
+
+
+def test_think_evidence_exposes_actual_child_screenshot_to_parent_model(artifact_store):
+    ref = store_image()
+    evidence = [
+        {"role": "assistant", "content": [{"toolUse": {"toolUseId": "capture", "name": "take_screenshot", "input": {}}}]},
+        {"role": "user", "content": [{"toolResult": {"toolUseId": "capture", "status": "success", "content": [
+            {"text": json.dumps({"observation": ref.model_dump(mode="json")})},
+        ]}}]},
+    ]
+    messages = [
+        {"role": "assistant", "content": [{"toolUse": {"toolUseId": "think-id", "name": "think", "input": {}}}]},
+        {"role": "user", "content": [{"toolResult": {"toolUseId": "think-id", "status": "success", "content": [
+            {"text": "Observed the desktop"}, {"json": {"messages": evidence}},
+        ]}}]},
+    ]
+    assert desktop_observation.latest_observation(messages) == ("capture", "take_screenshot", ref)
+    # Renaming a page/tool to look like structured Think evidence is insufficient.
+    messages[0]["content"][0]["toolUse"]["name"] = "http_request"
+    assert desktop_observation.latest_observation(messages) is None
+    messages[0]["content"][0]["toolUse"]["name"] = "think"
+    messages[1]["content"][0]["toolResult"]["content"][-1] = {"text": json.dumps({"messages": evidence})}
     assert desktop_observation.latest_observation(messages) is None

@@ -9,6 +9,7 @@ import {
   RotateCwIcon,
 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
+import { z } from "zod"
 
 import {
   Artifact,
@@ -47,6 +48,14 @@ export type BrowserControlMode =
   | "relinquishing"
   | "instructions"
   | "resuming"
+  | "recovery"
+
+const controlStatusSchema = z.object({
+  ready: z.boolean(),
+  mode: z.enum(["agent", "stopping", "human", "relinquishing", "instructions", "resuming", "recovery"]),
+  // Nanosecond epochs exceed JS integer precision; require lossless wire strings.
+  epoch: z.string().regex(/^[1-9][0-9]*$/),
+})
 
 const MODES_LOCKING_CLOSE: ReadonlySet<BrowserControlMode> = new Set([
   "stopping",
@@ -54,6 +63,7 @@ const MODES_LOCKING_CLOSE: ReadonlySet<BrowserControlMode> = new Set([
   "relinquishing",
   "instructions",
   "resuming",
+  "recovery",
 ])
 
 const BLURPLE_BADGE = "border-blurple/25 bg-blurple/15 text-blurple-bright"
@@ -69,6 +79,7 @@ const BADGE: Record<BrowserControlMode, { label: string; className: string }> = 
   relinquishing: { label: "Relinquishing", className: AMBER_BADGE },
   instructions: { label: "Paused", className: AMBER_BADGE },
   resuming: { label: "Resuming", className: BLURPLE_BADGE },
+  recovery: { label: "Recovery required", className: AMBER_BADGE },
 }
 
 const HEADER_BUTTON =
@@ -78,7 +89,7 @@ export type ComputerUsePreviewPanelProps = {
   preview: ComputerUsePreviewState
   /** Parent keys the panel by this durable chat ID, not a tool call ID. */
   sessionId?: string
-  /** Seed from server-confirmed ownership when restoring a mounted panel. */
+  /** Presentation seed only; fresh server status is required before input. */
   initialControlMode?: BrowserControlMode
   isStreaming: boolean
   status: ChatStatus
@@ -97,7 +108,7 @@ export type ComputerUsePreviewPanelProps = {
 export function ComputerUsePreviewPanel({
   preview,
   sessionId,
-  initialControlMode = "agent",
+  initialControlMode = "recovery",
   isStreaming,
   status,
   pendingApproval,
@@ -113,9 +124,59 @@ export function ComputerUsePreviewPanel({
   const handoffPending = useRef(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [fullscreen, setFullscreen] = useState(false)
-  const [mode, setMode] = useState<BrowserControlMode>(initialControlMode)
+  const [ownershipMode, setMode] = useState<BrowserControlMode>(initialControlMode)
+  const [control, setControl] = useState<{ sessionId: string; epoch: string } | null>(null)
+  const [checkingControl, setCheckingControl] = useState(true)
+  const [transitionPending, setTransitionPending] = useState(false)
+  const [controlError, setControlError] = useState("")
+  const statusRequest = useRef<AbortController | null>(null)
   const [handoffText, setHandoffText] = useState("")
   const [handoffError, setHandoffError] = useState("")
+  const mode = !checkingControl && sessionId && control?.sessionId === sessionId ? ownershipMode : "recovery"
+
+  const refreshControl = useCallback(async () => {
+    statusRequest.current?.abort()
+    const controller = new AbortController()
+    statusRequest.current = controller
+    if (!sessionId) return
+    return fetch(`/api/orchestrator/handoff?${new URLSearchParams({ sessionId })}`, {
+      cache: "no-store",
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
+    }).then(async response => {
+      if (!response.ok) throw new Error(`Status request failed (${response.status})`)
+      const data = controlStatusSchema.parse(await response.json())
+      if (controller.signal.aborted) return
+      const confirmedMode = data.ready ? data.mode : "recovery"
+      setControl({ sessionId, epoch: data.epoch })
+      setMode(confirmedMode)
+      setControlError(confirmedMode === "recovery" ? "Desktop unavailable or recovery required. Input is disabled; reconnect to check status." : "")
+      return confirmedMode
+    }).catch(() => {
+      if (controller.signal.aborted) return
+      setControl(null)
+      setMode("recovery")
+      setControlError("Could not verify desktop control. Input is disabled; reconnect to retry.")
+    }).finally(() => {
+      if (!controller.signal.aborted) setCheckingControl(false)
+    })
+  }, [sessionId])
+
+  useEffect(() => {
+    void refreshControl()
+    return () => { statusRequest.current?.abort() }
+  }, [refreshControl])
+
+  const observationId = preview.observation?.artifact_id
+  const lastControlObservation = useRef("")
+  useEffect(() => {
+    if (!sessionId || !observationId || checkingControl || transitionPending || handoffPending.current) return
+    const key = `${sessionId}:${observationId}`
+    if (lastControlObservation.current === key) return
+    lastControlObservation.current = key
+    // The first action may claim ownership after the mount request returned 409.
+    // Retry only on new evidence while unconfirmed, never on every healthy action.
+    if (control?.sessionId !== sessionId || controlError) void refreshControl()
+  }, [sessionId, observationId, checkingControl, transitionPending, control?.sessionId, controlError, refreshControl])
 
   let iframeSrc = ""
   if (preview.viewerType === "novnc" && preview.livePreviewUrl) {
@@ -130,11 +191,16 @@ export function ComputerUsePreviewPanel({
     }
   }
   const closeDisabled = MODES_LOCKING_CLOSE.has(mode)
-  const takeoverAvailable = Boolean(sessionId && iframeSrc && onReleaseControl && preview.controlAvailable !== false)
+  const takeoverAvailable = Boolean(mode === "agent" && iframeSrc && onReleaseControl && preview.controlAvailable !== false)
 
-  const reconnectViewer = useCallback(() => {
-    setReloadKey((key) => key + 1)
-  }, [])
+  const reconnectViewer = useCallback(async () => {
+    if (handoffPending.current) return
+    setCheckingControl(true)
+    setControl(null)
+    setControlError("")
+    setHandoffError("")
+    if (await refreshControl()) setReloadKey((key) => key + 1)
+  }, [refreshControl])
 
   const toggleFullscreen = useCallback(async () => {
     const el = rootRef.current
@@ -163,63 +229,73 @@ export function ComputerUsePreviewPanel({
   const takeControl = useCallback(async () => {
     if (mode !== "agent" || !takeoverAvailable || handoffPending.current) return
     handoffPending.current = true
+    setTransitionPending(true)
+    const request = statusRequest.current
     setHandoffError("")
     setMode("stopping")
     try {
       await onTakeControl()
-      setMode("human")
     } catch (error) {
-      setMode("agent")
-      setHandoffError(handoffFailure(error, "take control"))
+      if (!request?.signal.aborted) setHandoffError(handoffFailure(error, "take control"))
     } finally {
+      if (request && !request.signal.aborted) await refreshControl()
       handoffPending.current = false
+      setTransitionPending(false)
     }
-  }, [mode, onTakeControl, takeoverAvailable])
+  }, [mode, onTakeControl, takeoverAvailable, refreshControl])
 
-  // instructions→resuming→agent. The handoff awaits the backend (continue-as-
-  // new + successor ready); failure returns to instructions with the user's
-  // text preserved and the iframe still paused.
+  // Preserve feedback until both resume and authoritative agent status succeed.
   const giveControl = useCallback(
     async (message: PromptInputMessage) => {
       if (mode !== "instructions" || !message.text?.trim() || handoffPending.current) return
       handoffPending.current = true
+      setTransitionPending(true)
+      const request = statusRequest.current
       setHandoffText(message.text)
       setHandoffError("")
       setMode("resuming")
+      let failure: unknown
       try {
         await onGiveControl(message)
-        setHandoffText("")
-        setMode("agent")
       } catch (error) {
-        setMode("instructions")
-        setHandoffError(handoffFailure(error, "resume the agent"))
-        // Native PromptInput retains its input/attachments on rejected submit.
-        throw error
-      } finally {
-        handoffPending.current = false
+        failure = error
       }
+      const confirmed = request && !request.signal.aborted ? await refreshControl() : undefined
+      handoffPending.current = false
+      setTransitionPending(false)
+      if (failure || confirmed !== "agent") {
+        const error = failure ?? new Error("Resumption is unconfirmed; reconnect to check status")
+        setHandoffError(handoffFailure(error, "resume the agent"))
+        // Reject native submit so unconfirmed resumption never clears feedback.
+        throw error
+      }
+      setHandoffText("")
     },
-    [mode, onGiveControl]
+    [mode, onGiveControl, refreshControl]
   )
 
   const releaseControl = async () => {
     if (mode !== "human" || handoffPending.current) return
     handoffPending.current = true
+    setTransitionPending(true)
+    const request = statusRequest.current
     setHandoffError("")
     setMode("relinquishing")
     try {
       if (!onReleaseControl) throw new Error("Native desktop release unavailable")
       await onReleaseControl()
-      setMode("instructions")
     } catch (error) {
-      setHandoffError(handoffFailure(error, "release control"))
-      setMode("human")
+      if (!request?.signal.aborted) setHandoffError(handoffFailure(error, "release control"))
     } finally {
+      if (request && !request.signal.aborted) await refreshControl()
       handoffPending.current = false
+      setTransitionPending(false)
     }
   }
 
-  const badge = mode === "agent" && !isStreaming
+  const badge = checkingControl && sessionId
+    ? { label: "Checking control", className: AMBER_BADGE }
+    : mode === "agent" && !isStreaming
     ? { label: status === "error" ? "Stream interrupted" : "Chat idle", className: status === "error" ? AMBER_BADGE : BLURPLE_BADGE }
     : BADGE[mode]
 
@@ -251,11 +327,11 @@ export function ComputerUsePreviewPanel({
             </span>
           </div>
           <ArtifactActions>
-            {mode === "agent" ? (
+            {mode === "agent" || mode === "recovery" ? (
               <Button
                 className={cn(HEADER_BUTTON, "border-blurple/30 bg-blurple/10 text-blurple-bright hover:bg-blurple/20")}
                 data-testid="take-control"
-                disabled={!takeoverAvailable}
+                disabled={!takeoverAvailable || transitionPending}
                 title={!takeoverAvailable ? "A chat session, noVNC viewer and native release acknowledgment are required" : undefined}
                 onClick={takeControl}
                 size="sm"
@@ -270,6 +346,7 @@ export function ComputerUsePreviewPanel({
               <Button
                 className={cn(HEADER_BUTTON, "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20")}
                 data-testid="relinquish"
+                disabled={transitionPending || !onReleaseControl}
                 onClick={releaseControl}
                 size="sm"
                 type="button"
@@ -298,7 +375,7 @@ export function ComputerUsePreviewPanel({
               <WebPreviewNavigationButton
                 aria-label="Reconnect viewer"
                 data-testid="viewer-reconnect"
-                disabled={!iframeSrc}
+                disabled={!sessionId || checkingControl || transitionPending}
                 onClick={reconnectViewer}
                 tooltip="Reconnect viewer"
               >
@@ -345,15 +422,15 @@ export function ComputerUsePreviewPanel({
               </Alert>
             ) : null}
 
-            {handoffError ? (
+            {handoffError || controlError ? (
               <Alert
                 className="mx-2 mt-2 shrink-0 border-destructive/40 bg-destructive/10"
                 data-testid="browser-handoff-error"
                 role="alert"
                 variant="destructive"
               >
-                <AlertTitle>Handoff failed</AlertTitle>
-                <AlertDescription>{handoffError}</AlertDescription>
+                <AlertTitle>{controlError ? "Desktop control unavailable" : "Handoff failed"}</AlertTitle>
+                <AlertDescription>{controlError || handoffError}</AlertDescription>
               </Alert>
             ) : null}
 
@@ -369,14 +446,14 @@ export function ComputerUsePreviewPanel({
               title="Linux desktop via noVNC"
               className={cn(mode === "human" ? "" : "pointer-events-none")}
               data-control-mode={mode}
-              key={`${sessionId ?? ""}-${reloadKey}`}
+              key={`${sessionId ?? ""}-${control?.epoch ?? ""}-${reloadKey}`}
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
               src={iframeSrc}
             /> : <p role="status" className="p-3 text-sm text-muted-foreground">Desktop viewer unavailable. A native noVNC URL is required.</p>}
 
             {iframeSrc ? (
               <p className="shrink-0 border-t px-3 py-1.5 text-xs text-muted-foreground">
-                Desktop viewer via noVNC. {mode === "human" ? "Your input is enabled." : "Take control to interact; agent screenshots appear in the task timeline."}
+                Desktop viewer via noVNC. {mode === "human" ? "Your input is enabled." : mode === "recovery" ? "Input disabled until desktop control is verified." : "Take control to interact; agent screenshots appear in the task timeline."}
               </p>
             ) : null}
 
@@ -387,13 +464,13 @@ export function ComputerUsePreviewPanel({
               </p>
             ) : null}
 
-            {mode === "instructions" || mode === "resuming" ? (
+            {mode === "instructions" || mode === "resuming" || (mode === "recovery" && handoffText) ? (
               <div className="ide-glass-edge shrink-0 border-t bg-white/[0.02] p-3">
                 <PromptInput className="w-full" onSubmit={giveControl}>
                   <PromptInputBody>
                     <PromptInputTextarea
                       className="min-h-12"
-                      disabled={mode === "resuming"}
+                      disabled={mode !== "instructions" || transitionPending}
                       onChange={(event) => setHandoffText(event.currentTarget.value)}
                       placeholder="What you changed, or instructions for the agent…"
                       value={handoffText}
@@ -402,7 +479,7 @@ export function ComputerUsePreviewPanel({
                   <PromptInputFooter className="justify-end">
                     <PromptInputSubmit
                       data-testid="give-control-submit"
-                      disabled={mode === "resuming" || !handoffText.trim()}
+                      disabled={mode !== "instructions" || transitionPending || !handoffText.trim()}
                     />
                   </PromptInputFooter>
                 </PromptInput>

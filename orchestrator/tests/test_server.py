@@ -17,8 +17,15 @@ from fastapi.testclient import TestClient
 import perplexity_operations
 import server
 import asyncio
+import json
 import time
 from types import SimpleNamespace
+
+from temporalio import workflow
+from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamClient
+from temporalio.converter import DataConverter
+from temporalio.exceptions import ApplicationError
+from temporalio.client import WorkflowUpdateFailedError
 
 from config import PROVIDER_DISPLAY_NAMES
 
@@ -81,7 +88,7 @@ def test_turn_subscription_recovers_without_repeating_update(client, monkeypatch
         yield SimpleNamespace(data={"data": "second"}, topic="events", offset=1)
         finished.set()
         await asyncio.Event().wait()
-    stream = SimpleNamespace(get_offset=AsyncMock(return_value=0), subscribe=subscribe)
+    stream = SimpleNamespace(get_offset=AsyncMock(side_effect=[0, 2]), subscribe=subscribe)
     monkeypatch.setattr(server.WorkflowStreamClient, "create", MagicMock(return_value=stream))
     response = client.post("/sessions/chat-1/turns/stream", json={"prompt": "test", "model_id": "model-a"})
     assert response.status_code == 200
@@ -186,7 +193,7 @@ def test_turn_subscribes_before_update_and_keeps_the_first_frame(
         server.WorkflowStreamClient,
         "create",
         MagicMock(return_value=SimpleNamespace(
-            get_offset=AsyncMock(return_value=0), subscribe=subscribe
+            get_offset=AsyncMock(side_effect=[0, 1]), subscribe=subscribe
         )),
     )
 
@@ -247,6 +254,198 @@ def test_turn_pump_iterates_the_subscription_directly() -> None:
         text = handle.read()
     for banned in ("asyncio.Queue", "def consume", "asyncio.sleep(0.2)"):
         assert banned not in text, f"{banned} still present in server.py"
+
+
+class NativeTurnStream:
+    """Real stream storage, paging and subscription; only Temporal RPCs are fake."""
+
+    def __init__(self, monkeypatch, *, failure=False, fault=None, payload_size=0):
+        self.id = "synthetic-turn"
+        self.handlers = {}
+        self.finished = asyncio.Event()
+        self.poll_started = asyncio.Event()
+        self.failure = failure
+        self.fault = fault
+        self.offset_queries = 0
+        self.turn_calls = 0
+        self.polls = []
+        self.cancelled_polls = 0
+        self.subscriptions = []
+        self.labels = ["init_session", "navigate", "click:error", "browser:error", "take_screenshot:error"]
+
+        def register(name, handler, **kwargs):
+            self.handlers[name] = handler
+
+        async def wait_condition(predicate, **kwargs):
+            if not predicate():
+                await asyncio.Event().wait()
+
+        monkeypatch.setattr(workflow, "get_signal_handler", lambda name: None)
+        monkeypatch.setattr(workflow, "set_signal_handler", register)
+        monkeypatch.setattr(workflow, "set_update_handler", register)
+        monkeypatch.setattr(workflow, "set_query_handler", register)
+        monkeypatch.setattr(workflow, "payload_converter", lambda: DataConverter.default.payload_converter)
+        monkeypatch.setattr(workflow, "wait_condition", wait_condition)
+        self.stream = WorkflowStream()
+        self.native = WorkflowStreamClient(self)
+        self.payload_size = payload_size
+        monkeypatch.setitem(server._state, "client", SimpleNamespace(get_workflow_handle=lambda _: self))
+        monkeypatch.setattr(server.WorkflowStreamClient, "create", lambda *args: SimpleNamespace(
+            get_offset=self.native.get_offset, subscribe=self.subscribe,
+        ))
+
+    def publish(self):
+        for label in self.labels:
+            self.stream.topic("events").publish({"label": label, "padding": "x" * self.payload_size})
+        self.stream.topic("excluded-topic").publish({"label": "filtered tail"})
+
+    def subscribe(self, topics, from_offset):
+        iterator = self.native.subscribe(topics, from_offset=from_offset)
+        self.subscriptions.append((topics, from_offset, iterator))
+        return iterator
+
+    async def query(self, name, **kwargs):
+        if name == server.ChatWorkflow.turn_start_offset:
+            return None
+        self.offset_queries += 1
+        if self.offset_queries == 2 and self.fault == "query-timeout":
+            await asyncio.Event().wait()
+        offset = self.handlers[name]()
+        if self.offset_queries == 2 and self.fault == "append":
+            self.stream.topic("events").publish({"label": "after completion snapshot"})
+        return offset
+
+    async def start_update(self, name, arg, **kwargs):
+        if name == server.ChatWorkflow.turn:
+            self.turn_calls += 1
+
+            async def result():
+                await self.finished.wait()
+                if isinstance(self.failure, Exception):
+                    raise self.failure
+                if self.failure:
+                    raise RuntimeError("synthetic turn failure")
+                return "synthetic reply"
+        else:
+            self.polls.append(arg)
+
+            async def result():
+                try:
+                    if arg.topics and self.fault == "cancel-live":
+                        self.poll_started.set()
+                        await asyncio.Event().wait()
+                    if not arg.topics:
+                        if self.fault == "gap":
+                            self.stream.truncate(arg.from_offset + 1)
+                            self.fault = None
+                        elif self.fault == "premature-end":
+                            raise asyncio.CancelledError
+                        elif self.fault == "read-timeout":
+                            await asyncio.Event().wait()
+                    try:
+                        return await self.handlers[name](arg)
+                    except ApplicationError as error:
+                        raise WorkflowUpdateFailedError(error) from error
+                except asyncio.CancelledError:
+                    self.cancelled_polls += 1
+                    raise
+
+        return SimpleNamespace(workflow_run_id="synthetic-run", result=result)
+
+
+async def native_turn_body(harness):
+    response = await server.turn_stream(harness.id, server.TurnRequest(prompt="synthetic only"))
+    harness.publish()
+    return response.body_iterator
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [False, True])
+@pytest.mark.parametrize("payload_size", [0, 400_000])
+async def test_turn_completion_drains_native_backlog(monkeypatch, failure, payload_size):
+    harness = NativeTurnStream(monkeypatch, failure=failure, payload_size=payload_size, fault="append")
+    body = await native_turn_body(harness)
+    frames = [await anext(body), await anext(body)]
+    # Let the third read finish without forwarding it, then settle the update.
+    await asyncio.sleep(0)
+    harness.finished.set()
+    await asyncio.sleep(0)
+    frames.extend([frame async for frame in body])
+    events = [json.loads(frame.removeprefix(b"data: ")) for frame in frames]
+    assert [event["label"] for event in events if "label" in event] == harness.labels
+    assert events[-1] == ({"error": "synthetic turn failure"} if failure else {"done": True, "reply": "synthetic reply"})
+    assert harness.offset_queries == 2, "freeze the completion offset once"
+    assert [(topics, offset) for topics, offset, _ in harness.subscriptions] == [(server.CHAT_TOPICS, 0), (None, 2)]
+    assert all(iterator.ag_frame is None for _, _, iterator in harness.subscriptions)
+    assert harness.turn_calls == 1
+    if payload_size:
+        assert len(harness.polls) > 2, "exercise native response-size pagination"
+
+
+@pytest.mark.asyncio
+async def test_turn_completion_cancels_pending_native_read(monkeypatch):
+    harness = NativeTurnStream(monkeypatch, fault="cancel-live")
+    body = await native_turn_body(harness)
+    first = asyncio.create_task(anext(body))
+    await asyncio.wait_for(harness.poll_started.wait(), 1)
+    harness.finished.set()
+    frames = [await asyncio.wait_for(first, 1)]
+    frames.extend([frame async for frame in body])
+    events = [json.loads(frame.removeprefix(b"data: ")) for frame in frames]
+    assert [event["label"] for event in events if "label" in event] == harness.labels
+    assert events[-1]["done"] is True
+    assert harness.cancelled_polls == 1
+    assert all(iterator.ag_frame is None for _, _, iterator in harness.subscriptions)
+    assert harness.turn_calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault,detail", [
+    ("gap", "offset"), ("premature-end", "ended"),
+    ("read-timeout", "timed out"), ("query-timeout", "timed out"),
+])
+async def test_turn_completion_drain_reports_incomplete_delivery(monkeypatch, fault, detail):
+    monkeypatch.setattr(server, "SSE_COMPLETION_DRAIN_TIMEOUT", 0.03, raising=False)
+    harness = NativeTurnStream(monkeypatch, fault=fault)
+    body = await native_turn_body(harness)
+    frames = [await anext(body), await anext(body)]
+    harness.finished.set()
+    await asyncio.sleep(0)
+    started = time.monotonic()
+    frames.extend([frame async for frame in body])
+    events = [json.loads(frame.removeprefix(b"data: ")) for frame in frames]
+    assert "Incomplete event delivery" in events[-1].get("error", "")
+    assert detail in events[-1]["error"]
+    assert not any(event.get("done") for event in events)
+    assert time.monotonic() - started < 1
+    assert all(iterator.ag_frame is None for _, _, iterator in harness.subscriptions)
+    assert harness.turn_calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [False, True])
+async def test_turn_completion_without_native_events(monkeypatch, failure):
+    harness = NativeTurnStream(monkeypatch, failure=failure)
+    response = await server.turn_stream(harness.id, server.TurnRequest(prompt="synthetic only"))
+    harness.finished.set()
+    events = [json.loads(frame.removeprefix(b"data: ")) async for frame in response.body_iterator]
+    assert events == ([{"error": "synthetic turn failure"}] if failure else [{"done": True, "reply": "synthetic reply"}])
+    assert harness.offset_queries == 2
+    assert not any(not poll.topics for poll in harness.polls), "empty tail must not start a replay poll"
+    assert all(iterator.ag_frame is None for _, _, iterator in harness.subscriptions)
+    assert harness.turn_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_connector_setup_failure_survives_native_workflow_envelope(monkeypatch):
+    error = ApplicationError("Connector setup needed at https://console.perplexity.ai/group/connectors",
+                             type="PerplexityModelError", non_retryable=True)
+    harness = NativeTurnStream(monkeypatch, failure=WorkflowUpdateFailedError(error))
+    harness.finished.set()
+    response = await server.turn_stream("chat-1", server.TurnRequest(prompt="hello"))
+    frames = [json.loads(frame.decode().removeprefix("data: ").strip()) async for frame in response.body_iterator]
+    assert "https://console.perplexity.ai/group/connectors" in frames[-1]["error"]
+    assert harness.turn_calls == 1
 
 
 class FakeUpstream:

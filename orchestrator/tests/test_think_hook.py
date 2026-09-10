@@ -16,8 +16,10 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from temporalio.exceptions import ApplicationError
 from strands.hooks import HookRegistry
 from strands.hooks.events import BeforeInvocationEvent, BeforeModelCallEvent
+from strands.hooks.events import BeforeToolCallEvent, AfterModelCallEvent
 from temporalio.api.common.v1 import Payload
 from temporalio.converter import DataConverter
 
@@ -294,3 +296,47 @@ def test_tool_composition() -> None:
         "list_agent_models",
         "cancel_agent_response",
     ]
+
+
+def test_model_chosen_hook_forces_only_tool_name_and_resets_each_turn():
+    hook = _ThinkFirstHook("persona", FakeStream(), model_chosen=True)
+    registry = HookRegistry()
+    hook.register_hooks(registry)
+    assert not registered(registry, invocation_event([user_message("hello")]))
+    state = {"reasoning_effort": "high"}
+    event = BeforeModelCallEvent(agent=object(), invocation_state=state)
+    hook.begin_turn(0)
+    hook._require_think(event)
+    assert state == {"reasoning_effort": "high", "require_think": True}
+    call = BeforeToolCallEvent(agent=object(), selected_tool=None, invocation_state=state,
+                              tool_use={"toolUseId": "first", "name": "think", "input": {
+                                  "thought": "Hello", "reasoning_effort": "minimal", "cycle_count": 0,
+                              }})
+    hook._record_call(call)
+    hook._require_think(event)
+    assert state["require_think"] is False
+    assert call.tool_use["input"]["cycle_count"] == 0
+    hook.begin_turn(20)
+    hook._require_think(event)
+    assert state["require_think"] is True
+
+
+def test_model_chosen_hook_rejects_final_answer_or_other_first_tool():
+    hook = _ThinkFirstHook("persona", FakeStream(), model_chosen=True)
+    for content in [[{"text": "skipped thinking"}], [{"toolUse": {"name": "browser", "toolUseId": "wrong", "input": {}}}]]:
+        with pytest.raises(ApplicationError, match="first tool call"):
+            hook._verify_first_call(AfterModelCallEvent(agent=object(), stop_response=AfterModelCallEvent.ModelStopResponse(
+                message={"role": "assistant", "content": content}, stop_reason="end_turn",
+            )))
+    other = BeforeToolCallEvent(agent=object(), selected_tool=None, invocation_state={},
+                                tool_use={"toolUseId": "x", "name": "browser", "input": {}})
+    hook._record_call(other)
+    assert other.cancel_tool
+
+
+def test_failed_think_call_satisfies_first_call_and_leaves_recovery_to_model():
+    hook = _ThinkFirstHook("persona", FakeStream(), model_chosen=True)
+    hook._record_call(BeforeToolCallEvent(agent=object(), selected_tool=None, invocation_state={},
+        tool_use={"name": "think", "toolUseId": "failed", "input": {"cycle_count": 99}}))
+    hook._verify_first_call(AfterModelCallEvent(agent=object(), stop_response=AfterModelCallEvent.ModelStopResponse(
+        message={"role": "assistant", "content": [{"text": "Report/recover from error"}]}, stop_reason="end_turn")))

@@ -14,6 +14,7 @@ without a Temporal server.
 from __future__ import annotations
 
 from typing import Any, AsyncGenerator
+import copy
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -63,7 +64,8 @@ class ScriptedModel(Model):
     async def stream(
         self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
-        self.calls.append({"messages": messages, "system_prompt": system_prompt})
+        self.calls.append({"messages": copy.deepcopy(messages), "system_prompt": system_prompt,
+                           "tool_specs": copy.deepcopy(tool_specs), "state": dict(kwargs.get("invocation_state") or {})})
         for event in self.scripts.pop(0):
             yield event
 
@@ -353,11 +355,147 @@ async def test_model_failure_returns_error_result_with_content() -> None:
 
 
 def test_module_stays_a_thin_wrapper() -> None:
-    """Acceptance gate: the fork is gone and the module stays small.
+    """Native cycle adaptation in this module, not a shared-tools framework."""
+    import inspect
+    import workflow
+    assert not hasattr(workflow.ChatWorkflow, "_run_think")
+    source = inspect.getsource(think_activity.think_async)
+    assert "ThoughtProcessor({}, _CONSOLE).create_thinking_prompt" in source
+    assert ".stream_async(" in source
+    assert "tools=[]" not in source
+    assert "agent.tool_registry.registry" in source
 
-    Raised from 120: the hook-side ``ThinkInput`` dataclass (activity_as_hook's
-    ``activity_input`` payload) and the closing durable ``think_notes`` publish
-    both live here now, not in workflow.py.
-    """
-    lines = open(think_activity.__file__).read().splitlines()
-    assert len(lines) < 160, f"{len(lines)} lines; the wrapper must stay under 160"
+
+def call_events(name, call_id, arguments):
+    import json
+    return [
+        {"messageStart": {"role": "assistant"}},
+        {"contentBlockStart": {"start": {"toolUse": {"toolUseId": call_id, "name": name}}}},
+        {"contentBlockDelta": {"delta": {"toolUse": {"input": json.dumps(arguments)}}}},
+        {"contentBlockStop": {}}, {"messageStop": {"stopReason": "tool_use"}},
+        {"metadata": {"usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2}, "metrics": {"latencyMs": 1}}},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_async_inherits_parent_tools_and_executes_them_between_cycles():
+    from strands import Agent, tool
+    from config import THINK_MODEL_ID
+    calls = []
+    @tool
+    def lookup(value: str) -> str:
+        """Retrieve test evidence."""
+        calls.append(value)
+        return "evidence-742"
+    @tool
+    def think() -> str:
+        """Must never recurse."""
+        raise AssertionError("recursive Think")
+    model = ScriptedModel([call_events("lookup", "lookup-1", {"value": "question"}), text_events("first"), text_events("second")])
+    factory = MagicMock(return_value=model)
+    think_activity.configure({THINK_MODEL_ID: factory})
+    parent = Agent(model=ScriptedModel([]), tools=[lookup, think], system_prompt="Parent persona",
+                   messages=[{"role": "user", "content": [{"text": "prior context"}]}], callback_handler=None)
+    original = copy.deepcopy(parent.messages)
+    state = {"require_think": True, "reasoning_effort": "low", "session_id": "stable"}
+    emitted = [event async for event in think_activity.think_async("Analyze", 2, "high", agent=parent, invocation_state=state)]
+    final = emitted[-1]
+    assert final["status"] == "success"
+    assert final["content"][0]["text"] == "Cycle 1/2:\nfirst\n\nCycle 2/2:\nsecond"
+    assert calls == ["question"]
+    factory.assert_called_once()
+    assert len(model.calls) == 3
+    for request in model.calls:
+        assert [spec["name"] for spec in request["tool_specs"]] == ["lookup"]
+        assert request["system_prompt"] == "Parent persona"
+        assert request["state"]["reasoning_effort"] == "high"
+        assert "require_think" not in request["state"]
+    assert "evidence-742" in str(model.calls[-1]["messages"])
+    assert "prior context" in str(model.calls[-1]["messages"])
+    assert "evidence-742" in str(final)
+    assert parent.messages == original
+    assert state == {"require_think": True, "reasoning_effort": "low", "session_id": "stable"}
+    assert len([event for event in emitted if "event" in event]) > 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effort", ["minimal", "low", "medium", "high", "xhigh", "max"])
+async def test_async_effort_and_prompt_are_caller_selected(effort):
+    from strands import Agent
+    from config import THINK_MODEL_ID
+    model = ScriptedModel([text_events("insight")])
+    think_activity.configure({THINK_MODEL_ID: lambda: model})
+    parent = Agent(model=ScriptedModel([]), system_prompt="Parent", callback_handler=None)
+    events = [event async for event in think_activity.think_async("request", 1, effort, agent=parent,
+                                                                thinking_system_prompt="METHOD", system_prompt="Persona")]
+    assert events[-1]["status"] == "success"
+    assert model.calls[0]["state"]["reasoning_effort"] == effort
+    expected = think_activity.ThoughtProcessor({}, think_activity._CONSOLE).create_thinking_prompt("request", 1, 1, "METHOD")
+    assert prompt_text(model.calls[0]) == expected
+    assert model.calls[0]["system_prompt"] == "Persona"
+
+
+@pytest.mark.asyncio
+async def test_async_zero_cycles_does_not_access_agent_factory_or_tools():
+    events = [event async for event in think_activity.think_async("hello", 0, "minimal", agent=None)]
+    assert events == [{"status": "success", "content": [{"text": ""}]}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cycles,effort", [(-1, "minimal"), (11, "high"), (True, "high"), (1, "invented")])
+async def test_async_invalid_arguments_return_upstream_error_without_execution(cycles, effort):
+    events = [event async for event in think_activity.think_async("request", cycles, effort, agent=None)]
+    assert events[-1]["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_async_no_astra_factory_returns_error_not_parent_model_fallback():
+    from strands import Agent
+    parent_model = ScriptedModel([text_events("must not execute")])
+    parent = Agent(model=parent_model, callback_handler=None)
+    result = [event async for event in think_activity.think_async("request", 1, "minimal", agent=parent)]
+    assert result[-1]["status"] == "error"
+    assert "no fallback" in result[-1]["content"][0]["text"]
+    assert parent_model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_async_explicit_empty_tools_keeps_native_override_and_no_recursion():
+    from strands import Agent, tool
+    from config import THINK_MODEL_ID
+    @tool
+    def lookup() -> str:
+        """Test evidence."""
+        return "result"
+    model = ScriptedModel([text_events("answer")])
+    think_activity.configure({THINK_MODEL_ID: lambda: model})
+    parent = Agent(model=ScriptedModel([]), tools=[lookup], callback_handler=None)
+    result = [event async for event in think_activity.think_async("request", 1, "low", agent=parent, tools=[])]
+    assert result[-1]["status"] == "success"
+    assert not model.calls[0]["tool_specs"]
+
+
+@pytest.mark.asyncio
+async def test_async_mid_cycle_failure_returns_evidence_without_retrying_completed_tool():
+    from strands import Agent, tool
+    from config import THINK_MODEL_ID
+    calls = []
+    @tool
+    def lookup() -> str:
+        """Return observable evidence."""
+        calls.append("executed")
+        return "evidence-before-error"
+    class FailingAfterTool(ScriptedModel):
+        async def stream(self, *args, **kwargs):
+            if self.calls:
+                raise RuntimeError("provider unavailable after action")
+            async for event in super().stream(*args, **kwargs):
+                yield event
+    model = FailingAfterTool([call_events("lookup", "before-failure", {})])
+    think_activity.configure({THINK_MODEL_ID: lambda: model})
+    parent = Agent(model=ScriptedModel([]), tools=[lookup], callback_handler=None)
+    events = [event async for event in think_activity.think_async("request", 3, "high", agent=parent)]
+    assert events[-1]["status"] == "error"
+    assert "provider unavailable after action" in events[-1]["content"][0]["text"]
+    assert "evidence-before-error" in str(events[-1])
+    assert calls == ["executed"]

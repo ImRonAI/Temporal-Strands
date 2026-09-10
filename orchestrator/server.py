@@ -33,12 +33,11 @@ import logging
 import os
 import re
 import shlex
-import subprocess
+import stat
 import time
 from collections.abc import AsyncIterator
 import asyncio
-import fcntl
-from config import SSE_SUBSCRIBE_RESTART_LIMIT, SSE_SUBSCRIBE_RESTART_DELAY, SSE_HEARTBEAT_SECONDS
+from config import SSE_SUBSCRIBE_RESTART_LIMIT, SSE_SUBSCRIBE_RESTART_DELAY, SSE_HEARTBEAT_SECONDS, SSE_COMPLETION_DRAIN_TIMEOUT
 from contextlib import asynccontextmanager, suppress
 
 from starlette.concurrency import run_in_threadpool
@@ -51,10 +50,16 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from temporalio.client import Client, WorkflowUpdateStage, WorkflowUpdateFailedError
+from temporalio.client import (
+    Client,
+    WorkflowUpdateStage,
+    WorkflowUpdateFailedError,
+    WorkflowUpdateRPCTimeoutOrCancelledError,
+)
 from temporalio.contrib.strands import StrandsPlugin
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
 from temporalio.service import RPCError, RPCStatusCode
+from temporalio.exceptions import ApplicationError
 
 from compare_workflow import (
     MODEL_TOPIC_PREFIX,
@@ -68,8 +73,8 @@ from config import (
     CATALOG_CACHE_TTL,
     CATALOG_WORKFLOW_TIMEOUT,
     DEFAULT_MODEL_ID,
+    DESKTOP_BROWSER_TASK_QUEUE,
     DESKTOP_VNC_GRANT_COMMAND,
-    DESKTOP_VNC_REVOKE_COMMAND,
     DESKTOP_VNC_COMMAND_TIMEOUT,
     DESKTOP_HANDOFF_TIMEOUT,
     PROVIDER_DISPLAY_NAMES,
@@ -78,7 +83,7 @@ from config import (
     TASK_QUEUE,
 )
 from perplexity_operations import AGENT_RUNS_TOPIC
-from browser_activity import artifact_root, desktop_state
+from browser_activity import artifact_root
 from run_worker import agent_identity
 from skills_config import augmented_system_prompt
 from workspace_api import WorkspaceRequestBoundary, router as workspace_router, workspace_lifespan
@@ -125,18 +130,20 @@ _state: dict[str, Any] = {"client": None, "system_prompt": ""}
 
 
 _poller_cache: dict[str, Any] = {"checked_at": 0.0, "ok": False}
+_desktop_poller_cache: dict[str, Any] = {"checked_at": 0.0, "ok": False}
 
 
-async def task_queue_has_pollers() -> bool:
-    """Cached DescribeTaskQueue probe: are workflow pollers on TASK_QUEUE?
+async def task_queue_has_pollers(*, desktop: bool = False) -> bool:
+    """Cached DescribeTaskQueue probe for workflow or desktop activity pollers.
 
     Fail closed: no Temporal client, an RPC error, or a slow RPC all report
     False. Cached for READINESS_POLLER_CACHE so health/session gating stays
     cheap under load.
     """
     now = time.monotonic()
-    if now - _poller_cache["checked_at"] < READINESS_POLLER_CACHE.total_seconds():
-        return bool(_poller_cache["ok"])
+    cache = _desktop_poller_cache if desktop else _poller_cache
+    if now - cache["checked_at"] < READINESS_POLLER_CACHE.total_seconds():
+        return bool(cache["ok"])
     client = _state["client"]
     ok = False
     if client is not None:
@@ -149,8 +156,9 @@ async def task_queue_has_pollers() -> bool:
                 client.workflow_service.describe_task_queue(
                     DescribeTaskQueueRequest(
                         namespace=client.namespace,
-                        task_queue=TaskQueue(name=TASK_QUEUE),
-                        task_queue_type=TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW,
+                        task_queue=TaskQueue(name=DESKTOP_BROWSER_TASK_QUEUE if desktop else TASK_QUEUE),
+                        task_queue_type=(TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY if desktop
+                                         else TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW),
                     )
                 ),
                 timeout=READINESS_POLLER_RPC_TIMEOUT.total_seconds(),
@@ -159,8 +167,8 @@ async def task_queue_has_pollers() -> bool:
         except Exception as error:  # noqa: BLE001 - fail closed, never crash
             logger.warning("task-queue poller probe failed: %s", error)
             ok = False
-    _poller_cache["checked_at"] = now
-    _poller_cache["ok"] = ok
+    cache["checked_at"] = now
+    cache["ok"] = ok
     return ok
 
 
@@ -427,7 +435,7 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
         # temporalio/contrib/workflow_streams/_client.py, whose subscribe()
         # returns only on AcceptedUpdateCompletedWorkflow, RPC timeout, or
         # terminal status. ChatWorkflow stays Running between turns, so this
-        # per-turn pump stops on the update's result, never on exhaustion.
+        # per-turn pump drains to a frozen completion offset, never exhaustion.
         #
         # The SDK iterator is itself the buffer: it is selected against
         # directly, with no queue, consumer task, or drain sleep in between.
@@ -509,10 +517,66 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
                     )
                     anext_task = asyncio.create_task(_next_item(subscription))
 
+                # Completion can overtake a fetched batch or an in-flight poll.
+                # Replay from the last forwarded item, not the SDK's read cursor.
+                try:
+                    try:
+                        deadline = asyncio.get_running_loop().time() + SSE_COMPLETION_DRAIN_TIMEOUT
+                        end_offset = await asyncio.wait_for(
+                            stream_client.get_offset(), timeout=SSE_COMPLETION_DRAIN_TIMEOUT,
+                        )
+                        anext_task.cancel()
+                        with suppress(asyncio.CancelledError, Exception):
+                            await anext_task
+                        await _aclose(subscription)
+                        if last_offset > end_offset:
+                            raise RuntimeError("completion offset is behind the delivered offset")
+                        if last_offset < end_offset:
+                            # The watermark is global. Read every topic to reach it,
+                            # but expose only the existing SSE topic contract.
+                            subscription = stream_client.subscribe(None, from_offset=last_offset)
+                        while last_offset < end_offset:
+                            remaining = deadline - asyncio.get_running_loop().time()
+                            if remaining <= 0:
+                                raise TimeoutError
+                            anext_task = asyncio.create_task(_next_item(subscription))
+                            done, _ = await asyncio.wait({anext_task}, timeout=remaining)
+                            if not done:
+                                raise TimeoutError
+                            item = anext_task.result()
+                            if item is None:
+                                raise RuntimeError("stream ended before the completion offset")
+                            if item.offset != last_offset:
+                                raise RuntimeError(f"expected offset {last_offset}, received {item.offset}")
+                            last_offset = item.offset + 1
+                            if item.topic in CHAT_TOPICS:
+                                data = item.data
+                                frame = dict(data) if isinstance(data, dict) else {"data": data}
+                                frame["topic"] = item.topic
+                                yield sse(frame)
+                    finally:
+                        anext_task.cancel()
+                        with suppress(asyncio.CancelledError, Exception):
+                            await anext_task
+                        await _aclose(subscription)
+                except Exception as error:  # noqa: BLE001 - explicit incomplete delivery
+                    detail = "completion drain timed out" if isinstance(error, TimeoutError) else str(error)
+                    yield sse({"error": f"Incomplete event delivery: {detail}. Do not repeat computer actions."})
+                    return
+
                 try:
                     reply = result_task.result()
                 except Exception as error:  # noqa: BLE001 - surfaced to the client
-                    yield sse({"error": str(error)})
+                    detail = str(error)
+                    cause = error
+                    seen = set()
+                    while cause is not None and id(cause) not in seen:
+                        seen.add(id(cause))
+                        if isinstance(cause, ApplicationError) and cause.type == "PerplexityModelError":
+                            detail = str(cause)
+                            break
+                        cause = getattr(cause, "cause", None) or cause.__cause__
+                    yield sse({"error": detail})
                     return
                 yield sse({"done": True, "reply": reply})
             finally:
@@ -548,7 +612,7 @@ async def approve(session_id: str, body: ApproveRequest) -> None:
         raise HTTPException(502, str(error)) from error
 
 
-async def _vnc_input(command: str, expected_answer: str, *, verify_cleanup: bool = False) -> None:
+async def _vnc_input(command: str, expected_answer: str | tuple[str, ...], *, verify_cleanup: bool = False) -> None:
     """Toggle desktop input through x11vnc's native remote control, verified."""
     process = await asyncio.create_subprocess_exec(
         *shlex.split(command), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -561,101 +625,129 @@ async def _vnc_input(command: str, expected_answer: str, *, verify_cleanup: bool
         await process.wait()
         raise
     answers = stdout.decode().strip().splitlines()[-1].split(",") if stdout.strip() else []
-    if process.returncode != 0 or expected_answer not in answers:
+    expected = (expected_answer,) if isinstance(expected_answer, str) else expected_answer
+    if process.returncode != 0 or not set(expected).issubset(answers):
         raise HTTPException(503, "Desktop input transfer could not be verified")
     if verify_cleanup and not {"aro=client_count:0", "aro=pointer_mask:0x0"}.issubset(answers):
         raise HTTPException(503, "Native desktop clients or held input did not clear")
 
 
-def _desktop_mode(session_id: str, mode: str | None = None) -> dict:
-    owner = {"namespace": temporal().namespace, "workflow_id": session_id}
-    with desktop_state() as state:
-        if state.get("owner") != owner:
-            raise HTTPException(409, "This chat does not own the desktop")
-        if mode is not None:
-            state["mode"] = mode
-        return dict(state)
+def _desktop_mode(session_id: str) -> dict:
+    # Read the atomically replaced file only. Host locks do not synchronize with
+    # Linux flock on Colima, and even a read-only desktop_state context writes.
+    try:
+        fd = os.open(artifact_root() / "runtime.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise ValueError("Desktop state must be a regular file")
+            raw = source.read(4097)
+        if len(raw) > 4096:
+            raise ValueError("Desktop state exceeds limit")
+        state = json.loads(raw)
+        if not isinstance(state, dict) or type(state.get("epoch")) is not int or state.get("mode") not in {
+            "agent", "stopping", "human", "relinquishing", "instructions", "resuming", "recovery",
+        }:
+            raise ValueError("Invalid desktop state")
+    except (OSError, ValueError) as error:
+        raise HTTPException(503, "Desktop unavailable or invalid state") from error
+    if state.get("owner") != {"namespace": temporal().namespace, "workflow_id": session_id}:
+        raise HTTPException(409, "This chat does not own the desktop")
+    return state
 
 
 @app.get("/sessions/{session_id}/desktop-control")
-async def desktop_control_status(session_id: str) -> dict:
+async def desktop_control_status(session_id: str, response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store"
     state = await asyncio.to_thread(_desktop_mode, session_id)
-    workflow_state = await temporal().get_workflow_handle(session_id).query(ChatWorkflow.control_status)
-    return {"mode": state["mode"], "epoch": state["epoch"], **workflow_state}
+    try:
+        async with asyncio.timeout(READINESS_POLLER_RPC_TIMEOUT.total_seconds()):
+            workflow_state = await temporal().get_workflow_handle(session_id).query(
+                ChatWorkflow.control_status, rpc_timeout=READINESS_POLLER_RPC_TIMEOUT,
+            )
+    except (TimeoutError, RPCError):
+        # Reconnecting must not forget native ownership when the worker is down.
+        workflow_state = {"run_id": None, "ready": False}
+    runtime_available = await task_queue_has_pollers(desktop=True)
+    try:
+        command = shlex.split(DESKTOP_VNC_GRANT_COMMAND)
+        command = command[:command.index("-R")] + ["-Q", "viewonly,deny"]
+        # Pollers may linger after worker loss; require a fresh native receipt too.
+        await _vnc_input(
+            shlex.join(command), (f"ans=viewonly:{0 if state['mode'] == 'human' else 1}", "ans=deny:0"),
+        )
+    except (HTTPException, OSError, TimeoutError, ValueError):
+        runtime_available = False
+    current = await asyncio.to_thread(_desktop_mode, session_id)
+    # GET readiness means native availability, not an idle turn. Take Control
+    # must remain usable while workflow.control_status.ready is false during work.
+    available = runtime_available and current == state and state["mode"] != "recovery"
+    return {**workflow_state, "ready": available,
+            "mode": current["mode"] if runtime_available else "recovery", "epoch": str(current["epoch"])}
 
 
 @app.post("/sessions/{session_id}/handoff", status_code=204)
 async def handoff(session_id: str, body: HandoffRequest) -> None:
     handle = temporal().get_workflow_handle(session_id)
-    current = await asyncio.to_thread(_desktop_mode, session_id)
-    # Native filesystem locks fence both API processes and container actions.
-    # This is one isolated-owner pilot, not authentication for a public service.
-    transition_fd = os.open(artifact_root() / "handoff.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-    action_fd = None
     try:
-        try:
-            fcntl.flock(transition_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
-            raise HTTPException(409, "A desktop handoff is already in progress") from error
-        current = await asyncio.to_thread(_desktop_mode, session_id)
-        if body.action == "take":
-            if current["mode"] == "human":
-                return
-            if current["mode"] not in {"agent", "stopping"}:
-                raise HTTPException(409, "Desktop requires recovery or resume")
-            await asyncio.to_thread(_desktop_mode, session_id, "stopping")
-            await handle.execute_update(ChatWorkflow.claim_control)
-            action_fd = os.open(artifact_root() / "action.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-            async with asyncio.timeout(DESKTOP_HANDOFF_TIMEOUT.total_seconds()):
+        async with asyncio.timeout(DESKTOP_HANDOFF_TIMEOUT.total_seconds()):
+            await asyncio.to_thread(_desktop_mode, session_id)
+            steps = {
+                "take": [(ChatWorkflow.claim_control, ()), (ChatWorkflow.desktop_control, ("take",))],
+                "release": [(ChatWorkflow.desktop_control, ("release",))],
+                "give": [(ChatWorkflow.desktop_control, ("prepare_resume",)),
+                         (ChatWorkflow.relinquish_control, (body.message,))],
+            }[body.action]
+            old_run = None
+            for method, arguments in steps:
                 while True:
                     try:
-                        fcntl.flock(action_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        old_run = await handle.execute_update(method, *arguments, rpc_timeout=DESKTOP_HANDOFF_TIMEOUT)
                         break
-                    except BlockingIOError:
+                    except WorkflowUpdateFailedError as error:
+                        if getattr(error.cause, "type", None) != "SessionRollingOver":
+                            raise
                         await asyncio.sleep(0.1)
-            if (await asyncio.to_thread(_desktop_mode, session_id))["mode"] != "stopping":
-                raise HTTPException(409, "Desktop action failed; recovery required")
-            await _vnc_input(DESKTOP_VNC_REVOKE_COMMAND, "ans=viewonly:1", verify_cleanup=True)
-            await _vnc_input(DESKTOP_VNC_GRANT_COMMAND, "ans=viewonly:0")
-            await asyncio.to_thread(_desktop_mode, session_id, "human")
-            return
-        if body.action == "release":
-            if current["mode"] == "instructions":
+            if body.action != "give":
                 return
-            if current["mode"] not in {"human", "relinquishing"}:
-                raise HTTPException(409, "Desktop is not under human control")
-            await asyncio.to_thread(_desktop_mode, session_id, "relinquishing")
-            await _vnc_input(DESKTOP_VNC_REVOKE_COMMAND, "ans=viewonly:1", verify_cleanup=True)
-            await asyncio.to_thread(_desktop_mode, session_id, "instructions")
-            return
-        if current["mode"] not in {"instructions", "resuming"}:
-            raise HTTPException(409, "Relinquish desktop input before resuming")
-        await _vnc_input(DESKTOP_VNC_REVOKE_COMMAND, "ans=viewonly:1", verify_cleanup=True)
-        await asyncio.to_thread(_desktop_mode, session_id, "resuming")
-        old_run = await handle.execute_update(ChatWorkflow.relinquish_control, body.message)
-        async with asyncio.timeout(30):
             while True:
                 state = await handle.query(ChatWorkflow.control_status)
                 if state["run_id"] != old_run and state["ready"]:
-                    # Re-enable viewer connections but leave all native input fenced.
-                    command = shlex.split(DESKTOP_VNC_GRANT_COMMAND)
-                    command[command.index("-R") + 1] = "nodeny"
-                    await _vnc_input(shlex.join(command), "ans=viewonly:1")
-                    await asyncio.to_thread(_desktop_mode, session_id, "agent")
-                    return
+                    try:
+                        await handle.execute_update(ChatWorkflow.desktop_control, "resume", rpc_timeout=DESKTOP_HANDOFF_TIMEOUT)
+                        return
+                    except WorkflowUpdateFailedError as error:
+                        if getattr(error.cause, "type", None) != "SessionRollingOver":
+                            raise
                 await asyncio.sleep(0.1)
-    except TimeoutError as error:
-        raise HTTPException(504, "Session is still resuming; retry shortly") from error
+    except (TimeoutError, WorkflowUpdateRPCTimeoutOrCancelledError) as error:
+        task = asyncio.current_task()
+        if isinstance(error, WorkflowUpdateRPCTimeoutOrCancelledError) and task is not None and task.cancelling():
+            raise asyncio.CancelledError() from error
+        phase = {"take": "takeover", "release": "release", "give": "resume"}[body.action]
+        raise HTTPException(504, f"Desktop {phase} timed out; transfer unconfirmed, check control status before retrying") from error
     except WorkflowUpdateFailedError as error:
         raise HTTPException(409, str(error.__cause__ or error)) from error
     except RPCError as error:
         if error.status == RPCStatusCode.NOT_FOUND:
             raise HTTPException(404, f"Unknown session: {session_id}") from error
         raise HTTPException(502, str(error)) from error
-    finally:
-        if action_fd is not None:
-            os.close(action_fd)
-        os.close(transition_fd)
+
+
+@app.get("/sessions/{session_id}/desktop-images/{artifact_id}")
+async def desktop_image(session_id: str, artifact_id: str) -> Response:
+    from desktop_observation import observation_image
+    from workspace_state import StateConflict
+
+    await asyncio.to_thread(_desktop_mode, session_id)
+    try:
+        image = await asyncio.to_thread(
+            observation_image, artifact_id, namespace=temporal().namespace, workflow_id=session_id,
+        )
+    except (ValueError, KeyError, OSError, StateConflict) as error:
+        raise HTTPException(404, "Desktop observation unavailable") from error
+    return Response(image, media_type="image/png", headers={
+        "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+    })
 
 
 @app.post("/sessions/{session_id}/end", status_code=204)

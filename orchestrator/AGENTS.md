@@ -32,7 +32,7 @@ Primary: Perplexity Agent API (`PerplexityModel`), six `preset:` ids plus every 
 
 ## Think tool
 
-The `think` tool is **live**, falsifying the root `AGENTS.md` claim that it is discontinued. `THINK_TOOL` is built in `workflow.py`, added to the agent's tools, and `_ThinkFirstHook` forces it before the model on each new prompt, folding notes in as a `<think_notes>` block. `think_activity.py` is registered and configured in `run_worker.py`.
+Think remains required. September 10 execution decisions supersede the old fixed one-cycle pre-turn hook: the orchestrator must call `think` first each user turn and choose `reasoning_effort` and `cycle_count` itself, with no task heuristics. Think always uses `openai/gpt-6-astra` through the existing Perplexity factory, including its configured native API tools. Allowed effort inputs (accepted/echoed in live API checks): `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; 0-10 cycles, zero makes no Astra request, one effort for the whole call. `think_activity.think_async` adapts upstream prompts, inheritance (all current tools except recursive Think), summary/error envelope to async streaming. It starts from current parent context, retains full context across its cycles, and returns conclusions plus evidence. No separate persistent Think history. The model handles errors normally; no fallback model/effort. `_ThinkFirstHook` uses native named-tool choice, not code-selected arguments. `THINK_TOOL`/the old activity remain registered only for pre-patch replay, behind `think-model-chosen-astra-v1`.
 
 ## Stream topics
 

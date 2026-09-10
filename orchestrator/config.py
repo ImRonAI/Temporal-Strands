@@ -31,9 +31,8 @@ class RegisteredModel:
 # the desktop worker, which polls this queue from inside the Linux desktop
 # (Xvfb). Native Temporal task-queue routing — no custom platform code.
 DESKTOP_BROWSER_TASK_QUEUE = "desktop-browser"
-# Native x11vnc remote-control command used to fence/grant desktop input.
-# Executed verbatim by the API on handoff; the default targets the local pilot
-# container. Set to the deployment's equivalent for GCE.
+# Deployment command prefix retained for the API's read-only native VNC probe.
+# Control transfers execute only inside the desktop worker, never on the host.
 DESKTOP_VNC_GRANT_COMMAND = os.environ.get(
     "DESKTOP_VNC_GRANT_COMMAND",
     "docker --context colima exec gwen-desktop x11vnc -display :99 -R script:noviewonly;nodeny -Q viewonly,deny",
@@ -41,6 +40,14 @@ DESKTOP_VNC_GRANT_COMMAND = os.environ.get(
 DESKTOP_VNC_REVOKE_COMMAND = os.environ.get(
     "DESKTOP_VNC_REVOKE_COMMAND",
     "docker --context colima exec gwen-desktop x11vnc -display :99 -R script:viewonly;deny;disconnect:all;clear_all;fakebuttonevent:1,0;fakebuttonevent:2,0;fakebuttonevent:3,0 -Q viewonly,client_count,pointer_mask",
+)
+DESKTOP_VNC_REVOKE_SCRIPT = "script:viewonly;deny;disconnect:all;clear_all;fakebuttonevent:1,0;fakebuttonevent:2,0;fakebuttonevent:3,0"
+DESKTOP_VNC_GRANT_SCRIPT = "script:nodeny;noviewonly"
+# Runs inside the Linux desktop worker, inheriting its DISPLAY and XAUTHORITY.
+# Admit viewers only after verified revocation; never enable native input here.
+DESKTOP_VNC_VIEW_COMMAND = os.environ.get(
+    "DESKTOP_VNC_VIEW_COMMAND",
+    "x11vnc -R script:viewonly;nodeny -Q viewonly,deny",
 )
 DESKTOP_VNC_COMMAND_TIMEOUT = 15
 DESKTOP_HANDOFF_TIMEOUT = timedelta(seconds=45)
@@ -64,6 +71,7 @@ NATIVE_OUTPUT_ITEM_TYPES = (
     "sandbox_write_file",
     "share_file",
     "mcp_call",
+    "mcp_list_tools",
     "skill_loaded",
     "advisor_result",
 )
@@ -85,7 +93,7 @@ BUILTIN_SKILLS = tuple(
         "office/xlsx",
     )
 )
-# Dashboard-authorized Agent API connectors, attached to every request as
+# Configured Agent API connectors, attached to every request as
 # native {"type": "connector"} tools (agent_api_tools.connector_tools).
 # Authorization lives in the Perplexity dashboard; requests only reference the
 # connector id. Overridable via PERPLEXITY_CONNECTOR_IDS as comma-separated
@@ -107,6 +115,11 @@ CONNECTORS: tuple[dict[str, str], ...] = (
             "file contents; credentials are shared into the sandbox for "
             "git/gh."
         ),
+    },
+    {
+        "id": "connector_linear",
+        "server_label": "linear",
+        "server_description": "The user's Linear: issues, projects, teams, and project updates.",
     },
 )
 # The Agent API's own documented ceilings, not numbers chosen by this client.
@@ -159,6 +172,7 @@ MODEL_STREAM_BATCH_INTERVAL = timedelta(milliseconds=200)
 SSE_SUBSCRIBE_RESTART_LIMIT = 3
 SSE_SUBSCRIBE_RESTART_DELAY = 0.25
 SSE_HEARTBEAT_SECONDS = 10
+SSE_COMPLETION_DRAIN_TIMEOUT = 10
 
 
 def closable_activity_options(options: dict) -> dict:
@@ -189,6 +203,9 @@ THINK_STREAM_BATCH_INTERVAL = timedelta(seconds=2)
 THINK_START_TO_CLOSE = timedelta(minutes=10)
 THINK_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
 THINK_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
+THINK_MODEL_ID = "openai/gpt-6-astra"
+# Verified accepted and echoed by Agent API for Astra on 2026-09-10.
+THINK_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
 # --- Formation graph / sub-agent activities ---
 # A whole formation replay is expensive and non-idempotent (every node call
 # is billable inference), so like the think envelope the graph and use_agent
@@ -286,6 +303,8 @@ DESKTOP_MAX_MUTATIONS = 100
 DESKTOP_OBSERVATION_TIMEOUT = timedelta(seconds=30)
 DESKTOP_OBSERVATION_RETRY_POLICY = RetryPolicy(maximum_attempts=3)
 DESKTOP_MUTATION_TIMEOUT = timedelta(seconds=30)
+DESKTOP_SCHEDULE_TO_START = timedelta(seconds=5)
+DESKTOP_ACTION_SCHEDULE_TO_CLOSE = timedelta(seconds=40)
 DESKTOP_MUTATION_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
 DESKTOP_JOB_HEARTBEAT_INTERVAL = timedelta(seconds=10)
 DESKTOP_JOB_HEARTBEAT_TIMEOUT = timedelta(seconds=30)

@@ -1,4 +1,4 @@
-import { isDynamicToolUIPart, type UIMessage } from "ai"
+import { isDynamicToolUIPart, isReasoningUIPart, type DynamicToolUIPart, type UIMessage } from "ai"
 
 /** Gemini 3 Computer Use actions plus 2.5 legacy names, and the stock
  *  strands browser tool name (any provider).
@@ -217,4 +217,56 @@ export function computerUseFailed(output: unknown): boolean {
   if (!record) return false
   if (record.status === "error") return true
   return unwrapToolOutput(record)?.status === "error"
+}
+
+/** Inspect native result envelopes, including Temporal's serialized result.
+ * Keep all content blocks; arbitrary embedded page strings are not envelopes.
+ */
+export function toolPresentation(part: DynamicToolUIPart): {
+  output: unknown; error: string | undefined; state: DynamicToolUIPart["state"]; text: string; terminal: boolean
+} {
+  let output: unknown = "output" in part
+    ? COMPUTER_USE_TOOL_NAMES.has(part.toolName) ? stripComputerUseScreenshot(part.output) : part.output
+    : undefined
+  let failed = false
+  for (let depth = 0; depth < 8; depth++) {
+    const record = asRecord(output)
+    if (!record) break
+    failed ||= record.status === "error" || record.isError === true
+    const content = record.content
+    if (!Array.isArray(content) || content.length !== 1) break
+    const block = asRecord(content[0])
+    const inner = asRecord(block?.text) ?? asRecord(block?.json)
+    if (!inner || !("content" in inner || "status" in inner || "isError" in inner)) break
+    output = inner
+  }
+  const record = asRecord(output)
+  failed ||= record?.status === "error" || record?.isError === true
+  const blocks = Array.isArray(record?.content) ? record.content : []
+  const text = blocks.map(block => {
+    const item = asRecord(block)
+    return typeof item?.text === "string" ? item.text : ""
+  }).filter(Boolean).join("\n\n") || (typeof output === "string" ? output
+    : Array.isArray(output) ? output.filter(value => typeof value === "string").join("\n\n")
+    : typeof record?.notes === "string" ? record.notes : "")
+  let error = part.state === "output-error" ? part.errorText : undefined
+  if (part.state === "output-denied") error = "Tool execution was denied."
+  if (failed && !error) {
+    const detail = record?.error
+    error = text || (typeof detail === "string" ? detail : undefined)
+      || (typeof asRecord(detail)?.message === "string" ? String(asRecord(detail)?.message) : undefined)
+      || (typeof record?.message === "string" ? record.message : undefined)
+      || "Tool reported an error without a message."
+  }
+  return { output, text, error,
+    state: part.state === "output-available" && failed ? "output-error" : part.state,
+    terminal: ["output-available", "output-error", "output-denied"].includes(part.state) }
+}
+
+/** Hide only conclusions already shown in the live reasoning stream. */
+export function thinkSummaryWasStreamed(text: string, parts: UIMessage["parts"]): boolean {
+  const normalize = (value: string) => value.replace(/Cycle \d+\/\d+:\s*/g, "").replace(/\s+/g, " ").trim()
+  const summary = normalize(text)
+  const reasoning = normalize(parts.filter(isReasoningUIPart).map(part => part.text).join(" "))
+  return !!summary && reasoning.includes(summary)
 }

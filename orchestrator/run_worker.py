@@ -54,6 +54,7 @@ from catalog_workflow import ModelCatalogWorkflow, model_catalog, set_catalog
 from compare_workflow import CompareWorkflow
 from config import (
     BUILTIN_SKILLS,
+    CONNECTORS,
     DEFAULT_MODEL_ID,
     GEMINI_MAX_OUTPUT_TOKENS,
     GEMINI_MODEL_IDS,
@@ -171,10 +172,25 @@ def build_perplexity_factories(
     the closure and never enters model configuration or workflow state.
     """
     tools = native_tools()
-    logger.info(
-        "Registered Agent API connectors: %s",
-        [tool["server_label"] for tool in tools if tool.get("type") == "connector"],
-    )
+    connector_labels = [
+        tool["server_label"] for tool in tools if tool.get("type") == "connector"
+    ]
+    if connector_labels:
+        logger.warning(
+            "Configured Agent API connectors: %s; authorization status unverified "
+            "(no public connector list/status endpoint). An API Group administrator "
+            "must verify connections at https://console.perplexity.ai/group/connectors",
+            connector_labels,
+        )
+    missing_labels = [
+        connector["server_label"] for connector in CONNECTORS
+        if connector["server_label"] not in connector_labels
+    ]
+    if missing_labels:
+        logger.warning(
+            "Connector configuration missing from explicit PERPLEXITY_CONNECTOR_IDS selection: %s. "
+            "Other configured connectors and tools remain enabled.", missing_labels,
+        )
     registered_ids = [*PRESET_MODEL_IDS, *model_ids]
     factories = {
         # PerplexityModel pins base_url to PERPLEXITY_API_BASE and
@@ -284,7 +300,8 @@ async def assemble_model_factories() -> tuple[
     appears exactly once with its worker-declared provider.
     Graceful startup: a missing Perplexity key skips Perplexity with a warning;
     a catalog fetch failure keeps the six preset factories; a missing Google
-    key skips Gemini. SystemExit only when no factories remain.
+    key skips Gemini. Missing connector configuration warns without disabling
+    other tools. Malformed explicit configuration fails before registration.
     """
     factories: dict[str, Callable[[], Any]] = {}
     catalog: list[RegisteredModel] = []
@@ -296,6 +313,12 @@ async def assemble_model_factories() -> tuple[
             "PERPLEXITY_API_KEY is not set; skipping Perplexity model factories"
         )
     else:
+        # Validate operator setup before catalog I/O or any factory registration.
+        # Connector IDs alone cannot establish API Group authorization.
+        try:
+            connector_tools()
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
         catalog_ids: list[str] = []
         try:
             catalog_ids = await fetch_model_ids(perplexity_key)
@@ -372,7 +395,9 @@ def validate_outbound_tools() -> None:
         }
         for spec in workflow_tool_specs()
     ]
-    outbound = [*native_tools(), *converted]
+    # A Gemini-only worker does not register Agent API native integrations.
+    natives = native_tools() if os.environ.get("PERPLEXITY_API_KEY") else []
+    outbound = [*natives, *converted]
     try:
         json.dumps(outbound)
     except (TypeError, ValueError) as error:
@@ -491,9 +516,8 @@ async def main() -> None:
     # One shared registry for every sub-agent activity (graph / use_agent /
     # use_skill); think keeps its own pinned copy.
     subagent_support.configure(model_factories)
-    # The ONE permitted registry for think: strands_tools.think's
-    # model_provider cannot name a Temporal model factory, so the activity
-    # resolves the session model from this mapping instead.
+    # Legacy Think remains configured for pre-patch histories. New Think runs
+    # natively inside ChatWorkflow with the same tools and model as its parent.
     think_activity.set_model_factories(model_factories)
     # Formation nodes select a model by registered id only -- the same
     # factories StrandsPlugin serves -- never by provider name.

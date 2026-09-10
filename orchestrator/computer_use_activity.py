@@ -56,7 +56,6 @@ def execute_computer_use(action: str, args: dict[str, Any]) -> dict[str, Any]:
     with desktop_action() as epoch:
         # Imports stay inside the Linux activity, never on the credential host.
         import pyautogui
-        from strands_tools.cursor import cursor
 
         width, height = pyautogui.size()
         x, y = denormalize(args.get("x"), width), denormalize(args.get("y"), height)
@@ -80,11 +79,11 @@ def execute_computer_use(action: str, args: dict[str, Any]) -> dict[str, Any]:
                     browser_args["url"] = args.get("url", "about:blank")
                 result = _browser.browser(browser_input=BrowserInput.model_validate({"action": browser_args}))
         elif canonical in {"click", "double_click", "triple_click", "middle_click", "right_click"}:
-            result = cursor(action="click", x=x, y=y,
+            pyautogui.click(x, y,
                             button={"middle_click": "middle", "right_click": "right"}.get(canonical, "left"),
-                            clicks={"double_click": 2, "triple_click": 3}.get(canonical, 1))
+                            clicks={"double_click": 2, "triple_click": 3}.get(canonical, 1), interval=0.0)
         elif canonical == "move":
-            result = cursor(action="move", x=x, y=y)
+            pyautogui.moveTo(x, y)
         elif canonical in {"mouse_down", "mouse_up"}:
             pyautogui.moveTo(x, y)
             (pyautogui.mouseDown if canonical == "mouse_down" else pyautogui.mouseUp)()
@@ -95,23 +94,26 @@ def execute_computer_use(action: str, args: dict[str, Any]) -> dict[str, Any]:
             if args.get("x") is not None and args.get("y") is not None:
                 pyautogui.click(x, y)
                 pyautogui.hotkey("ctrl", "a")
-            result = cursor(action="type_text", text=text)
+            pyautogui.write(text, interval=0.0)
             if args.get("press_enter"):
                 pyautogui.press("enter")
         elif canonical == "drag_and_drop":
             pyautogui.moveTo(denormalize(args.get("start_x", args.get("x")), width),
                              denormalize(args.get("start_y", args.get("y")), height))
-            result = cursor(action="drag", to_x=denormalize(args.get("end_x", args.get("destination_x")), width),
-                            to_y=denormalize(args.get("end_y", args.get("destination_y")), height))
+            pyautogui.dragTo(denormalize(args.get("end_x", args.get("destination_x")), width),
+                             denormalize(args.get("end_y", args.get("destination_y")), height),
+                             duration=0.5, button="left")
         elif canonical == "press_key":
-            result = cursor(action="press_key", key=key)
+            pyautogui.press(key)
         elif canonical in {"key_down", "key_up"}:
             (pyautogui.keyDown if canonical == "key_down" else pyautogui.keyUp)(key)
         elif canonical == "hotkey":
             keys = args.get("keys", args.get("key", []))
             if isinstance(keys, str):
                 keys = keys.lower().replace("control", "ctrl").split("+")
-            result = cursor(action="hotkey", keys=keys)
+            if not keys:
+                raise ValueError("Desktop hotkey requires at least one key")
+            pyautogui.hotkey(*keys)
         elif canonical == "scroll":
             direction = args.get("direction", "down")
             amount = max(1, min(30, int(args.get("magnitude_in_pixels", args.get("magnitude", 300))) // 100))
@@ -119,7 +121,7 @@ def execute_computer_use(action: str, args: dict[str, Any]) -> dict[str, Any]:
             if direction in {"left", "right"}:
                 pyautogui.hscroll(amount if direction == "right" else -amount)
             else:
-                result = cursor(action="scroll", amount=amount if direction == "up" else -amount)
+                pyautogui.scroll(amount if direction == "up" else -amount)
         elif canonical == "wait":
             time.sleep(max(0, min(5, args.get("seconds", 5))))
         elif canonical != "take_screenshot":

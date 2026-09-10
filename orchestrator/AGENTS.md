@@ -2,6 +2,10 @@
 
 Python 3.13 Temporal/Strands stack. Read the root `AGENTS.md` first; this file adds orchestrator-local detail.
 
+## Desktop implementation contract
+
+Before editing `desktop_worker.py`, `browser_activity.py`, `computer_use_activity.py`, or desktop-related workflow, server, config, and provider code, read `desktop/AGENTS.md`. That document covers sibling backend files explicitly through this instruction, not directory inheritance alone. Preserve Think. It records the required noVNC iframe, native-only framework integration, screenshot delivery, human takeover, same-session Continue-As-New, known gaps, and mandatory live acceptance tests. Do not treat old inventory claims in this file as proof that the current provider or desktop implementation is complete.
+
 ## Running tests
 
 Always run pytest from inside `orchestrator/` — no `conftest.py` or `__init__.py`. The first command is the adherence gate:
@@ -17,7 +21,7 @@ Always run pytest from inside `orchestrator/` — no `conftest.py` or `__init__.
 - `StrandsPlugin` goes on the **Client**, never the Worker.
 - Providers subclass concrete Strands providers. `GeminiModel` subclasses Strands' `GeminiModel`; `PerplexityModel` is a standalone `Model` subclass, planned to rebase onto `OpenAIResponsesModel`.
 - Hooks subclass `HookProvider` on `HookRegistry` callbacks (`_ThinkFirstHook` on `BeforeInvocationEvent`, `_ToolResultHook` on `AfterToolCallEvent`).
-- Community tools come from `strands_tools`, imported, never vendored. The `orchestrator/tools/` symlink farm still exists for `load_tool`; marked for removal.
+ - Community tools come from `strands_tools`, imported, never vendored. The former `orchestrator/tools/` symlink farm was removed; `load_tool` runs as the worker-registered `load_tool_activity` (`workflow.py` permanent tool) and resolves bare module names against the installed `strands_tools` package.
 - `server.py`: never iterate a turn stream to exhaustion; cancel the consumer, never the workflow update.
 - Live `Model` instances never go into workflow `__init__` — use `TemporalAgent` + named model factories on the worker.
 - Graceful degradation for optional infra — `telemetry.py` is the reference (missing OTLP endpoint → log + empty list, never raise).

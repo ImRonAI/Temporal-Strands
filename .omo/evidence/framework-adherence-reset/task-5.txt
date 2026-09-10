@@ -1,0 +1,309 @@
+================================================================================
+TODO 5 — orchestrator/perplexity_model.py: rebase PerplexityModel onto
+          OpenAIResponsesModel
+Date: 2026-09-09
+Repo: /Users/tims-stuff/Desktop/v0-clone-blurple  (branch cursor/orchestrator-gemini-computer-use)
+================================================================================
+
+CHANGED FILES
+  orchestrator/perplexity_model.py            rewritten (618 -> 198 lines)
+  orchestrator/config.py                      + NATIVE_OUTPUT_ITEM_TYPES
+                                              (PERPLEXITY_API_BASE already present, :47)
+  orchestrator/tests/test_perplexity_model.py rewritten to httpx.MockTransport (65 tests)
+  orchestrator/run_worker.py                  factory drops the preconstructed
+                                              perplexity.AsyncPerplexity client;
+                                              passes api_key= instead
+  orchestrator/tests/test_run_worker.py       base-url/retries assertion moved to
+                                              _resolve_client_args()
+
+--------------------------------------------------------------------------------
+1. FAILING-FIRST PROOF (TDD)
+--------------------------------------------------------------------------------
+Test fixtures were rewritten FIRST (canned SSE served through httpx.MockTransport;
+no fake-client seam — the parent's real openai.AsyncOpenAI parser and this
+module's tap both read the same one HTTP body), then run against the OLD
+hand-rolled module:
+
+  $ cd orchestrator && .venv/bin/python -m pytest tests/test_perplexity_model.py -q
+  FAILED tests/test_perplexity_model.py::test_structured_output_uses_the_parent_parse_path
+  58 failed, 2 passed in 13.54s
+
+(The 2 that passed were the two pure-helper tests: _ensure_object_properties
+normalization and the invalid-preset ApplicationError, both intentionally KEPT
+behavior.)
+
+After implementation:
+
+  $ cd orchestrator && .venv/bin/python -m pytest tests/test_perplexity_model.py -q
+  65 passed in 1.32s
+
+--------------------------------------------------------------------------------
+2. ACCEPTANCE CRITERIA
+--------------------------------------------------------------------------------
+(a) Subclass proven:
+  $ cd orchestrator && .venv/bin/python -c "from perplexity_model import PerplexityModel; \
+      from strands.models.openai_responses import OpenAIResponsesModel; \
+      assert issubclass(PerplexityModel, OpenAIResponsesModel)"
+  SUBCLASS OK                                                      [exit 0]
+
+(b) Line count < 200:
+  $ wc -l orchestrator/perplexity_model.py
+       198 orchestrator/perplexity_model.py                        [PASS: 198 < 200]
+
+(c) Deleted-symbol grep = 0:
+  $ grep -cn "flush_ready\|_message_items\|AsyncPerplexity\|_format_chunk({" \
+      orchestrator/perplexity_model.py
+  0                                                     [grep exit 1 = no match]
+
+(d) Suites green:
+  $ .venv/bin/python -m pytest tests/test_perplexity_model.py tests/test_run_worker.py -q
+  91 passed in 1.97s
+
+--------------------------------------------------------------------------------
+3. THE THREE OVERRIDES (and nothing else)
+--------------------------------------------------------------------------------
+Asserted structurally by test_only_three_methods_are_overridden:
+
+  {_resolve_client_args, _format_request, stream}
+
+Deleted: _message_items, _message_item, _image_part, flush_ready,
+_raise_sdk_error, _raise_failed, _native_event (class attrs), _value,
+_application_error (module attrs), the ~280-line stream body, the ModelConfig
+TypedDict, the local structured_output, the local update_config/get_config.
+Asserted by test_hand_rolled_parser_helpers_are_gone.
+
+Kept: _preset_name, _ensure_object_properties, _validate_config.
+
+(1) _resolve_client_args() ->
+      {"base_url": f"{PERPLEXITY_API_BASE}/v1", "api_key": <from factory>,
+       "max_retries": 0,
+       "http_client": httpx.AsyncClient(event_hooks={"response": [self._tap_sse]})}
+    A FRESH httpx.AsyncClient per call is required: the parent wraps the SDK
+    client in `async with` (openai_responses.py:321), which closes the
+    http_client on exit — a reused one would be closed after turn one.
+
+(2) _format_request(...) -> super() then:
+      - preset:<name> id  =>  request["preset"] = name; del request["model"]
+      - _ensure_object_properties over every {"type":"function"} tool entry
+      - per-turn reasoning_effort folded into request["reasoning"]
+      - browser-observation hydration preserved (activity context only)
+      - DISCOVERED CONSTRAINT (not in the plan text): openai's
+        AsyncResponses.create() takes Agent-API-only fields as NEITHER named
+        kwargs nor loose **kwargs — it raises
+          TypeError: AsyncResponses.create() got an unexpected keyword argument 'preset'
+          TypeError: ... unexpected keyword argument 'max_steps'
+          TypeError: ... unexpected keyword argument 'skills'
+        So the adapter partitions the request against
+        inspect.signature(AsyncResponses.create) and moves every non-SDK field
+        into `extra_body`, the SDK's documented verbatim-JSON passthrough.
+        Verified on the wire (recorded MockTransport request body):
+          {"input":[...],"stream":true,"store":true,"background":true,
+           "tools":[...],"preset":"high","max_steps":100,
+           "skills":[{"type":"builtin","name":"office"}]}
+        i.e. `preset`/`max_steps`/`skills` land at the JSON top level, exactly
+        as the Agent API expects, and `model` is absent for preset ids.
+      - store: the parent writes `"store": self.stateful` AFTER merging
+        **params (openai_responses.py:558-564), so __init__ sets
+        stateful=bool(params.get("store")). Asserted by
+        test_store_survives_the_parents_stateful_override (store=True on wire).
+
+(3) Native-event tap at the HTTP layer. `_tap_sse(response)`: no-ops unless
+    content-type starts with text/event-stream; otherwise replaces
+    response.aiter_bytes with a wrapper that forwards every byte UNCHANGED to
+    the SDK and, line by line, json-parses each `data:` line. A payload is
+    queued when its `type` starts with `response.reasoning.`, equals
+    `response.skill.loaded`, or is `response.output_item.done` whose
+    `item.type` is in config.NATIVE_OUTPUT_ITEM_TYPES.
+    `stream(...)`: drains the queue before each parent chunk and once more
+    after the parent finishes, yielding `{"perplexity": <parsed dict>}`.
+    Byte-for-byte identity asserted by
+    test_forwarded_bytes_are_identical_to_the_server_body.
+    route.ts NOT touched.
+
+--------------------------------------------------------------------------------
+4. QA — HAPPY PATH (recorded StreamEvent JSON)
+--------------------------------------------------------------------------------
+Canned SSE body: response.created, output_text.delta x3 ("Check"/"ing"/" now"),
+output_item.added(function_call lookup/call_1), function_call_arguments.done
+('{"q": "x"}'), response.reasoning.search_results, output_item.done(share_file),
+response.completed(usage 4/3/7).
+
+Recorded emission (verbatim; a later todo copies this for frontend fixtures):
+
+[
+  { "messageStart": { "role": "assistant" } },
+  { "perplexity": {
+      "type": "response.reasoning.search_results",
+      "results": [ { "url": "https://example.com", "title": "Example" } ] } },
+  { "perplexity": {
+      "type": "response.output_item.done",
+      "output_index": 2,
+      "sequence_number": 22,
+      "item": {
+        "type": "share_file",
+        "file_id": "file-1",
+        "path": "/v1/responses/resp-1/files/file-1/content",
+        "status": "completed" } } },
+  { "contentBlockStart": { "start": {} } },
+  { "contentBlockDelta": { "delta": { "text": "Check" } } },
+  { "contentBlockDelta": { "delta": { "text": "ing" } } },
+  { "contentBlockDelta": { "delta": { "text": " now" } } },
+  { "contentBlockStop": {} },
+  { "contentBlockStart": { "start": { "toolUse": { "name": "lookup", "toolUseId": "call_1" } } } },
+  { "contentBlockDelta": { "delta": { "toolUse": { "input": "{\"q\": \"x\"}" } } } },
+  { "contentBlockStop": {} },
+  { "messageStop": { "stopReason": "tool_use" } },
+  { "metadata": { "usage": { "inputTokens": 4, "outputTokens": 3, "totalTokens": 7 },
+                  "metrics": { "latencyMs": 0 } } }
+]
+
+Checks, all asserted in test_happy_path_frame_sequence:
+  - messageStart present and first
+  - one text block: contentBlockStart {} -> 3 text deltas -> contentBlockStop
+  - one toolUse block: start{toolUse lookup/call_1} -> full-arguments delta -> stop
+  - EXACTLY TWO {"perplexity": ...} frames, both before messageStop
+  - messageStop stopReason "tool_use"
+  - metadata usage 4/3/7
+
+Ordering note: the tap surfaces native frames at the NEXT parent chunk
+boundary, so their absolute position depends on HTTP chunking, never their
+count or their being pre-messageStop. Same body served in 64-byte chunks:
+  ['messageStart','contentBlockStart','contentBlockDelta','contentBlockDelta',
+   'contentBlockDelta','perplexity','perplexity','contentBlockStop',
+   'contentBlockStart','contentBlockDelta','contentBlockStop','messageStop',
+   'metadata']
+Still exactly two, still before messageStop. Asserted by
+test_tap_survives_arbitrary_chunk_boundaries and
+test_native_frames_are_ordered_before_the_next_parent_chunk.
+
+--------------------------------------------------------------------------------
+5. QA — FAILURE PATH (parent's classify_openai_error, no bare Exception)
+--------------------------------------------------------------------------------
+Live probe against the real parent loop through MockTransport:
+
+  rate_limit_exceeded        -> strands.types.exceptions.ModelThrottledException: rate limit reached
+  context_length_exceeded    -> strands.types.exceptions.ContextWindowOverflowException: maximum context length
+  invalid_request_error      -> strands.models.openai_responses._OpenAIResponsesStreamError: bad tools
+  HTTP 429                   -> strands.types.exceptions.ModelThrottledException
+  HTTP 401                   -> openai.AuthenticationError
+  HTTP 400                   -> openai.BadRequestError
+
+No bare `Exception`, no locally-raised ApplicationError on any stream failure
+path (config-validation errors remain non-retryable ApplicationErrors, which is
+the KEPT behavior). ContextWindowOverflowException is one of the four types in
+StrandsFailureConverter._TERMINAL_EXCEPTIONS, so Temporal marks it
+non_retryable and the conversation manager can react.
+
+--------------------------------------------------------------------------------
+6. ADVERSARIAL SCENARIOS
+--------------------------------------------------------------------------------
+(a) Malformed input — the tap's line filter is TOTAL. Every one of these is
+    dropped without raising and without altering the forwarded bytes
+    (test_non_json_and_partial_data_lines_are_never_enqueued):
+      b"data: not-json"
+      b'data: {"type": "response.reasoning.trunc"'      (truncated JSON)
+      b"data: "                                          (empty)
+      b"data: null" / b"data: [1, 2]" / b"data: [DONE]"  (non-dict)
+      b": comment"                                       (SSE comment)
+      b"event: response.reasoning.search_results"        (event line, no data)
+      b"\xff\xfe binary noise"                           (invalid UTF-8)
+      b'data: {"type": 7}'                               (non-str type)
+      b'...output_item.done", "item": "not-a-dict"'
+      b'...output_item.done", "item": {"type": "message"}'  (message excluded)
+    A truncated TRAILING line (dropped connection mid-frame) also leaves the
+    SDK stream intact: test_truncated_trailing_line_and_comments_do_not_break_the_stream.
+    A non-SSE (JSON error) body is never tapped at all:
+    test_non_sse_responses_are_not_tapped.
+
+(b) Stale state — re-running the same model instance starts a FRESH
+    asyncio.Queue per turn, so a Temporal activity replay cannot surface the
+    previous attempt's native frames:
+    test_re_running_the_same_model_does_not_leak_native_frames (turn 1 yields 1
+    native frame, turn 2 yields 0).
+
+(c) Misleading success output — the happy-path test asserts the native frame
+    list by EQUALITY (exactly two, exact payloads), not membership, so a
+    duplicated or dropped frame fails. Every one of the eight
+    NATIVE_OUTPUT_ITEM_TYPES is covered by a parametrized forwarding test, and
+    an unknown Perplexity-only event type (response.in_progress) is asserted
+    NOT forwarded.
+
+--------------------------------------------------------------------------------
+7. ADHERENCE GATE (a) and (b) FLIPPED TO PASS
+--------------------------------------------------------------------------------
+  $ cd orchestrator && .venv/bin/python -m pytest tests/test_framework_adherence.py -v
+  test_a_no_bare_strands_model_subclass                      PASSED
+  test_b_perplexity_model_subclasses_openai_responses_model  PASSED   <-- flipped
+  test_c_gemini_model_has_no_format_chunk_literal            PASSED
+  test_d_think_activity_imports_strands_tools_think          PASSED
+  test_e_no_execute_activity_in_hook_provider                PASSED
+  test_f_no_timedelta_outside_config                         FAILED  (other lane)
+  test_g_no_private_tool_func_access                         PASSED
+  test_h_no_empty_except_handler                             FAILED  (other lane)
+
+(a) also flipped: the old module was `class PerplexityModel(Model)` with
+`from strands.models import Model` — precisely what check (a) forbids.
+(f) fails on orchestrator/browser_activity.py (timedelta literal) and (h) on
+orchestrator/graph_activity.py:579 (bare `except: pass`) — both outside this
+lane's scope.
+
+--------------------------------------------------------------------------------
+8. FULL ORCHESTRATOR GATE — EXACT COUNTS
+--------------------------------------------------------------------------------
+  $ cd orchestrator && .venv/bin/python -m pytest tests -q
+  10 failed, 713 passed, 12 warnings in 23.34s
+
+  FAILED tests/test_browser_activity.py::test_native_browser_runs_through_temporal_activity
+  FAILED tests/test_framework_adherence.py::test_f_no_timedelta_outside_config
+  FAILED tests/test_framework_adherence.py::test_h_no_empty_except_handler
+  FAILED tests/test_hot_load.py::test_load_tool_file_read_runs_as_activity
+  FAILED tests/test_hot_load.py::test_load_tool_hot_loads_calculator_by_bare_name
+  FAILED tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+  FAILED tests/test_think_activity.py::test_every_model_chunk_streams_to_the_thinking_topic
+  FAILED tests/test_think_activity.py::test_module_stays_a_thin_wrapper
+  FAILED tests/test_workflow.py::test_browser_survives_handoff_rollover
+  FAILED tests/test_workflow.py::test_workflow_builds_agent_with_config_model_stream_batch_interval
+
+PRE-EXISTING / OTHER-LANE ATTRIBUTION. Baseline before this lane landed was
+13 failed / 710 passed — this change turned 3 failures into passes
+(test_b_perplexity_model_subclasses_openai_responses_model plus the two
+test_run_worker/test_perplexity_model regressions that the rebase resolves) and
+introduced none. Each remaining failure was checked for coupling to this lane's
+scope:
+  - test_hot_load.py (3): "'NoneType' object has no attribute 'tool_registry'",
+    'calculator'/'file_read' absent from scheduled activity types — todo 7/8's
+    load_tool activity rewiring, in flight.
+  - test_think_activity.py (2): module is 149 lines vs a <120 assertion, and an
+    extra {"think_notes": ...} frame on the thinking topic — todo 4's
+    activity_as_hook lane. (Its only mention of PerplexityModel is a docstring
+    at :28; no import, no coupling.)
+  - test_workflow.py (2): "'ChatWorkflow' object has no attribute '_stream'" —
+    workflow.py refactor lane.
+  - test_browser_activity.py (1): browser action returns 'error' — no import of
+    perplexity_model anywhere in the module.
+  - test_framework_adherence.py (2): checks (f) and (h), explicitly written to
+    the TARGET state of other lanes (see the file's own comments).
+None of these five modules imports perplexity_model, PerplexityModel, or
+NATIVE_OUTPUT_ITEM_TYPES:
+  $ grep -ln "perplexity_model\|PerplexityModel\|NATIVE_OUTPUT_ITEM_TYPES" \
+      tests/test_browser_activity.py tests/test_hot_load.py \
+      tests/test_think_activity.py tests/test_think_hook.py tests/test_workflow.py
+  tests/test_think_activity.py      (docstring only, line 28)
+
+--------------------------------------------------------------------------------
+9. MUST-NOT-DO COMPLIANCE
+--------------------------------------------------------------------------------
+  no commit                              — nothing staged or committed
+  no new class X(strands.models.Model)   — adherence check (a) PASSES
+  no edits outside scope                 — 5 files, all listed above
+  no route.ts edits                      — app/api/orchestrator/route.ts untouched
+  no model id renames                    — PRESET_PREFIX/PRESETS byte-identical;
+                                           run_worker registers the same ids
+  no batch-interval changes              — MODEL_STREAM_BATCH_INTERVAL,
+                                           THINK_STREAM_BATCH_INTERVAL,
+                                           AGENT_RUNS_STREAM_BATCH_INTERVAL unchanged
+
+Dependency note: `perplexityai` remains in requirements.txt and remains imported
+by perplexity_operations.py (files/retrieve/cancel) and by run_worker.py's
+perplexity_client_factory for those operation activities. Only THIS module
+switched to openai.AsyncOpenAI (via the parent), as specified.

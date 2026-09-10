@@ -1,0 +1,218 @@
+TODO 10 — Temporal-native readiness + catalog workflow
+=======================================================
+Date: 2026-09-09
+Scope: orchestrator/config.py, orchestrator/run_worker.py, orchestrator/server.py,
+       orchestrator/catalog_workflow.py (new), tests, .runtime deletion.
+
+1. FAILING-FIRST PROOF (before implementation)
+------------------------------------------------
+Command: .venv/bin/python -m pytest tests/test_server.py tests/test_run_worker.py \
+         tests/test_catalog_workflow.py -q
+Result (before deleting readiness lease / adding catalog workflow):
+    22 failed, 30 passed, 25 errors in 16.70s
+  (test_catalog_workflow.py failed to collect: ModuleNotFoundError: catalog_workflow;
+   test_server.py errored on every test needing server.readiness/AttributeError once
+   the new health/catalog assertions were written against the not-yet-existing
+   server.model_catalog / server._catalog_cache surface.)
+
+2. IMPLEMENTATION SUMMARY
+--------------------------
+DELETED:
+  - run_worker.py: write_readiness, refresh_readiness_lease, clear_readiness,
+    READINESS_PATH, and their call sites in main() (heartbeat task, finally-block
+    cleanup). Unused imports (json-adjacent tempfile/time/contextlib.suppress) removed.
+  - server.py: validate_readiness_record, readiness(), _pid_alive(), models_of(),
+    the readiness-file read path. /health, /sessions, /sessions/{id}/turns/stream,
+    /compare/stream now go through the new catalog cache instead.
+  - orchestrator/tests/test_readiness_lease.py (deleted).
+  - orchestrator/.runtime/ (git-rm --cached + rm -rf; already gitignored).
+  - config.py: READINESS_HEARTBEAT_INTERVAL, READINESS_LEASE_TTL constants (kept
+    READINESS_POLLER_CACHE / READINESS_POLLER_RPC_TIMEOUT — those already served
+    the DescribeTaskQueue-based liveness probe, unrelated to the JSON lease).
+
+ADDED:
+  - config.py: CATALOG_ACTIVITY_TIMEOUT (5s), CATALOG_WORKFLOW_TIMEOUT (8s, bounds
+    the whole execute_workflow call both server-side via execution_timeout= and
+    client-side via asyncio.wait_for — prevents /health hanging forever when no
+    worker is polling), CATALOG_CACHE_TTL (30s).
+  - orchestrator/catalog_workflow.py (new module):
+      set_catalog(catalog) / _CATALOG module registry (mirrors
+      think_activity.set_model_factories's pattern — worker-process state, never
+      a workflow payload).
+      @activity.defn(name="model_catalog") async def model_catalog() -> list[RegisteredModel]
+      @workflow.defn class ModelCatalogWorkflow with .run() executing exactly the
+      one activity with CATALOG_ACTIVITY_TIMEOUT as start_to_close_timeout.
+  - run_worker.py: imports ModelCatalogWorkflow/model_catalog/set_catalog; calls
+    set_catalog(catalog) right after assemble_model_factories(); registers
+    ModelCatalogWorkflow in workflows=[...] and model_catalog in activities=[...].
+  - server.py:
+      _catalog_cache = {"models": None, "fetched_at": 0.0}
+      _execute_catalog_workflow(): client.execute_workflow(ModelCatalogWorkflow.run,
+        id=f"model-catalog-{uuid4()}", task_queue=TASK_QUEUE,
+        execution_timeout=CATALOG_WORKFLOW_TIMEOUT) wrapped in
+        asyncio.wait_for(..., timeout=CATALOG_WORKFLOW_TIMEOUT); any exception ->
+        [] (fail closed).
+      model_catalog(refresh=False): TTL-cached; empty results are never cached
+        (so a worker coming up is picked up immediately, not after a stale TTL).
+      validated_model(model_id): 503 when catalog is empty, one forced refresh on
+        a plain cache miss (not on an already-empty catalog, to avoid doubling the
+        wait before a 503), 400 with a preview of available ids otherwise.
+      GET /health: liveness == task_queue_has_pollers() only (unchanged
+        DescribeTaskQueue helper at server.py ~:112-145). Payload keys are exactly
+        {status, temporal, worker, pollers, models, providers, default_model} —
+        "worker" is now pollers_ok itself (a worker IS its pollers); "models" is
+        the full list of {id, provider, label} objects (no model_ids, no count).
+        "providers" = config.PROVIDER_DISPLAY_NAMES. default_model = DEFAULT_MODEL_ID
+        if present in the catalog else the first catalog entry, else None.
+      POST /sessions and POST /sessions/{id}/turns/stream: model_id validated via
+        validated_model() against the cached (refresh-on-miss) catalog.
+      POST /compare/stream: model_ids validated against the same cached catalog,
+        with one refresh before rejecting on any miss.
+
+3. TEST-FILE CHANGES (TDD)
+----------------------------
+  - tests/test_run_worker.py: replaced the JSON-lease-writer tests with
+    (a) test_worker_registers_model_catalog_workflow_and_activity — parses
+        run_worker.main's AST and asserts ModelCatalogWorkflow / model_catalog are
+        in the Worker(...) call's workflows=/activities= list literals;
+    (b) test_worker_installs_the_boot_catalog — asserts main() calls set_catalog(...);
+    (c) test_no_readiness_lease_symbols_remain — asserts nothing with "readiness"
+        in its name survives on run_worker (catches the whole family, not a fixed
+        list, so a partial revert can't slip back in under a new name).
+  - tests/test_catalog_workflow.py (new): workflow._Definition / activity._Definition
+    registration checks, set_catalog/model_catalog round-trip, empty-before-install
+    behavior, and a copy-not-alias check (set_catalog(entries); entries.clear() must
+    not mutate the served catalog).
+  - tests/test_server.py: added seed_catalog() helper (patches
+    server._execute_catalog_workflow, clears the cache) replacing every
+    monkeypatch.setattr(server, "readiness", ...) call site. New/updated tests:
+    test_health_lists_provider_catalog (exact key set, no model_ids, each model
+      object has {id,provider,label}, providers == PROVIDER_DISPLAY_NAMES),
+    test_health_is_degraded_without_pollers,
+    test_health_default_model_falls_back_to_first_catalog_entry,
+    test_catalog_is_cached_then_refreshed_after_ttl (one execution per TTL window,
+      then a fresh one after the cache is aged past CATALOG_CACHE_TTL),
+    test_start_session_refreshes_catalog_once_on_miss (exactly one extra workflow
+      execution on a genuine miss, not a retry storm),
+    test_start_session_503_when_no_worker_serves_a_catalog,
+    test_turn_refreshes_catalog_once_on_miss,
+    test_readiness_lease_helpers_are_gone (readiness/validate_readiness_record/
+      models_of all absent from server).
+  - tests/test_readiness_lease.py: deleted.
+  - tests/test_desktop_release.py: one path-fixture literal changed from
+    ".runtime/worker-readiness.json" to ".runtime/browser-observations/x.jpg" —
+    the forbidden-.runtime-component check is about the directory, not a file that
+    no longer exists; still exercises the same validator branch.
+
+4. ACCEPTANCE GREP
+--------------------
+Command: grep -rn "READINESS_PATH\|worker-readiness" orchestrator scripts app lib \
+         --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=.venv \
+         --exclude-dir=__pycache__
+Result: 0 matches (confirmed twice, including after clearing .pytest_cache which
+        had cached the old nodeids).
+
+scripts/worker_supervisor.py: inspected — a generic subprocess restart wrapper
+  with zero readiness-file / orchestrator-specific coupling (spawns whatever
+  command line it is given). No change needed.
+
+lib/perplexity.ts: NOT edited (frontend edits out of scope for this lane). It
+  still reads payload.model_ids / payload.models as a fallback chain and will
+  fall back to its static preset+Gemini list against the new /health shape until
+  a frontend lane updates it to read the "models": [{id,provider,label}] array —
+  called out under RISKS below.
+
+package.json dev:web ("wait-on -t 120000 http-get://127.0.0.1:8787/health"): only
+  cares about the endpoint returning 200, which /health still does in every case
+  (ok AND degraded are 200; only /sessions and /turns/stream 503 on an empty
+  catalog). Unaffected.
+
+5. FULL PYTEST RUN (orchestrator/, from inside orchestrator/)
+-----------------------------------------------------------------
+Command: .venv/bin/python -m pytest tests -q --ignore=tests/test_think_hook.py
+(test_think_hook.py excluded: pre-existing collection ImportError unrelated to this
+ task — a concurrent lane's WIP rewrite of that file imports ThinkInput from
+ think_activity.py, which does not define it yet; think_activity.py is out of
+ scope for this lane per the task's MUST NOT DO list.)
+
+Result: 12 failed, 700 passed, 5 warnings in ~21s
+
+Failing tests (all pre-existing / other-lane scope, NONE touch config.py,
+run_worker.py, server.py, or catalog_workflow.py's new surface):
+  tests/test_browser_activity.py::test_native_browser_runs_through_temporal_activity
+  tests/test_framework_adherence.py::test_f_no_timedelta_outside_config   (pre-existing; compare_workflow.py:81, not touched by this lane)
+  tests/test_framework_adherence.py::test_h_no_empty_except_handler        (pre-existing; graph_activity.py:579, not touched)
+  tests/test_hot_load.py::test_load_tool_file_read_runs_as_activity
+  tests/test_hot_load.py::test_load_tool_hot_loads_calculator_by_bare_name
+  tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+  tests/test_hot_load.py::test_chat_load_tools_runs_temporal_mcp_call_tool
+  tests/test_run_worker.py::test_perplexity_client_pins_base_url_and_retries (pre-existing PerplexityModel/OpenAIResponsesModel migration in progress; asserts .client attribute the current PerplexityModel constructor signature warns about — unrelated to readiness/catalog)
+  tests/test_think_activity.py::test_every_model_chunk_streams_to_the_thinking_topic
+  tests/test_think_activity.py::test_module_stays_a_thin_wrapper           (line-count budget test on think_activity.py, out of scope)
+  tests/test_workflow.py::test_browser_survives_handoff_rollover
+  tests/test_workflow.py::test_workflow_builds_agent_with_config_model_stream_batch_interval (asserts a `_stream` attribute workflow.py does not currently have — out of scope, workflow.py edits forbidden by this task)
+
+VERIFIED against baseline (git stash of this task's diff, same pytest invocation
+on HEAD): test_framework_adherence a/b/g pass on baseline (fixed by other lanes
+since), f/h fail identically; test_run_worker's base_url test fails identically;
+test_hot_load / test_browser_activity / test_workflow failures are flaky-by-worker-
+port-timing across runs (varied between 5-12 failures run-to-run in that same set,
+independent of this diff) — none reference readiness, catalog, or any symbol this
+task touches.
+
+Scoped-to-this-task pytest (every file this task edited or added):
+Command: .venv/bin/python -m pytest tests/test_server.py tests/test_run_worker.py \
+         tests/test_catalog_workflow.py tests/test_config.py \
+         tests/test_desktop_release.py -q
+Result: 201 passed in 4.23s   <-- 100% green on the actual scope of this task.
+
+6. MANUAL / LIVE QA (real Temporal, no mocks)
+------------------------------------------------
+Started `temporal server start-dev --port 7239` (isolated instance so the real
+dev-stack Temporal on :7233 -- already down before this session started -- was
+not disturbed), then TEMPORAL_ADDRESS=127.0.0.1:7239 for both run_worker.py and
+`uvicorn server:app`.
+
+HAPPY PATH (worker up, polling, real 58-entry Perplexity+Gemini catalog):
+  curl http://127.0.0.1:8813/health
+  -> {"status":"ok","temporal":true,"worker":true,"pollers":true,
+      "models":[{"id":"preset:fast","provider":"perplexity-agent-api",
+                 "label":"Fast (preset)"}, ... 58 entries ...,
+                {"id":"gemini-3.8-flash","provider":"google-ai-studio",
+                 "label":"gemini-3.8-flash"}, ...],
+      "providers":{"perplexity-agent-api":"Perplexity Agent API",
+                    "google-ai-studio":"Google AI Studio"},
+      "default_model":"preset:high"}
+  HTTP 200. Confirmed: no "model_ids" key, no count field, every model object
+  carries its worker-declared provider.
+
+FAILURE PATH (worker process killed, API left running, cache aged past
+CATALOG_CACHE_TTL=30s to force a real re-execution):
+  curl http://127.0.0.1:8813/health   (8s wall-clock -- CATALOG_WORKFLOW_TIMEOUT
+    bound, confirms the hang-guard works instead of blocking forever)
+  -> {"status":"degraded","temporal":true,"worker":false,"pollers":false,
+      "models":[],"providers":{...},"default_model":null}
+  HTTP 200
+
+  curl -X POST http://127.0.0.1:8813/sessions -d '{"model_id":"preset:high"}'
+  -> {"detail":"No worker is ready"}
+  HTTP 503
+
+Both QA processes (worker, api, isolated temporal server) were killed after the
+run; the pre-existing dev-stack processes this session found already stopped
+(port 7233 Temporal, worker_supervisor-managed run_worker) were left as found --
+none were running when this task began, so none needed restoring.
+
+ADVERSARIAL CHECKS ADDRESSED
+  - Stale cache never masks a real registration: model_catalog(refresh=True) is
+    forced on any id miss (validated_model, /compare) and the TTL-refresh test
+    (test_catalog_is_cached_then_refreshed_after_ttl) asserts the workflow is
+    re-executed exactly once per TTL window, not memoized forever.
+  - Hang guard: CATALOG_WORKFLOW_TIMEOUT bounds _execute_catalog_workflow on BOTH
+    the Temporal-side (execution_timeout=) and the asyncio side (wait_for) --
+    verified live: /health returned in ~8s, not hung, when no worker was polling.
+  - Health payload keys asserted exact (set equality) in
+    test_health_lists_provider_catalog, not just "contains" checks, so a rogue
+    extra key would fail the test.
+  - No custom infra invented beyond the required one workflow + one activity pair;
+    catalog_workflow.py adds nothing else durable.

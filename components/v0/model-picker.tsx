@@ -35,6 +35,8 @@ function effortLabel(value: string) {
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
+  "perplexity-agent-api": "Perplexity Agent API",
+  "google-ai-studio": "Google AI Studio",
   anthropic: "Anthropic",
   openai: "OpenAI",
   google: "Google",
@@ -81,8 +83,8 @@ export function ModelPicker({
   reasoningEffort = "default",
   onReasoningEffortChange,
 }: ModelPickerProps) {
-  const { models, status } = useModels()
   const [open, setOpen] = useState(false)
+  const { models, status, error } = useModels(open)
   const [choosingEffort, setChoosingEffort] = useState(false)
   const actionsRef = useRef<PopoverRoot.Actions | null>(null)
 
@@ -183,10 +185,10 @@ export function ModelPicker({
           >
             <PromptInputCommandInput placeholder="Search models…" />
             <PromptInputCommandList className="max-h-80">
-              <PromptInputCommandEmpty>No models found.</PromptInputCommandEmpty>
+              <PromptInputCommandEmpty>{error || (status === "loading" ? "Loading models…" : "No models found.")}</PromptInputCommandEmpty>
               {groups.map(([provider, items]) => (
                 <PromptInputCommandGroup
-                  heading={providerLabel(provider)}
+                  heading={items[0]?.provider_label || providerLabel(provider)}
                   key={provider}
                 >
                   {items.map((model) => (

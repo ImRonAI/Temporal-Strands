@@ -24,8 +24,11 @@ from strands.models.gemini import GeminiModel as _GeminiModel
 from strands.types.content import ContentBlock, Messages
 from strands.types.streaming import StreamEvent
 from strands.types.tools import ToolChoice, ToolSpec
+from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
-from computer_use_activity import COMPUTER_USE_TOOL_NAMES, capture_page_png
+from desktop_observation import latest_observation, resolve_observation
+from workspace_state import StateConflict
 
 
 def _unwrap_activity_payload(text: str) -> dict[str, Any]:
@@ -197,24 +200,39 @@ class GeminiModel(_GeminiModel):
     _grounding: dict[str, Any]
 
     def _format_request_content(self, messages: Messages) -> list[genai.types.Content]:
-        names: dict[str, str] = {}
-        last_cu: str | None = None
-        for message in messages:
-            for block in message.get("content") or []:
-                if not isinstance(block, dict):
-                    continue
-                if "toolUse" in block:
-                    names[block["toolUse"]["toolUseId"]] = block["toolUse"]["name"]
-                result = block.get("toolResult")
-                if result:
-                    tool_use_id = result["toolUseId"]
-                    if names.get(tool_use_id) in COMPUTER_USE_TOOL_NAMES:
-                        last_cu = tool_use_id
-        self._latest_cu_tool_result_id = last_cu
+        contents = super()._format_request_content(messages)
         try:
-            return super()._format_request_content(messages)
-        finally:
-            self._latest_cu_tool_result_id = None
+            observation = latest_observation(messages)
+            if observation:
+                call_id, name, ref = observation
+                info = activity.info()
+                if not info.workflow_id:
+                    raise ValueError("Desktop observation requires a workflow identity")
+                png = resolve_observation(ref, namespace=info.namespace, workflow_id=info.workflow_id)
+        except (OSError, ValueError, StateConflict, RuntimeError) as error:
+            raise ApplicationError(
+                "Desktop observation unavailable; obtain a fresh screenshot",
+                type="DesktopObservationUnavailable", non_retryable=True,
+            ) from error
+        if observation:
+            if name == "browser":
+                contents.append(genai.types.Content(role="user", parts=[
+                    genai.types.Part(text=f"Desktop screenshot from tool call {call_id}"),
+                    genai.types.Part.from_bytes(data=png, mime_type="image/png"),
+                ]))
+            else:
+                # Gemini's native Computer Use contract requires pixels on the
+                # corresponding FunctionResponse, never captured on this host.
+                for content in reversed(contents):
+                    for part in content.parts or []:
+                        response = part.function_response
+                        if response is not None and response.id == call_id:
+                            response.parts = [genai.types.FunctionResponsePart.from_bytes(
+                                data=png, mime_type="image/png",
+                            )]
+                            return contents
+                raise ValueError("Desktop observation has no matching function response")
+        return contents
 
     def _computer_use_function_response(
         self,
@@ -237,23 +255,12 @@ class GeminiModel(_GeminiModel):
             parsed.pop("screenshot", None)
             parsed.pop("mediaType", None)
             payload.update(parsed)
-        png = None
-        if tool_use_id == getattr(self, "_latest_cu_tool_result_id", None):
-            png, page_url = capture_page_png()
-            if page_url:
-                payload["url"] = page_url
         response = payload or {"url": ""}
-        parts = (
-            [genai.types.FunctionResponsePart.from_bytes(data=png, mime_type="image/png")]
-            if png
-            else None
-        )
         return genai.types.Part(
             function_response=genai.types.FunctionResponse(
                 id=tool_use_id,
                 name=function_name,
                 response=response,
-                parts=parts,
             )
         )
 
@@ -279,6 +286,8 @@ class GeminiModel(_GeminiModel):
                 ),
             )
         if "toolResult" in content:
+            from computer_use_activity import COMPUTER_USE_TOOL_NAMES
+
             tool_use_id = content["toolResult"]["toolUseId"]
             function_name = tool_use_id_to_name.get(tool_use_id, tool_use_id)
             if function_name in COMPUTER_USE_TOOL_NAMES:
@@ -294,6 +303,8 @@ class GeminiModel(_GeminiModel):
         navigate. Custom FunctionDeclarations are only for other tools
         (https://ai.google.dev/gemini-api/docs/generate-content/computer-use).
         """
+        from computer_use_activity import COMPUTER_USE_TOOL_NAMES
+
         filtered = [
             spec
             for spec in (tool_specs or [])

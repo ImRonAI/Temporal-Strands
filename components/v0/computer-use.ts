@@ -1,6 +1,7 @@
 import { isDynamicToolUIPart, type UIMessage } from "ai"
 
-/** Gemini 3 Computer Use actions plus 2.5 legacy names.
+/** Gemini 3 Computer Use actions plus 2.5 legacy names, and the stock
+ *  strands browser tool name (any provider).
  *  https://ai.google.dev/gemini-api/docs/computer-use
  */
 export const COMPUTER_USE_TOOL_NAMES = new Set([
@@ -35,15 +36,33 @@ export const COMPUTER_USE_TOOL_NAMES = new Set([
   "wait_5_seconds",
 ])
 
+/** noVNC viewer for the Linux desktop the stock strands browser runs on.
+ *  View-only is x11vnc's default; takeover is server-toggled on handoff. */
+export const DESKTOP_NOVNC_URL =
+  process.env.NEXT_PUBLIC_DESKTOP_NOVNC_URL ??
+  "http://localhost:6080/vnc.html?autoconnect=true&resize=scale&reconnect=true"
+
 export type ComputerUsePreview = {
   open: boolean
+  /** Timeline panel identity, not the durable chat session ID. */
   sessionId: string
   url: string
   livePreviewUrl: string
-  devtoolsFrontendUrl: string
   action: string
   intent: string
-  screenshot: { base64: string; mediaType: string } | null
+  observation: ComputerUseObservation | null
+  viewerType?: "novnc"
+  controlAvailable?: boolean
+}
+
+/** Display metadata only; the server verifies artifact scope and integrity. */
+export type ComputerUseObservation = {
+  artifact_id: string
+  generation: string
+  sha256: string
+  width: number
+  height: number
+  mime_type: "image/png" | "image/jpeg"
 }
 
 const EMPTY: ComputerUsePreview = {
@@ -51,10 +70,9 @@ const EMPTY: ComputerUsePreview = {
   sessionId: "",
   url: "",
   livePreviewUrl: "",
-  devtoolsFrontendUrl: "",
   action: "",
   intent: "",
-  screenshot: null,
+  observation: null,
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -81,19 +99,17 @@ function stringField(record: Record<string, unknown> | null, key: string): strin
   return typeof value === "string" ? value : ""
 }
 
-/** Pull url / screenshot / intent out of a Computer Use tool part. */
+/** Read the native activity result, including reference-only screenshot metadata. */
 export function computerUseFields(part: {
   toolName: string
   input?: unknown
   output?: unknown
 }): {
   url: string
-  livePreviewUrl: string
-  devtoolsFrontendUrl: string
   action: string
   intent: string
-  screenshot: { base64: string; mediaType: string } | null
-  screenshotUrl: string
+  status: string
+  observation: ComputerUseObservation | null
 } {
   const rawInput = asRecord(part.input)
   const input = part.toolName === "browser"
@@ -101,37 +117,33 @@ export function computerUseFields(part: {
     : rawInput
   const output = unwrapToolOutput(part.output)
   const url = stringField(output, "url") || stringField(input, "url")
-  const livePreviewUrl = stringField(output, "livePreviewUrl")
-  const devtoolsFrontendUrl = stringField(output, "devtoolsFrontendUrl")
   const intent = stringField(output, "intent") || stringField(input, "intent")
   const action = stringField(output, "action") || stringField(input, "type") || part.toolName
-  const raw = output?.screenshot
-  const mediaType = stringField(output, "mediaType") || "image/jpeg"
-  const screenshot =
-    typeof raw === "string" && raw.length > 0
-      ? { base64: raw, mediaType }
+  const status = stringField(output, "status")
+  const raw = asRecord(output?.observation)
+  const artifact_id = stringField(raw, "artifact_id")
+  const generation = stringField(raw, "generation")
+  const sha256 = stringField(raw, "sha256")
+  const width = raw?.width
+  const height = raw?.height
+  const mime_type = raw?.mime_type
+  const observation: ComputerUseObservation | null =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(artifact_id) &&
+    /^[1-9][0-9]*$/.test(generation) && /^[0-9a-f]{64}$/.test(sha256) &&
+    typeof width === "number" && Number.isSafeInteger(width) && width > 0 &&
+    typeof height === "number" && Number.isSafeInteger(height) && height > 0 &&
+    (mime_type === "image/png" || mime_type === "image/jpeg")
+      ? { artifact_id, generation, sha256, width, height, mime_type }
       : null
-  const candidate = stringField(output, "screenshotUrl")
-  let screenshotUrl = ""
-  try {
-    const parsed = new URL(candidate)
-    if (["http:", "https:"].includes(parsed.protocol) &&
-      !parsed.username && !parsed.password &&
-      /^\/browser-observations\/[a-zA-Z0-9_-]+\/content$/.test(parsed.pathname)) {
-      screenshotUrl = candidate
-    }
-  } catch {
-    // Native observations use explicit service URLs, never arbitrary tool text.
-  }
-  return { url, livePreviewUrl, devtoolsFrontendUrl, action, intent, screenshot, screenshotUrl }
+  return { url, action, intent, status, observation }
 }
 
 /** Unwrap Computer Use payloads from tool-output-available shapes. */
 export function unwrapToolOutput(value: unknown): Record<string, unknown> | null {
   const record = asRecord(value)
   if (!record) return null
-  const browserPreview = asRecord(record.browserPreview)
-  if (browserPreview) return browserPreview
+  // Metadata on the activity itself wins over JSON-looking page content.
+  if ("action" in record || "observation" in record || record.status === "error") return record
 
   // TemporalActivityTool JSON-stringifies the whole activity return value:
   // {"status":"success","content":[{"text":"{\"action\":...}"}]}
@@ -141,22 +153,23 @@ export function unwrapToolOutput(value: unknown): Record<string, unknown> | null
       const nested = asRecord(block)
       if (!nested) continue
       const fromText = asRecord(nested.text)
-      if (fromText) return asRecord(fromText.browserPreview) ?? fromText
+      if (fromText) return unwrapToolOutput(fromText)
     }
   }
 
   if (typeof record.text === "string") {
     const nested = asRecord(record.text)
-    if (nested) return nested
+    if (nested) return unwrapToolOutput(nested)
   }
   return record
 }
 
-/** Latest Computer Use preview for the conversation. Opens for the rest of
- *  the streaming turn once any Computer Use action is elicited. */
+/** Latest Computer Use preview for the conversation. The browser tool runs
+ *  only on the Linux desktop, so any browser/computer-use part opens the
+ *  noVNC viewer. */
 export function computerUsePreview(
   parts: UIMessage["parts"] | undefined,
-  isStreaming: boolean
+  _isStreaming: boolean
 ): ComputerUsePreview {
   if (!parts?.length) return EMPTY
 
@@ -168,35 +181,40 @@ export function computerUsePreview(
     if (part.toolName !== "browser" && !COMPUTER_USE_TOOL_NAMES.has(part.toolName)) continue
     const fields = computerUseFields(part)
     if (!panelId) panelId = part.toolCallId
-    // Resolve the nullable accumulator to a concrete ComputerUsePreview so
-    // property reads never happen behind a narrowing-hostile optional chain.
     const previous: ComputerUsePreview = latest ?? EMPTY
     latest = {
       open: false,
       sessionId: panelId,
       url: fields.url || previous.url,
-      livePreviewUrl: fields.livePreviewUrl || previous.livePreviewUrl,
-      devtoolsFrontendUrl:
-        fields.devtoolsFrontendUrl || previous.devtoolsFrontendUrl,
+      livePreviewUrl: DESKTOP_NOVNC_URL,
       action: fields.action,
       intent: fields.intent || previous.intent,
-      screenshot: fields.screenshot ?? previous.screenshot,
+      observation: fields.observation ?? previous.observation,
+      viewerType: "novnc",
+      controlAvailable: true,
     }
   }
 
   if (!latest) return EMPTY
-  latest.open =
-    isStreaming ||
-    Boolean(latest.url) ||
-    Boolean(latest.livePreviewUrl) ||
-    Boolean(latest.devtoolsFrontendUrl)
+  latest.open = true
   return latest
 }
 
 export function stripComputerUseScreenshot(output: unknown): unknown {
+  if (Array.isArray(output)) return output.map(stripComputerUseScreenshot)
   const record = asRecord(output)
-  if (!record || !("screenshot" in record)) return output
-  const rest = { ...record }
-  delete rest.screenshot
-  return rest
+  if (!record) return output
+  // Older persisted tool results may contain inline pixels. Keep their other
+  // arguments/results, but never render those bytes in the activity history.
+  const rest = Object.fromEntries(Object.entries(record)
+    .filter(([key]) => key !== "screenshot" && key !== "image" && key !== "base64")
+    .map(([key, value]) => [key, stripComputerUseScreenshot(value)]))
+  return typeof output === "string" ? JSON.stringify(rest) : rest
+}
+
+export function computerUseFailed(output: unknown): boolean {
+  const record = asRecord(output)
+  if (!record) return false
+  if (record.status === "error") return true
+  return unwrapToolOutput(record)?.status === "error"
 }

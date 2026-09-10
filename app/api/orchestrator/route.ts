@@ -10,6 +10,7 @@ import {
 
 import { DEFAULT_MODEL } from "@/lib/perplexity"
 import { COMPUTER_USE_TOOL_NAMES } from "@/components/v0/computer-use"
+import { createSkillRunSnapshot, foldSkillEvent, type SkillRunSnapshot } from "@/components/v0/skill-run"
 import {
   createGraphRunSnapshot,
   foldGraphEvent,
@@ -414,6 +415,12 @@ export async function POST(req: Request) {
       // they happened.
       let reasoningSeq = 0
       let openReasoningId: string | null = null
+      // The sub-agent speaker ([skill_name] / [agent_name]) already announced
+      // in the open reasoning block. The orchestrator publishes one thinking
+      // frame per model token; labeling every delta rendered as
+      // "Using[skill] the[skill] sandbox[skill]...". Label only when the
+      // speaker changes, and forget it when the block closes.
+      let announcedSpeaker: string | null = null
 
       // Strands lifecycle events (messageStart/messageStop) carry no renderable
       // payload — only contentBlockDelta / tool frames become UI parts. On
@@ -453,6 +460,7 @@ export async function POST(req: Request) {
         if (openReasoningId !== null) {
           writer.write({ type: "reasoning-end", id: openReasoningId })
           openReasoningId = null
+          announcedSpeaker = null
         }
       }
 
@@ -522,6 +530,7 @@ export async function POST(req: Request) {
         // Formation graph runs, one cumulative snapshot per graph tool call
         // (same reconciliation pattern as agentRuns). Keyed by toolUseId.
         const graphRuns = new Map<string, GraphRunSnapshot>()
+        const skillRuns = new Map<string, SkillRunSnapshot>()
         // parseJsonEventStream is the AI SDK's own SSE reader: it decodes,
         // frames on the event-source protocol, drops [DONE], and safely
         // parses each payload. Hand-rolling this missed \r\n framing.
@@ -543,21 +552,33 @@ export async function POST(req: Request) {
             // snapshot re-emitted as ONE reconciled data-graph-run part —
             // identical reconciliation pattern to data-agent-run below.
             if (
+              "topic" in event && event.topic === "thinking" &&
+              "tool_use" in event && event.tool_use?.name === "use_skill" &&
+              typeof event.tool_use.toolUseId === "string" &&
+              "data" in event && event.data && typeof event.data === "object"
+            ) {
+              const id = event.tool_use.toolUseId
+              const run = skillRuns.get(id) ?? createSkillRunSnapshot(id)
+              skillRuns.set(id, run)
+              foldSkillEvent(run, event.data as Record<string, unknown>)
+              clearTurnPending()
+              closeReasoning()
+              writer.write({ type: "data-skill-run", id: `skill-${id}`, data: structuredClone(run) })
+              continue
+            }
+
+            if (
               "topic" in event &&
               event.topic === "thinking" &&
               "tool_use" in event &&
-              (event.tool_use?.name === "use_skill" ||
-                event.tool_use?.name === "use_agent") &&
+              event.tool_use?.name === "use_agent" &&
               typeof event.tool_use.toolUseId === "string" &&
               "data" in event &&
               typeof event.data === "object" &&
               event.data !== null
             ) {
-              // use_skill and use_agent publish the same standalone frame
-              // shape (orchestrator/use_agent_activity.py): {skill_name |
-              // agent_name, text, event} with the sanitized native agent
-              // event retained. Both stream into Chain of Thought through
-              // the same generic path.
+              // use_agent retains its existing reasoning presentation;
+              // use_skill is handled above as an isolated Agent snapshot.
               const frame = event.data as {
                 skill_name?: string
                 agent_name?: string
@@ -587,10 +608,17 @@ export async function POST(req: Request) {
                     : typeof frame.agent_name === "string" && frame.agent_name
                       ? frame.agent_name
                       : ""
-                const label = name ? `[${name}] ` : ""
+                const id = ensureReasoning()
+                // Announce the speaker once per reasoning block (and again on
+                // speaker change) — never per token delta.
+                const label =
+                  name && announcedSpeaker !== name
+                    ? `${announcedSpeaker !== null ? "\n" : ""}[${name}] `
+                    : ""
+                if (name) announcedSpeaker = name
                 writer.write({
                   type: "reasoning-delta",
-                  id: ensureReasoning(),
+                  id,
                   delta: `${label}${delta}`,
                 })
               }

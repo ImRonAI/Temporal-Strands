@@ -304,15 +304,20 @@ export function FormationNode({ data }: { data: FormationNodeData }) {
         <NodeAction>{getStatusBadge(state)}</NodeAction>
       </NodeHeader>
       <NodeContent>
-        {streaming ? (
+        {/* The live text tail always renders while output exists — hiding it
+            behind a shimmer-only "Streaming…" left running nodes opaque for
+            the whole run. The shimmer is an activity indicator ABOVE the
+            text, never a replacement for it. */}
+        {streaming && (
           <Shimmer as="p" className="text-xs">
             Streaming…
           </Shimmer>
-        ) : excerpt ? (
+        )}
+        {excerpt ? (
           <div className="max-h-24 overflow-hidden text-xs">
-            <MessageResponse>{excerpt}</MessageResponse>
+            <MessageResponse isAnimating={streaming}>{excerpt}</MessageResponse>
           </div>
-        ) : (
+        ) : streaming ? null : (
           <p className="text-muted-foreground text-xs">No output yet</p>
         )}
       </NodeContent>

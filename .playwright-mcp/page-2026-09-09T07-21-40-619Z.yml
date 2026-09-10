@@ -1,0 +1,46 @@
+- generic [active] [ref=f9e1]:
+  - main [ref=f9e2]:
+    - generic [ref=f9e3]:
+      - generic [ref=f9e4]: v0 / studio
+      - navigation [ref=f9e9]:
+        - button "Community" [ref=f9e10]
+        - button "Pricing" [ref=f9e11]
+        - button "Enterprise" [ref=f9e12]
+        - button "Docs" [ref=f9e13]
+      - generic [ref=f9e14]:
+        - button "Compare models" [ref=f9e15] [cursor=pointer]
+        - button "Sign in" [ref=f9e16]
+        - button "Start building" [ref=f9e17]
+    - generic [ref=f9e19]:
+      - generic [ref=f9e20]: Now in beta
+      - heading "What should we ship today?" [level=1] [ref=f9e23]:
+        - generic [ref=f9e24]: What
+        - generic [ref=f9e26]: should
+        - generic [ref=f9e28]: we
+        - generic [ref=f9e30]: ship
+        - generic [ref=f9e32]: today?
+      - paragraph [ref=f9e35]: Describe an interface in plain language. v0 turns it into clean, production-ready React — components, styling, and all.
+      - generic [ref=f9e36]:
+        - group [ref=f9e38]:
+          - group [ref=f9e39]
+          - textbox "Describe what you want to ship…" [ref=f9e41]
+          - group [ref=f9e42]:
+            - generic [ref=f9e43]:
+              - button [ref=f9e44]
+              - button "Loading models…" [ref=f9e45]
+            - button "Submit" [disabled]
+        - generic [ref=f9e51]:
+          - button "A pricing page with a yearly toggle" [ref=f9e53] [cursor=pointer]
+          - button "An analytics dashboard with charts" [ref=f9e55] [cursor=pointer]
+          - button "A waitlist landing page" [ref=f9e57] [cursor=pointer]
+          - button "A Kanban board with drag and drop" [ref=f9e59] [cursor=pointer]
+          - button "A settings page with tabs" [ref=f9e61] [cursor=pointer]
+      - paragraph [ref=f9e65]: Trusted by design engineers shipping at the edge of the web.
+  - button "Open Next.js Dev Tools" [ref=f9e71] [cursor=pointer]:
+    - generic [ref=f9e74]:
+      - text: Compiling
+      - generic [ref=f9e75]:
+        - generic [ref=f9e76]: .
+        - generic [ref=f9e77]: .
+        - generic [ref=f9e78]: .
+  - alert [ref=f9e79]

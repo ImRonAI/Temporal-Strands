@@ -4,6 +4,10 @@ Multi-provider agent gateway: a Next.js UI streams durable agent turns from a Py
 
 > **Read this first.** This file describes the verified current state of the working tree. Where a behavior is policy (the agent model policy below, the provider-declaration rule), treat it as binding.
 
+**Desktop/browser work:** before changing its runtime, tools, provider image path, handoff, transport, or UI, read `orchestrator/desktop/AGENTS.md` and `components/v0/AGENTS.md`. Their acceptance contract records the September 10 user requirements and supersedes older conflicting desktop proposals. Historical success reports are not verification of the current implementation.
+
+**Desktop continuation:** `.kilo/plans/2026-09-10-desktop-completion-handoff.md` records the native migration's remaining gaps, completed guard tooling, restored full Perplexity picker, and latest runtime/test evidence. Recheck current state; do not repeat obsolete demos or remove the restored catalog fix.
+
 ## Project Structure & Module Organization
 
 Request path: `app/page.tsx` (`useChat` → `/api/orchestrator`) converts FastAPI SSE into AI SDK UI-message parts; the bridge is `orchestrator/server.py` (`POST /sessions`, `/turns/stream`, `/end`, `/compare/stream`, `/approve`, `GET /health`) talking to Temporal workflow `ChatWorkflow` in `workflow.py`. Workers (`run_worker.py`) register provider model factories on task queue `perplexity-orchestrator`.

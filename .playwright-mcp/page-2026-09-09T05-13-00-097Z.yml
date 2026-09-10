@@ -1,0 +1,35 @@
+- generic [active] [ref=f2e1]:
+  - main [ref=f2e2]:
+    - generic [ref=f2e3]:
+      - generic [ref=f2e4]: v0 / studio
+      - navigation [ref=f2e9]:
+        - button "Community" [ref=f2e10]
+        - button "Pricing" [ref=f2e11]
+        - button "Enterprise" [ref=f2e12]
+        - button "Docs" [ref=f2e13]
+      - generic [ref=f2e14]:
+        - button "Compare models" [ref=f2e15] [cursor=pointer]
+        - button "Sign in" [ref=f2e16]
+        - button "Start building" [ref=f2e17]
+    - generic [ref=f2e187]:
+      - log [ref=f2e188]:
+        - generic [ref=f2e190]:
+          - paragraph [ref=f2e195]:
+            - text: "Use the native browser yourself to demonstrate the live desktop: initialize session desktop-watch, navigate to"
+            - link "https://example.com" [ref=f2e196] [cursor=pointer]:
+              - /url: https://example.com/
+            - text: ", inspect the returned screenshot, click the visible Learn more link, then report the destination shown. Emit one brief progress update before clicking. No delegation, search, HTTP, shell, or source inspection. Maximum four tool actions. Leave the headed Linux browser open so I can see it in the noVNC preview. Think may plan; the outer agent must execute."
+          - generic [ref=f2e200]:
+            - button "Thinking…" [expanded] [ref=f2e202]
+            - generic [ref=f2e214]: Working
+      - group [ref=f2e225]:
+        - group [ref=f2e226]
+        - textbox "Ask for a change, or start something new…" [ref=f2e228]
+        - group [ref=f2e229]:
+          - generic [ref=f2e230]:
+            - button [ref=f2e231]
+            - button "gpt-6-astra" [ref=f2e232]
+            - button "Web preview" [ref=f2e236]
+          - button "Stop" [ref=f2e238]
+  - button "Open Next.js Dev Tools" [ref=f2e69] [cursor=pointer]
+  - alert [ref=f2e162]

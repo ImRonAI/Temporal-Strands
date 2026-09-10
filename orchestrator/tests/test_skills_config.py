@@ -166,3 +166,54 @@ def test_augmented_prompt_without_catalog_is_base(
 ) -> None:
     monkeypatch.setenv("SKILLS_DIR", str(tmp_path))
     assert skills_config.augmented_system_prompt("Base.") == "Base."
+
+
+def _write_skill(root: Path, name: str) -> None:
+    directory = root / name
+    directory.mkdir()
+    (directory / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: Skill {name}\n---\n# {name} instructions\n"
+    )
+
+
+def test_scoped_inline_skill_tool_only_loads_assigned_skills(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """create_inline_skill_tool(names) scopes Pattern 2 to the assigned subset:
+    assigned skills load, unassigned catalog skills are rejected by the
+    reference validate_skill_name inside the tool."""
+    for name in ("alpha", "beta", "gamma"):
+        _write_skill(tmp_path, name)
+    monkeypatch.setenv("SKILLS_DIR", str(tmp_path))
+
+    tool = skills_config.create_inline_skill_tool(["alpha", "beta"])
+    assert "# alpha instructions" in tool("alpha")
+
+    from agentskills.errors import SkillActivationError, SkillNotFoundError
+
+    with pytest.raises((SkillNotFoundError, SkillActivationError)):
+        tool("gamma")
+
+
+def test_resolve_skills_rejects_unknown_names(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _write_skill(tmp_path, "alpha")
+    monkeypatch.setenv("SKILLS_DIR", str(tmp_path))
+
+    from agentskills.errors import SkillNotFoundError
+
+    with pytest.raises(SkillNotFoundError, match="nope"):
+        skills_config.resolve_skills(["nope"])
+
+
+def test_scoped_skills_prompt_lists_only_assigned(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for name in ("alpha", "beta"):
+        _write_skill(tmp_path, name)
+    monkeypatch.setenv("SKILLS_DIR", str(tmp_path))
+
+    text = skills_config.skills_prompt(["alpha"])
+    assert "<name>alpha</name>" in text
+    assert "<name>beta</name>" not in text

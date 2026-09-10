@@ -2,7 +2,7 @@ import { z } from "zod"
 
 const requestSchema = z.object({
   sessionId: z.string().regex(/^[a-zA-Z0-9_-]+$/),
-  action: z.enum(["take", "give"]),
+  action: z.enum(["take", "release", "give"]),
   message: z.string().default(""),
 }).refine((body) => body.action !== "give" || body.message.trim().length > 0, {
   message: "Resume instructions are required",

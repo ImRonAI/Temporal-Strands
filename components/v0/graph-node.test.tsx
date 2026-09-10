@@ -367,6 +367,24 @@ describe("FormationNode streamed output rendering", () => {
     expect(html).toContain('data-testid="shimmer"')
   })
 
+  it("shows the live text tail on the card WHILE streaming, never shimmer-only", () => {
+    // Regression: a streaming node card that hides its accumulated text
+    // behind "Streaming…" gives the user no way to know what the agent is
+    // doing for the whole run.
+    render({ status: "streaming", text: "## Findings\nAll good." })
+    expect(h.messageResponses.map((r) => r.children)).toContain(
+      "## Findings\nAll good."
+    )
+  })
+
+  it("streaming card excerpt shows the tail of long output", () => {
+    const long = `${"x".repeat(600)}THE-TAIL`
+    render({ status: "streaming", text: long })
+    const card = h.messageResponses.find((r) => r.children.includes("THE-TAIL"))
+    expect(card).toBeDefined()
+    expect(card!.children.length).toBeLessThanOrEqual(481)
+  })
+
   it("labels the inspector with the member name, status, and model", () => {
     render()
     const header = h.agentHeaderProps.at(-1)!

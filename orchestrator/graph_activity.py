@@ -121,6 +121,13 @@ class GraphTask(BaseModel):
     skill: Optional[str] = Field(
         default=None, description="Registered skill name; runs that skill's sub-agent."
     )
+    skills: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "With skill: registered skill names assigned to the sub-agent as "
+            "inline skill(skill_name) tools (loaded into its own context)."
+        ),
+    )
     model_id: Optional[str] = Field(
         default=None,
         description="Registered model id for this task's agent; omit to inherit.",
@@ -143,6 +150,14 @@ class GraphNode(BaseModel):
     )
     skill: Optional[str] = Field(
         default=None, description="skill_agent nodes: registered skill name."
+    )
+    skills: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "skill_agent nodes: registered skill names assigned to the "
+            "sub-agent as inline skill(skill_name) tools it loads into its "
+            "own context (traditional skill use, not nested sub-agents)."
+        ),
     )
     tools: Optional[list[str]] = Field(
         default=None, description="agent nodes: tool names; omit to inherit all."

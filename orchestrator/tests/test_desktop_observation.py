@@ -1,8 +1,15 @@
+import hashlib
+import io
+import json
+import os
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 import pytest
+from PIL import Image
 from pydantic import ValidationError
 
+import desktop_observation
 from desktop_observation import ObservationRef, physical_coordinates
 from workspace_state import StateConflict
 
@@ -87,3 +94,240 @@ def test_observation_is_descriptor_only_in_temporal_payload(observation):
     assert b"input_image" not in payload.data
     restored = pydantic_data_converter.payload_converter.from_payloads([payload], [ObservationRef])
     assert restored == [observation]
+
+
+@pytest.fixture
+def artifact_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(tmp_path))
+    runtime = {"epoch": 7, "owner": {"namespace": "test", "workflow_id": "chat-1"}, "mode": "agent"}
+    (tmp_path / "runtime.json").write_text(json.dumps(runtime))
+    return tmp_path, runtime
+
+
+def store_image(**kwargs):
+    return desktop_observation.store_observation(
+        Image.new("RGB", (16, 12), "blue"), namespace="test", workflow_id="chat-1",
+        operation_id="capture-1", desktop_epoch=7, **kwargs,
+    )
+
+
+def resolve_image(ref, **overrides):
+    return desktop_observation.resolve_observation(
+        ref, **{"namespace": "test", "workflow_id": "chat-1", **overrides},
+    )
+
+
+def artifact_paths(root, ref):
+    scope = hashlib.sha256(b"test\0chat-1").hexdigest()
+    return root / scope / f"{ref.artifact_id}.png", root / scope / f"{ref.artifact_id}.json"
+
+
+def test_store_resolve_exact_png_and_metadata(artifact_store):
+    root, runtime = artifact_store
+    ref = store_image()
+    png, manifest = artifact_paths(root, ref)
+    data = resolve_image(ref)
+    assert UUID(ref.artifact_id).version == 4
+    assert ref.generation == "1"
+    assert data == png.read_bytes()
+    assert hashlib.sha256(data).hexdigest() == ref.sha256
+    assert len(data) == ref.byte_size
+    with Image.open(io.BytesIO(data)) as image:
+        assert image.size == (ref.width, ref.height) == (16, 12)
+        assert image.convert("RGB").getpixel((0, 0)) == (0, 0, 255)
+    assert json.loads(manifest.read_text())["observation"] == ref.model_dump(mode="json")
+    assert json.loads((root / "runtime.json").read_text()) == runtime
+    assert len(ref.model_dump_json()) < 2048
+
+
+def test_inflight_capture_can_finish_while_stopping_but_cannot_feed_model(artifact_store):
+    root, runtime = artifact_store
+    (root / "runtime.json").write_text(json.dumps({**runtime, "mode": "stopping"}))
+    ref = store_image()
+    assert artifact_paths(root, ref)[0].is_file()
+    with pytest.raises(StateConflict):
+        resolve_image(ref)
+
+
+@pytest.mark.parametrize("scope", [{"namespace": "other"}, {"workflow_id": "other"}])
+def test_resolve_rejects_cross_scope(artifact_store, scope):
+    ref = store_image()
+    with pytest.raises((OSError, ValueError, StateConflict)):
+        resolve_image(ref, **scope)
+
+
+@pytest.mark.parametrize("changes", [
+    {"epoch": 8}, {"epoch": True}, {"mode": "human"}, {"owner": None},
+    {"owner": {"namespace": "test", "workflow_id": "other"}},
+])
+def test_resolve_requires_current_runtime_owner_and_epoch(artifact_store, changes):
+    root, runtime = artifact_store
+    ref = store_image()
+    (root / "runtime.json").write_text(json.dumps({**runtime, **changes}))
+    with pytest.raises((ValueError, StateConflict)):
+        resolve_image(ref)
+
+
+@pytest.mark.parametrize("changes", [
+    {"sha256": "b" * 64}, {"generation": "2"}, {"operation_id": "forged"},
+    {"width": 15}, {"captured_at": "2026-01-01T00:00:00Z"},
+])
+def test_resolve_compares_complete_metadata_with_manifest(artifact_store, changes):
+    ref = store_image()
+    forged = ObservationRef.model_validate({**ref.model_dump(mode="json"), **changes})
+    with pytest.raises((ValueError, StateConflict)):
+        resolve_image(forged)
+
+
+@pytest.mark.parametrize("name", ["../runtime", "/tmp/image", "not-a-uuid"])
+def test_resolve_rejects_unvalidated_artifact_names(artifact_store, name):
+    ref = store_image().model_copy(update={"artifact_id": name})
+    with pytest.raises(ValueError):
+        resolve_image(ref)
+
+
+@pytest.mark.parametrize("target", ["png", "manifest", "runtime", "scope"])
+def test_resolve_rejects_symlinks(artifact_store, target):
+    root, _ = artifact_store
+    ref = store_image()
+    png, manifest = artifact_paths(root, ref)
+    path = {"png": png, "manifest": manifest, "runtime": root / "runtime.json", "scope": png.parent}[target]
+    renamed = path.with_name(path.name + ".original")
+    path.rename(renamed)
+    path.symlink_to(renamed, target_is_directory=target == "scope")
+    with pytest.raises(OSError):
+        resolve_image(ref)
+
+
+def test_resolve_rejects_corrupt_or_missing_pixels(artifact_store):
+    root, _ = artifact_store
+    ref = store_image()
+    png, _ = artifact_paths(root, ref)
+    png.write_bytes(b"x" * ref.byte_size)
+    with pytest.raises(ValueError, match="integrity"):
+        resolve_image(ref)
+    png.unlink()
+    with pytest.raises(OSError):
+        resolve_image(ref)
+
+
+def test_store_never_overwrites_existing_artifact(artifact_store, monkeypatch):
+    root, _ = artifact_store
+    ref = store_image()
+    png, manifest = artifact_paths(root, ref)
+    original = (png.read_bytes(), manifest.read_bytes())
+    monkeypatch.setattr(desktop_observation, "uuid4", lambda: UUID(ref.artifact_id))
+    with pytest.raises(FileExistsError):
+        store_image()
+    assert (png.read_bytes(), manifest.read_bytes()) == original
+
+
+@pytest.mark.parametrize("limit", ["dimensions", "pixels", "bytes"])
+def test_store_bounds_dimensions_pixels_and_encoded_bytes(artifact_store, monkeypatch, limit):
+    if limit == "dimensions":
+        monkeypatch.setattr(desktop_observation, "DESKTOP_MAX_DIMENSION", 8)
+        image = Image.new("RGB", (9, 1))
+    elif limit == "pixels":
+        monkeypatch.setattr(desktop_observation, "DESKTOP_OBSERVATION_MAX_BYTES", 100)
+        image = Image.new("RGB", (11, 10))
+    else:
+        monkeypatch.setattr(desktop_observation, "DESKTOP_OBSERVATION_MAX_BYTES", 10)
+        image = Image.new("RGB", (1, 1))
+    with pytest.raises(ValueError, match="limit"):
+        desktop_observation.store_observation(
+            image, namespace="test", workflow_id="chat-1", operation_id="capture", desktop_epoch=7,
+        )
+
+
+def test_artifact_root_symlink_is_rejected(artifact_store, tmp_path, monkeypatch):
+    root, _ = artifact_store
+    ref = store_image()
+    link = tmp_path / "root-link"
+    link.symlink_to(root, target_is_directory=True)
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(link))
+    with pytest.raises(OSError):
+        resolve_image(ref)
+    with pytest.raises(OSError):
+        store_image()
+
+
+def test_artifact_hardlinks_are_rejected(artifact_store):
+    root, _ = artifact_store
+    ref = store_image()
+    png, _ = artifact_paths(root, ref)
+    os.link(png, root / "linked.png")
+    with pytest.raises(ValueError, match="link"):
+        resolve_image(ref)
+
+
+def test_runtime_change_during_resolution_is_rejected(artifact_store, monkeypatch):
+    root, runtime = artifact_store
+    ref = store_image()
+    read = desktop_observation._read_artifact
+
+    def change_runtime(directory, name, limit):
+        data = read(directory, name, limit)
+        if name.endswith(".png"):
+            (root / "runtime.json").write_text(json.dumps({**runtime, "mode": "human"}))
+        return data
+
+    monkeypatch.setattr(desktop_observation, "_read_artifact", change_runtime)
+    with pytest.raises(StateConflict):
+        resolve_image(ref)
+
+
+@pytest.mark.parametrize("damage", ["missing-runtime", "malformed-runtime", "oversized-runtime", "oversized-image", "invalid-image"])
+def test_resolve_fails_closed_on_unavailable_or_invalid_files(artifact_store, damage):
+    root, _ = artifact_store
+    ref = store_image()
+    png, manifest = artifact_paths(root, ref)
+    if damage == "missing-runtime":
+        (root / "runtime.json").unlink()
+    elif damage == "malformed-runtime":
+        (root / "runtime.json").write_text("{")
+    elif damage == "oversized-runtime":
+        (root / "runtime.json").write_bytes(b"x" * 4097)
+    elif damage == "oversized-image":
+        with png.open("r+b") as file:
+            file.truncate(desktop_observation.DESKTOP_OBSERVATION_MAX_BYTES + 1)
+    else:
+        data = b"not an image"
+        png.write_bytes(data)
+        ref = ref.model_copy(update={"byte_size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+        record = json.loads(manifest.read_text())
+        record["observation"] = ref.model_dump(mode="json")
+        manifest.write_text(json.dumps(record))
+    with pytest.raises((OSError, ValueError, StateConflict)):
+        resolve_image(ref)
+
+
+@pytest.mark.parametrize("namespace,workflow_id", [("", "id"), ("ns", ""), ("ns\0x", "id"), ("ns", "id\0x")])
+def test_ambiguous_or_empty_scope_is_rejected(artifact_store, namespace, workflow_id):
+    with pytest.raises(ValueError):
+        desktop_observation.store_observation(
+            Image.new("RGB", (1, 1)), namespace=namespace, workflow_id=workflow_id,
+            operation_id="capture", desktop_epoch=7,
+        )
+
+
+def test_latest_result_missing_observation_cannot_reuse_old_pixels(artifact_store):
+    ref = store_image()
+    messages = [
+        {"role": "assistant", "content": [
+            {"toolUse": {"toolUseId": call_id, "name": "browser", "input": {}}} for call_id in ("old", "new")
+        ]},
+        {"role": "user", "content": [
+            {"toolResult": {"toolUseId": "old", "status": "success", "content": [
+                {"text": json.dumps({"observation": ref.model_dump(mode="json")})},
+            ]}},
+            {"toolResult": {"toolUseId": "new", "status": "success", "content": [
+                {"text": json.dumps({"status": "success", "content": [{"text": json.dumps({
+                    "observation": ref.model_dump(mode="json"),
+                })}]})},
+            ]}},
+        ]},
+    ]
+    with pytest.raises(ValueError, match="missing"):
+        desktop_observation.latest_observation(messages)
+    messages[-1]["content"][-1]["toolResult"]["status"] = "error"
+    assert desktop_observation.latest_observation(messages) is None

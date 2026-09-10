@@ -1,4 +1,5 @@
 import os
+from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from typing import Optional
@@ -6,12 +7,66 @@ from typing import Optional
 from temporalio.common import RetryPolicy
 
 TASK_QUEUE = "perplexity-orchestrator"
+
+# --- Provider declaration ---
+# Providers are declared by the worker, never inferred client-side from id
+# shapes: a "gemini*" id could mean Google AI Studio (direct) or google/* via
+# the Perplexity gateway. Every registered model carries its declared provider.
+PROVIDER_PERPLEXITY_AGENT_API = "perplexity-agent-api"
+PROVIDER_GOOGLE_AI_STUDIO = "google-ai-studio"
+PROVIDER_DISPLAY_NAMES = {
+    "perplexity-agent-api": "Perplexity Agent API",
+    "google-ai-studio": "Google AI Studio",
+}
+
+
+@dataclass(frozen=True)
+class RegisteredModel:
+    """A worker-registered model id with its declared provider and label."""
+
+    id: str
+    provider: str
+    label: str
+# Desktop browser routing: the stock strands browser activity executes only on
+# the desktop worker, which polls this queue from inside the Linux desktop
+# (Xvfb). Native Temporal task-queue routing — no custom platform code.
+DESKTOP_BROWSER_TASK_QUEUE = "desktop-browser"
+# Native x11vnc remote-control command used to fence/grant desktop input.
+# Executed verbatim by the API on handoff; the default targets the local pilot
+# container. Set to the deployment's equivalent for GCE.
+DESKTOP_VNC_GRANT_COMMAND = os.environ.get(
+    "DESKTOP_VNC_GRANT_COMMAND",
+    "docker --context colima exec gwen-desktop x11vnc -display :99 -R script:noviewonly;nodeny -Q viewonly,deny",
+)
+DESKTOP_VNC_REVOKE_COMMAND = os.environ.get(
+    "DESKTOP_VNC_REVOKE_COMMAND",
+    "docker --context colima exec gwen-desktop x11vnc -display :99 -R script:viewonly;deny;disconnect:all;clear_all;fakebuttonevent:1,0;fakebuttonevent:2,0;fakebuttonevent:3,0 -Q viewonly,client_count,pointer_mask",
+)
+DESKTOP_VNC_COMMAND_TIMEOUT = 15
+DESKTOP_HANDOFF_TIMEOUT = timedelta(seconds=45)
 # --- Perplexity Agent API (outer model provider) ---
 # Pinned explicitly rather than inherited from the environment: the Perplexity
 # SDK reads PERPLEXITY_BASE_URL on construction, and .env.local may point it at
 # the stateless router endpoint, which rejects catalog model ids and
 # background/store/max_steps.
 PERPLEXITY_API_BASE = "https://api.perplexity.ai"
+# Perplexity-only ``response.output_item.done`` item types. These are the
+# server-side tool payloads in the Agent API's OutputItem union that the
+# OpenAI Responses stream loop has no branch for and silently skips
+# (strands/models/openai_responses.py:334-449). PerplexityModel taps the raw
+# SSE body and re-emits each one verbatim under a ``{"perplexity": ...}``
+# StreamEvent so the UI can render its tool card. "message" is deliberately
+# absent: its text already streams as output_text deltas.
+NATIVE_OUTPUT_ITEM_TYPES = (
+    "search_results",
+    "fetch_url_results",
+    "sandbox_results",
+    "sandbox_write_file",
+    "share_file",
+    "mcp_call",
+    "skill_loaded",
+    "advisor_result",
+)
 # The six documented dynamic presets, in registration/readiness order. Each is
 # registered as model id "preset:<name>" (perplexity_model.PRESET_PREFIX).
 PERPLEXITY_PRESETS = ("fast", "low", "medium", "high", "xhigh", "wide-research")
@@ -92,6 +147,18 @@ MODEL_RETRY_POLICY = RetryPolicy()
 # applied only when both timeouts are None (graceful degradation, matching
 # workflow.py's ``_closable``).
 UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE = timedelta(days=1)
+
+# Outer TemporalAgent streaming batch interval (workflow.py's
+# ``streaming_batch_interval``). Temporal's own value for LLM streaming
+# (docs.temporal.io, "Stream LLM output"). Every batch is a durable Signal
+# appended to workflow history, so this is a history-pressure dial, not a
+# latency dial: at 25 ms a single turn produced 5,158 signals and 24,953
+# history events, and the workflow spent its time replaying history instead
+# of streaming.
+MODEL_STREAM_BATCH_INTERVAL = timedelta(milliseconds=200)
+SSE_SUBSCRIBE_RESTART_LIMIT = 3
+SSE_SUBSCRIBE_RESTART_DELAY = 0.25
+SSE_HEARTBEAT_SECONDS = 10
 
 
 def closable_activity_options(options: dict) -> dict:
@@ -179,19 +246,31 @@ COMPUTER_USE_HEARTBEAT = MODEL_HEARTBEAT
 # Browser actions can submit forms or otherwise cause non-idempotent effects.
 BROWSER_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
 
-# --- Worker readiness lease ---
-# The readiness file is a live, expiring lease, not a static marker: the worker
-# rewrites it (atomically) every READINESS_HEARTBEAT_INTERVAL with its PID and
-# a heartbeat timestamp, and the API rejects any record whose heartbeat is
-# older than READINESS_LEASE_TTL or whose PID is no longer alive. TTL is a
-# multiple of the heartbeat so one missed/slow write does not flap readiness.
-READINESS_HEARTBEAT_INTERVAL = timedelta(seconds=5)
-READINESS_LEASE_TTL = timedelta(seconds=20)
-# /health and POST /sessions additionally verify live task-queue pollers via
-# DescribeTaskQueue, cached for this long and bounded by this RPC timeout so
-# the check stays cheap. Fail closed: unavailable Temporal reports no pollers.
+# --- Worker readiness (Temporal-native) ---
+# There is no readiness file. Liveness is Temporal's own DescribeTaskQueue
+# poller probe, cached for this long and bounded by this RPC timeout so the
+# check stays cheap under load. Fail closed: unavailable Temporal, an RPC
+# error, or a slow RPC all report no pollers.
 READINESS_POLLER_CACHE = timedelta(seconds=5)
 READINESS_POLLER_RPC_TIMEOUT = timedelta(seconds=2)
+# --- Model catalog (catalog_workflow.ModelCatalogWorkflow) ---
+# The provider-declaring catalog is served over Temporal's own unit of work:
+# ModelCatalogWorkflow schedules the model_catalog activity, which returns the
+# catalog the worker captured at boot. The activity is a pure in-memory read,
+# so a short start-to-close is correct -- exceeding it means no worker is
+# serving the queue, which is exactly the degraded signal /health reports.
+CATALOG_ACTIVITY_TIMEOUT = timedelta(seconds=5)
+# Whole-execution bound, applied twice: as the workflow's own
+# execution_timeout so Temporal abandons it server-side, and as the client-side
+# wait on execute_workflow. Without it a queue with no pollers leaves
+# execute_workflow pending forever and /health never answers -- the endpoint
+# `pnpm dev:web` waits on. Must exceed CATALOG_ACTIVITY_TIMEOUT so a normal
+# activity attempt is never cut short by the outer bound.
+CATALOG_WORKFLOW_TIMEOUT = timedelta(seconds=8)
+# How long the API reuses a fetched catalog before re-executing the workflow.
+# A model id missing from the cache also forces one immediate refresh, so a
+# worker that registered new ids mid-window is picked up without waiting.
+CATALOG_CACHE_TTL = timedelta(seconds=30)
 
 EMBEDDING_GENERATIONS = {
     "memory-v1": {

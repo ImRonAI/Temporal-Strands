@@ -1,0 +1,35 @@
+- generic [active] [ref=f9e1]:
+  - main [ref=f9e2]:
+    - generic [ref=f9e3]:
+      - generic [ref=f9e4]: v0 / studio
+      - navigation [ref=f9e9]:
+        - button "Community" [ref=f9e10]
+        - button "Pricing" [ref=f9e11]
+        - button "Enterprise" [ref=f9e12]
+        - button "Docs" [ref=f9e13]
+      - generic [ref=f9e14]:
+        - button "Compare models" [ref=f9e15] [cursor=pointer]
+        - button "Sign in" [ref=f9e16]
+        - button "Start building" [ref=f9e17]
+    - generic [ref=f9e141]:
+      - log [ref=f9e142]:
+        - generic [ref=f9e144]:
+          - paragraph [ref=f9e149]:
+            - text: "Use the native browser tool directly: initialize session takeover-demo and navigate to"
+            - link "https://example.com" [ref=f9e150] [cursor=pointer]:
+              - /url: https://example.com/
+            - text: . Stop after navigation and leave the headed desktop open for me to take control. No delegation or research. Report ready for takeover.
+          - generic [ref=f9e154]:
+            - button "Thinking…" [expanded] [ref=f9e156]
+            - generic [ref=f9e168]: Working
+      - group [ref=f9e179]:
+        - group [ref=f9e180]
+        - textbox "Ask for a change, or start something new…" [ref=f9e182]
+        - group [ref=f9e183]:
+          - generic [ref=f9e184]:
+            - button [ref=f9e185]
+            - button "High (preset)" [ref=f9e186]
+            - button "Web preview" [ref=f9e190]
+          - button "Stop" [ref=f9e192]
+  - button "Open Next.js Dev Tools" [ref=f9e112] [cursor=pointer]
+  - alert [ref=f9e79]

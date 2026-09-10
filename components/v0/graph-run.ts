@@ -159,7 +159,7 @@ function foldToolResult(node: GraphNodeSnapshot, result: Frame) {
 //                                      result blocks
 //   {type:"tool_result", tool_result}  ToolResultEvent
 //   {type:"tool_stream", tool_stream_event}  nested tool sub-events
-function foldLeafEvent(node: GraphNodeSnapshot, inner: unknown) {
+export function foldLeafEvent(node: GraphNodeSnapshot, inner: unknown) {
   if (!inner || typeof inner !== "object") return
   const ev = inner as Frame
 

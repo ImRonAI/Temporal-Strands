@@ -551,7 +551,7 @@ def test_other_json_files_are_allowed(tmp_path: Path) -> None:
         ("app/.git/HEAD", "forbidden path component '.git'"),
         ("app/orchestrator/.venv/bin/python", "forbidden path component '.venv'"),
         ("app/orchestrator/__pycache__/x.pyc", "forbidden path component '__pycache__'"),
-        ("app/orchestrator/.runtime/worker-readiness.json", "forbidden path component '.runtime'"),
+        ("app/orchestrator/.runtime/browser-observations/x.jpg", "forbidden path component '.runtime'"),
         ("app/.next/cache/webpack/x.pack", "forbidden path sequence '.next/cache'"),
         ("app/.kilo/plans/x.md", "forbidden path component '.kilo'"),
         ("app/.worktrees/x/package.json", "forbidden path component '.worktrees'"),

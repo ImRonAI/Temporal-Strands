@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button"
 import { DEFAULT_MODEL } from "@/lib/perplexity"
 import { cn } from "@/lib/utils"
 import { AgentActivity } from "@/components/v0/agent-activity"
+import { computerUseTextIndices } from "@/components/v0/computer-use-activity"
 import { BlurpleBackground } from "@/components/v0/blurple-background"
 import { GraphActivity } from "@/components/v0/graph-activity"
 import { computerUsePreview } from "@/components/v0/computer-use"
@@ -318,7 +319,7 @@ export function AgentChat({
     projectIde.activityId,
   ])
 
-  async function handoff(action: "take" | "give", message = "") {
+  async function handoff(action: "take" | "release" | "give", message = "") {
     if (!sessionId) throw new Error("No active browser session")
     const response = await fetch("/api/orchestrator/handoff", {
       method: "POST",
@@ -432,6 +433,9 @@ export function AgentChat({
                         )}
                         {message.parts.map((part, i) => {
                           if (isTextUIPart(part)) {
+                            if (message.role === "assistant" && computerUseTextIndices(message.parts,
+                              (status === "streaming" || status === "submitted") && messageIndex === messages.length - 1
+                            ).has(i)) return null
                             return (
                               // isAnimating drives Streamdown's own streaming
                               // affordances — token fade-in and the caret. It
@@ -574,8 +578,12 @@ export function AgentChat({
                    onStop={stop}
                   globalDrop={!paneId}
                   placeholder="Ask for a change, or start something new…"
-                  previewActive={showProjectIde}
+                  previewActive={showProjectIde || showBrowserPreview}
                   onPreview={() => {
+                    if (browserPreview.open) {
+                      setDismissedPreview("")
+                      return
+                    }
                     setDismissedIde(null)
                     setPreviewRequested(true)
                   }}
@@ -604,6 +612,7 @@ export function AgentChat({
                     onDeny={() => answerApproval("deny")}
                     onClose={() => setDismissedPreview(browserPreview.sessionId)}
                     onTakeControl={takeControl}
+                    onReleaseControl={() => handoff("release")}
                     onGiveControl={giveControl}
                   />
                 </motion.div>

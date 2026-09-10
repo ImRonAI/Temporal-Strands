@@ -650,6 +650,52 @@ async def test_skill_agent_node_uses_vendored_construction(monkeypatch) -> None:
     assert planned["nodes"][0]["skill"] == "wf-skill"
 
 
+def test_skill_agent_node_assigned_skills_become_inline_tools(monkeypatch) -> None:
+    """A skill_agent node's ``skills`` list assigns those skills to the
+    sub-agent as a scoped Pattern-2 skill() tool plus the scoped catalog in
+    its system prompt — traditional inline use, never nested sub-agents."""
+    from pathlib import Path
+
+    import graph_tool
+    import skills_config
+    from skills_config import ensure_skills_configured
+
+    fixtures = (
+        Path(__file__).resolve().parents[2]
+        / ".."
+        / "strands-tools"
+        / "tests"
+        / "fixtures_skills"
+    ).resolve()
+    if not fixtures.is_dir():
+        pytest.skip("fixtures_skills catalog unavailable")
+    monkeypatch.setenv("SKILLS_DIR", str(fixtures))
+    skills_config.discovered_skills.cache_clear()
+    try:
+        ensure_skills_configured(None)
+        agent = graph_tool.build_skill_agent(
+            {"id": "writer", "skill": "wf-skill", "skills": ["wf-skill"]},
+            parent_agent=None,
+            model=ScriptedModel(),
+        )
+        tool_names = set(agent.tool_registry.registry)
+        assert "skill" in tool_names
+        assert "use_skill" not in tool_names  # inline use, never nested
+        assert "<name>wf-skill</name>" in agent.system_prompt
+
+        # Without an assignment there is no inline skill tool and no catalog.
+        plain = graph_tool.build_skill_agent(
+            {"id": "writer2", "skill": "wf-skill"},
+            parent_agent=None,
+            model=ScriptedModel(),
+        )
+        assert "skill" not in set(plain.tool_registry.registry)
+        assert "<available_skills>" not in plain.system_prompt
+    finally:
+        skills_config.discovered_skills.cache_clear()
+        ensure_skills_configured(None)
+
+
 # --- management actions (process-local) --------------------------------------
 
 

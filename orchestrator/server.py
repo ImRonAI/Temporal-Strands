@@ -7,7 +7,7 @@ Endpoint contract, fixed by the protected route files under ``app/api/``:
     POST /sessions/{id}/approve         -> 204
     POST /sessions/{id}/end             -> 204, idempotent
     POST /compare/stream                -> SSE
-    GET  /health                        -> readiness detail
+    GET  /health                        -> liveness + model catalog
 
 SSE frames are newline-delimited ``data: <json>`` lines. The chat stream emits
 one frame per stream item plus exactly one terminal frame:
@@ -32,14 +32,19 @@ import json
 import logging
 import os
 import re
+import shlex
+import subprocess
 import time
 from collections.abc import AsyncIterator
 import asyncio
+import fcntl
+from config import SSE_SUBSCRIBE_RESTART_LIMIT, SSE_SUBSCRIBE_RESTART_DELAY, SSE_HEARTBEAT_SECONDS
 from contextlib import asynccontextmanager, suppress
 
 from starlette.concurrency import run_in_threadpool
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from dotenv import load_dotenv
@@ -58,14 +63,23 @@ from compare_workflow import (
     CompareWorkflow,
     model_topic,
 )
+from catalog_workflow import ModelCatalogWorkflow
 from config import (
-    READINESS_LEASE_TTL,
+    CATALOG_CACHE_TTL,
+    CATALOG_WORKFLOW_TIMEOUT,
+    DEFAULT_MODEL_ID,
+    DESKTOP_VNC_GRANT_COMMAND,
+    DESKTOP_VNC_REVOKE_COMMAND,
+    DESKTOP_VNC_COMMAND_TIMEOUT,
+    DESKTOP_HANDOFF_TIMEOUT,
+    PROVIDER_DISPLAY_NAMES,
     READINESS_POLLER_CACHE,
     READINESS_POLLER_RPC_TIMEOUT,
     TASK_QUEUE,
 )
 from perplexity_operations import AGENT_RUNS_TOPIC
-from run_worker import READINESS_PATH, agent_identity
+from browser_activity import artifact_root, desktop_state
+from run_worker import agent_identity
 from skills_config import augmented_system_prompt
 from workspace_api import WorkspaceRequestBoundary, router as workspace_router, workspace_lifespan
 from workflow import (
@@ -110,66 +124,6 @@ CHAT_TOPICS = [
 _state: dict[str, Any] = {"client": None, "system_prompt": ""}
 
 
-def _pid_alive(pid: int) -> bool:
-    """True when a local process with this PID exists (signal 0 probe)."""
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # Exists but owned by someone else; still a live process.
-        return True
-    except OSError:
-        return False
-    return True
-
-
-def validate_readiness_record(
-    record: Any, *, now: float | None = None
-) -> dict[str, Any] | None:
-    """The record if it is a live worker lease, else None.
-
-    Rejects (never raises): non-dict/malformed records, legacy records without
-    ``pid``/``heartbeat``, heartbeats older than READINESS_LEASE_TTL, heartbeats
-    implausibly far in the future (clock damage), and leases whose PID is no
-    longer a live local process.
-    """
-    if not isinstance(record, dict):
-        return None
-    pid = record.get("pid")
-    heartbeat = record.get("heartbeat")
-    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
-        return None
-    if not isinstance(heartbeat, (int, float)) or isinstance(heartbeat, bool):
-        return None
-    current = time.time() if now is None else now
-    ttl = READINESS_LEASE_TTL.total_seconds()
-    age = current - float(heartbeat)
-    if age > ttl or age < -ttl:
-        return None
-    if not _pid_alive(pid):
-        return None
-    return record
-
-
-async def readiness() -> dict[str, Any] | None:
-    """Live worker readiness lease, or None when no live worker holds one.
-
-    Off the event loop: FastAPI runs `async def` handlers directly on the loop,
-    so a synchronous read_text here blocks every other in-flight request --
-    including active SSE streams -- for the duration of the disk I/O.
-    """
-
-    def _read() -> dict[str, Any] | None:
-        try:
-            record = json.loads(READINESS_PATH.read_text())
-        except (OSError, json.JSONDecodeError, ValueError):
-            return None
-        return validate_readiness_record(record)
-
-    return await run_in_threadpool(_read)
-
-
 _poller_cache: dict[str, Any] = {"checked_at": 0.0, "ok": False}
 
 
@@ -210,9 +164,86 @@ async def task_queue_has_pollers() -> bool:
     return ok
 
 
-def models_of(record: dict[str, Any] | None) -> list[str]:
-    models = (record or {}).get("models")
-    return models if isinstance(models, list) else []
+_catalog_cache: dict[str, Any] = {"models": None, "fetched_at": 0.0}
+
+
+async def _execute_catalog_workflow() -> list[dict[str, str]]:
+    """Run ModelCatalogWorkflow once and return its catalog as plain dicts.
+
+    Failure is not an error condition here: no worker polling the task queue
+    means the activity never starts and this raises, which is exactly the
+    degraded state /health reports. Callers get an empty catalog.
+    """
+    client = _state["client"]
+    if client is None:
+        return []
+    try:
+        # Bounded on both sides: execution_timeout lets Temporal abandon the
+        # run server-side, and the asyncio bound stops /health from hanging
+        # when nothing is polling the queue at all.
+        catalog = await asyncio.wait_for(
+            client.execute_workflow(
+                ModelCatalogWorkflow.run,
+                id=f"model-catalog-{uuid4()}",
+                task_queue=TASK_QUEUE,
+                execution_timeout=CATALOG_WORKFLOW_TIMEOUT,
+            ),
+            timeout=CATALOG_WORKFLOW_TIMEOUT.total_seconds(),
+        )
+    except Exception as error:  # noqa: BLE001 - fail closed, never crash /health
+        logger.warning("model catalog workflow failed: %s", error)
+        return []
+    return [
+        {"id": entry.id, "provider": entry.provider, "label": entry.label}
+        for entry in catalog
+    ]
+
+
+async def model_catalog(*, refresh: bool = False) -> list[dict[str, str]]:
+    """The live worker catalog, cached for CATALOG_CACHE_TTL.
+
+    ``refresh=True`` bypasses the cache: a model id the cache has not seen may
+    simply predate the last fetch, so validation forces exactly one re-execute
+    before rejecting it rather than making the caller wait out the TTL.
+    """
+    now = time.monotonic()
+    cached = _catalog_cache["models"]
+    fresh = (
+        cached is not None
+        and now - _catalog_cache["fetched_at"] < CATALOG_CACHE_TTL.total_seconds()
+    )
+    if fresh and not refresh:
+        return cached
+    models = await _execute_catalog_workflow()
+    # An empty catalog is never cached: it means no worker answered, and
+    # caching that would keep /health degraded for a whole TTL window after a
+    # worker comes up.
+    if models:
+        _catalog_cache["models"] = models
+        _catalog_cache["fetched_at"] = now
+    return models
+
+
+async def validated_model(model_id: str) -> None:
+    """Reject a model id the live worker does not serve.
+
+    503 when no catalog is available at all (no worker), 400 when the worker is
+    up but does not register this id -- checked against a freshly refreshed
+    catalog so a newly registered id is never wrongly rejected.
+    """
+    ids = [entry["id"] for entry in await model_catalog()]
+    if ids and model_id not in ids:
+        # Exactly one refresh: the id may have been registered after the cached
+        # catalog was fetched. Skipped when the catalog is empty -- no worker
+        # answered, and re-executing would only double the wait before the 503.
+        ids = [entry["id"] for entry in await model_catalog(refresh=True)]
+    if not ids:
+        raise HTTPException(503, "No worker is ready")
+    if model_id not in ids:
+        preview = ", ".join(ids[:5])
+        if len(ids) > 5:
+            preview += ", ..."
+        raise HTTPException(400, f"Unsupported model: {model_id}. Available: {preview}")
 
 
 @asynccontextmanager
@@ -248,6 +279,28 @@ def sse(payload: dict[str, Any]) -> bytes:
     return f"data: {json.dumps(payload)}\n\n".encode()
 
 
+async def _next_item(subscription: AsyncIterator[Any]) -> Any:
+    """One step of a stream subscription, or None when it ends.
+
+    Wrapping ``__anext__`` in a task is what lets the pump select the SDK
+    iterator against the update's result with ``asyncio.wait``; StopAsyncIteration
+    cannot cross a task boundary, so end-of-stream becomes ``None``.
+    """
+    try:
+        return await subscription.__anext__()
+    except StopAsyncIteration:
+        return None
+
+
+async def _aclose(subscription: AsyncIterator[Any]) -> None:
+    """Release a stream subscription without touching the workflow."""
+    closer = getattr(subscription, "aclose", None)
+    if closer is None:
+        return
+    with suppress(Exception):
+        await closer()
+
+
 class StartSession(BaseModel):
     model_id: str = Field(min_length=1)
 
@@ -262,10 +315,10 @@ class TurnRequest(BaseModel):
     images: list[TurnMediaPayload] = Field(default_factory=list)
     documents: list[TurnMediaPayload] = Field(default_factory=list)
     videos: list[TurnMediaPayload] = Field(default_factory=list)
-    # Optional per-turn model switch: validated against the worker's readiness
-    # catalog and forwarded to the workflow, which rebuilds its agent on the
-    # new factory name before running the turn. Omitted -> keep the session's
-    # current model.
+    # Optional per-turn model switch: validated against the live worker
+    # catalog (ModelCatalogWorkflow) and forwarded to the workflow, which
+    # rebuilds its agent on the new factory name before running the turn.
+    # Omitted -> keep the session's current model.
     model_id: str | None = None
     reasoning_effort: str | None = None
 
@@ -275,7 +328,7 @@ class ApproveRequest(BaseModel):
 
 
 class HandoffRequest(BaseModel):
-    action: str = Field(pattern="^(take|give)$")
+    action: str = Field(pattern="^(take|release|give)$")
     message: str = ""
 
 
@@ -286,46 +339,35 @@ class CompareRequest(BaseModel):
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    # One read, not two: this used to call readiness() and supported_models(),
-    # each doing its own full read + parse.
-    record = await readiness()
+    """Liveness plus the worker-declared model catalog.
+
+    Liveness is Temporal's own DescribeTaskQueue poller probe -- there is no
+    readiness file and no PID/heartbeat lease. The catalog comes from
+    ModelCatalogWorkflow, so every model object carries the provider its worker
+    declared; the Next.js picker groups by that instead of guessing from the id.
+    """
     temporal_ok = _state["client"] is not None
-    worker_ok = record is not None
     pollers_ok = await task_queue_has_pollers()
-    model_ids = models_of(record)
-    payload: dict[str, Any] = {
-        "status": "ok" if (temporal_ok and worker_ok and pollers_ok) else "degraded",
-        "api": True,
+    models = await model_catalog()
+    default_model = None
+    if models:
+        ids = [entry["id"] for entry in models]
+        default_model = DEFAULT_MODEL_ID if DEFAULT_MODEL_ID in ids else ids[0]
+    return {
+        "status": "ok" if (temporal_ok and pollers_ok and models) else "degraded",
         "temporal": temporal_ok,
-        "worker": worker_ok,
-        # Live DescribeTaskQueue verification (cached): the lease proves a
-        # local worker process is alive, pollers prove it is actually polling
-        # Temporal. Fail closed when Temporal is unavailable.
+        # A worker IS its pollers: nothing else can serve the task queue.
+        "worker": pollers_ok,
         "pollers": pollers_ok,
-        "models": len(model_ids),
-        # Full readiness catalog, in worker registration order. The Next.js
-        # model helper (lib/perplexity.ts) reads this so the picker mirrors
-        # the live worker catalog; "models" stays a count for compatibility.
-        "model_ids": model_ids,
+        "models": models,
+        "providers": PROVIDER_DISPLAY_NAMES,
+        "default_model": default_model,
     }
-    default_model = (record or {}).get("default_model")
-    if isinstance(default_model, str) and default_model:
-        payload["default_model"] = default_model
-    return payload
 
 
 @app.post("/sessions")
 async def start_session(body: StartSession) -> dict[str, str]:
-    models = models_of(await readiness())
-    if not models:
-        raise HTTPException(503, "No worker is ready")
-    if body.model_id not in models:
-        preview = ", ".join(models[:5])
-        if len(models) > 5:
-            preview += ", ..."
-        raise HTTPException(
-            400, f"Unsupported model: {body.model_id}. Available: {preview}"
-        )
+    await validated_model(body.model_id)
     if not await task_queue_has_pollers():
         raise HTTPException(503, "No worker is polling the task queue")
 
@@ -354,14 +396,7 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
     ):
         raise HTTPException(422, "A prompt or at least one attachment is required")
     if body.model_id is not None:
-        models = models_of(await readiness())
-        if body.model_id not in models:
-            preview = ", ".join(models[:5])
-            if len(models) > 5:
-                preview += ", ..."
-            raise HTTPException(
-                400, f"Unsupported model: {body.model_id}. Available: {preview}"
-            )
+        await validated_model(body.model_id)
     client = temporal()
     handle = client.get_workflow_handle(session_id)
     if body.reasoning_effort is not None:
@@ -389,87 +424,111 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
 
     async def body_iter() -> AsyncIterator[bytes]:
         # A subscription ends only when the WORKFLOW ends -- verified in
-        # _client.py, which returns on AcceptedUpdateCompletedWorkflow, RPC
-        # timeout, or terminal status and nothing else. ChatWorkflow is a
-        # durable multi-turn session that stays Running between turns, so
-        # iterating it to exhaustion inside a per-turn request never returns
-        # and the response never closes.
+        # temporalio/contrib/workflow_streams/_client.py, whose subscribe()
+        # returns only on AcceptedUpdateCompletedWorkflow, RPC timeout, or
+        # terminal status. ChatWorkflow stays Running between turns, so this
+        # per-turn pump stops on the update's result, never on exhaustion.
         #
-        # The strands-temporal guide (Pattern 8) documents the shape: the
-        # consumer runs as its own task, the caller awaits the result, then
-        # cancels the consumer after a short drain. The guide also warns
-        # against breaking on messageStop -- a tool-using run emits one per
-        # turn, so that truncates every later turn.
-        frames: asyncio.Queue[bytes] = asyncio.Queue()
-
-        async def consume() -> None:
-            # poll_cooldown stays at its 100ms default: each poll is a durable
-            # Update against the workflow.
-            async for item in stream_client.subscribe(
-                CHAT_TOPICS, from_offset=start_offset
-            ):
-                data = item.data
-                frame = dict(data) if isinstance(data, dict) else {"data": data}
-                frame["topic"] = item.topic
-                await frames.put(sse(frame))
-
-        # Subscribe before the update is accepted, or early events are lost.
-        consume_task = asyncio.create_task(consume())
-        update_handle = await handle.start_update(
-            ChatWorkflow.turn,
-            TurnInput(
-                prompt=body.prompt,
-                images=[
-                    TurnImage(format=image.format, data=image.data)
-                    for image in body.images
-                ],
-                documents=[
-                    TurnDocument(format=document.format, data=document.data)
-                    for document in body.documents
-                ],
-                videos=[
-                    TurnVideo(format=video.format, data=video.data)
-                    for video in body.videos
-                ],
-                model_id=body.model_id,
-                reasoning_effort=body.reasoning_effort,
-            ),
-            wait_for_stage=WorkflowUpdateStage.ACCEPTED,
-        )
-        result_task = asyncio.create_task(update_handle.result())
-
+        # The SDK iterator is itself the buffer: it is selected against
+        # directly, with no queue, consumer task, or drain sleep in between.
+        last_offset = start_offset
+        # Subscribe BEFORE the update is accepted, or early events are lost.
+        # poll_cooldown stays at its 100ms default: each poll is a durable
+        # Update against the workflow.
+        subscription = stream_client.subscribe(CHAT_TOPICS, from_offset=last_offset)
+        anext_task: asyncio.Task[Any] | None = None
         try:
-            # Forward frames as they land until the turn's reply is ready.
-            while not result_task.done():
-                get = asyncio.create_task(frames.get())
-                done, _ = await asyncio.wait(
-                    {get, result_task}, return_when=asyncio.FIRST_COMPLETED
-                )
-                if get in done:
-                    yield get.result()
-                    continue
-                get.cancel()
-                with suppress(asyncio.CancelledError):
-                    await get
-
-            # Drain what the consumer already published for this turn before
-            # the terminal frame -- the guide's "give it a moment first".
-            await asyncio.sleep(0.2)
-            while not frames.empty():
-                yield frames.get_nowait()
-
             try:
-                reply = result_task.result()
+                update_handle = await handle.start_update(
+                ChatWorkflow.turn,
+                TurnInput(
+                    prompt=body.prompt,
+                    images=[
+                        TurnImage(format=image.format, data=image.data)
+                        for image in body.images
+                    ],
+                    documents=[
+                        TurnDocument(format=document.format, data=document.data)
+                        for document in body.documents
+                    ],
+                    videos=[
+                        TurnVideo(format=video.format, data=video.data)
+                        for video in body.videos
+                    ],
+                    model_id=body.model_id,
+                    reasoning_effort=body.reasoning_effort,
+                ),
+                wait_for_stage=WorkflowUpdateStage.ACCEPTED,
+                )
             except Exception as error:  # noqa: BLE001 - surfaced to the client
                 yield sse({"error": str(error)})
                 return
-            yield sse({"done": True, "reply": reply})
+
+            result_task = asyncio.create_task(update_handle.result())
+            try:
+                restarts = 0
+                anext_task = asyncio.create_task(_next_item(subscription))
+                # Forward frames as they land until the turn's reply is ready.
+                while not result_task.done():
+                    done, _ = await asyncio.wait(
+                        {anext_task, result_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                        timeout=SSE_HEARTBEAT_SECONDS,
+                    )
+                    if not done:
+                        yield b": keep-alive\n\n"
+                        continue
+                    if anext_task not in done:
+                        continue  # The result landed; the loop test ends us.
+                    try:
+                        item = anext_task.result()
+                    except Exception as error:  # noqa: BLE001
+                        item, lost = None, error
+                    else:
+                        lost = None
+                    if item is not None:
+                        data = item.data
+                        frame = dict(data) if isinstance(data, dict) else {"data": data}
+                        frame["topic"] = item.topic
+                        last_offset = item.offset + 1
+                        anext_task = asyncio.create_task(_next_item(subscription))
+                        yield sse(frame)
+                        continue
+                    # The subscription ended or failed before the turn did.
+                    if result_task.done():
+                        break
+                    if restarts >= SSE_SUBSCRIBE_RESTART_LIMIT:
+                        logger.warning("Stream subscription lost for %s: %s", session_id, lost)
+                        yield sse({"error": "Live event connection lost. The durable turn may still be running; do not repeat computer actions."})
+                        return
+                    restarts += 1
+                    await asyncio.sleep(SSE_SUBSCRIBE_RESTART_DELAY)
+                    await _aclose(subscription)
+                    subscription = stream_client.subscribe(
+                        CHAT_TOPICS, from_offset=last_offset
+                    )
+                    anext_task = asyncio.create_task(_next_item(subscription))
+
+                try:
+                    reply = result_task.result()
+                except Exception as error:  # noqa: BLE001 - surfaced to the client
+                    yield sse({"error": str(error)})
+                    return
+                yield sse({"done": True, "reply": reply})
+            finally:
+                # Cancelling the client-side result waiter does not cancel the
+                # accepted Temporal update or retry any computer action: a
+                # closed browser tab must not abort a durable turn.
+                if not result_task.done():
+                    result_task.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await result_task
         finally:
-            # Cancel the consumer, never the update: a closed browser tab must
-            # not abort a durable turn.
-            consume_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await consume_task
+            if anext_task is not None:
+                anext_task.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await anext_task
+            await _aclose(subscription)
 
     return StreamingResponse(
         body_iter(),
@@ -489,18 +548,100 @@ async def approve(session_id: str, body: ApproveRequest) -> None:
         raise HTTPException(502, str(error)) from error
 
 
+async def _vnc_input(command: str, expected_answer: str, *, verify_cleanup: bool = False) -> None:
+    """Toggle desktop input through x11vnc's native remote control, verified."""
+    process = await asyncio.create_subprocess_exec(
+        *shlex.split(command), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), DESKTOP_VNC_COMMAND_TIMEOUT)
+    except BaseException:
+        with suppress(ProcessLookupError):
+            process.kill()
+        await process.wait()
+        raise
+    answers = stdout.decode().strip().splitlines()[-1].split(",") if stdout.strip() else []
+    if process.returncode != 0 or expected_answer not in answers:
+        raise HTTPException(503, "Desktop input transfer could not be verified")
+    if verify_cleanup and not {"aro=client_count:0", "aro=pointer_mask:0x0"}.issubset(answers):
+        raise HTTPException(503, "Native desktop clients or held input did not clear")
+
+
+def _desktop_mode(session_id: str, mode: str | None = None) -> dict:
+    owner = {"namespace": temporal().namespace, "workflow_id": session_id}
+    with desktop_state() as state:
+        if state.get("owner") != owner:
+            raise HTTPException(409, "This chat does not own the desktop")
+        if mode is not None:
+            state["mode"] = mode
+        return dict(state)
+
+
+@app.get("/sessions/{session_id}/desktop-control")
+async def desktop_control_status(session_id: str) -> dict:
+    state = await asyncio.to_thread(_desktop_mode, session_id)
+    workflow_state = await temporal().get_workflow_handle(session_id).query(ChatWorkflow.control_status)
+    return {"mode": state["mode"], "epoch": state["epoch"], **workflow_state}
+
+
 @app.post("/sessions/{session_id}/handoff", status_code=204)
 async def handoff(session_id: str, body: HandoffRequest) -> None:
     handle = temporal().get_workflow_handle(session_id)
+    current = await asyncio.to_thread(_desktop_mode, session_id)
+    # Native filesystem locks fence both API processes and container actions.
+    # This is one isolated-owner pilot, not authentication for a public service.
+    transition_fd = os.open(artifact_root() / "handoff.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    action_fd = None
     try:
+        try:
+            fcntl.flock(transition_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise HTTPException(409, "A desktop handoff is already in progress") from error
+        current = await asyncio.to_thread(_desktop_mode, session_id)
         if body.action == "take":
+            if current["mode"] == "human":
+                return
+            if current["mode"] not in {"agent", "stopping"}:
+                raise HTTPException(409, "Desktop requires recovery or resume")
+            await asyncio.to_thread(_desktop_mode, session_id, "stopping")
             await handle.execute_update(ChatWorkflow.claim_control)
+            action_fd = os.open(artifact_root() / "action.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+            async with asyncio.timeout(DESKTOP_HANDOFF_TIMEOUT.total_seconds()):
+                while True:
+                    try:
+                        fcntl.flock(action_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        await asyncio.sleep(0.1)
+            if (await asyncio.to_thread(_desktop_mode, session_id))["mode"] != "stopping":
+                raise HTTPException(409, "Desktop action failed; recovery required")
+            await _vnc_input(DESKTOP_VNC_REVOKE_COMMAND, "ans=viewonly:1", verify_cleanup=True)
+            await _vnc_input(DESKTOP_VNC_GRANT_COMMAND, "ans=viewonly:0")
+            await asyncio.to_thread(_desktop_mode, session_id, "human")
             return
+        if body.action == "release":
+            if current["mode"] == "instructions":
+                return
+            if current["mode"] not in {"human", "relinquishing"}:
+                raise HTTPException(409, "Desktop is not under human control")
+            await asyncio.to_thread(_desktop_mode, session_id, "relinquishing")
+            await _vnc_input(DESKTOP_VNC_REVOKE_COMMAND, "ans=viewonly:1", verify_cleanup=True)
+            await asyncio.to_thread(_desktop_mode, session_id, "instructions")
+            return
+        if current["mode"] not in {"instructions", "resuming"}:
+            raise HTTPException(409, "Relinquish desktop input before resuming")
+        await _vnc_input(DESKTOP_VNC_REVOKE_COMMAND, "ans=viewonly:1", verify_cleanup=True)
+        await asyncio.to_thread(_desktop_mode, session_id, "resuming")
         old_run = await handle.execute_update(ChatWorkflow.relinquish_control, body.message)
         async with asyncio.timeout(30):
             while True:
                 state = await handle.query(ChatWorkflow.control_status)
                 if state["run_id"] != old_run and state["ready"]:
+                    # Re-enable viewer connections but leave all native input fenced.
+                    command = shlex.split(DESKTOP_VNC_GRANT_COMMAND)
+                    command[command.index("-R") + 1] = "nodeny"
+                    await _vnc_input(shlex.join(command), "ans=viewonly:1")
+                    await asyncio.to_thread(_desktop_mode, session_id, "agent")
                     return
                 await asyncio.sleep(0.1)
     except TimeoutError as error:
@@ -511,6 +652,10 @@ async def handoff(session_id: str, body: HandoffRequest) -> None:
         if error.status == RPCStatusCode.NOT_FOUND:
             raise HTTPException(404, f"Unknown session: {session_id}") from error
         raise HTTPException(502, str(error)) from error
+    finally:
+        if action_fd is not None:
+            os.close(action_fd)
+        os.close(transition_fd)
 
 
 @app.post("/sessions/{session_id}/end", status_code=204)
@@ -586,8 +731,8 @@ async def response_file_content(response_id: str, file_id: str) -> Response:
 
 @app.post("/compare/stream")
 async def compare_stream(body: CompareRequest) -> StreamingResponse:
-    models = models_of(await readiness())
-    if not models:
+    ids = [entry["id"] for entry in await model_catalog()]
+    if not ids:
         raise HTTPException(503, "No worker is ready")
 
     seen: set[str] = set()
@@ -598,7 +743,11 @@ async def compare_stream(body: CompareRequest) -> StreamingResponse:
     ]
     if len(selected) > MAX_COMPARE_MODELS:
         raise HTTPException(422, f"At most {MAX_COMPARE_MODELS} models")
-    unknown = [model_id for model_id in selected if model_id not in models]
+    if any(model_id not in ids for model_id in selected):
+        # One refresh before rejecting: the worker may have registered these
+        # ids after the cached catalog was fetched.
+        ids = [entry["id"] for entry in await model_catalog(refresh=True)]
+    unknown = [model_id for model_id in selected if model_id not in ids]
     if unknown:
         raise HTTPException(400, f"Unsupported models: {', '.join(unknown)}")
 

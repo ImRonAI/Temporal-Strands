@@ -19,6 +19,13 @@ node_modules
 .worktrees/
 # Graph tool durable state (SQLite store + session dirs)
 orchestrator/.graph-tool/
-# Installed strands_tools package, linked at worker start for load_tool discovery
-orchestrator/strands-tools
-orchestrator/tools/*.py
+# Local browser screenshot evidence is runtime data, not source.
+orchestrator/.runtime/browser-observations/
+orchestrator/.runtime/desktop-temporal.db*
+
+# GCP service-account keys / GCE metadata — never commit
+fair-expanse-*.json
+*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].json
+compute.json
+orchestrator/.runtime/
+scripts/__pycache__/

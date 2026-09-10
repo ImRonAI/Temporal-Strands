@@ -8,85 +8,21 @@ export type Model = {
   object: "model"
   created: number
   owned_by: string
+  provider_label?: string
 }
 
 export type PerplexityModel = Model
 
-// The six Perplexity Agent API dynamic presets the worker always registers
-// (as "preset:<name>") when PERPLEXITY_API_KEY is present. The live catalog
-// (provider/model ids from GET /v1/models) is discovered by the worker at
-// startup and is deliberately NOT mirrored here -- it changes continuously
-// and must never be hardcoded. This list exists only as the offline fallback
-// when the orchestrator /health endpoint is unreachable.
-const PERPLEXITY_PRESETS = [
-  "fast",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "wide-research",
-] as const
-
-// Gemini ids the worker registers GeminiModel factories for (config.py
-// GEMINI_MODEL_IDS): pinned 3.8, the 3.7 fallback, and Google's dynamic alias.
-const GEMINI_MODEL_IDS = [
-  "gemini-3.8-flash",
-  "gemini-3.7-flash",
-  "gemini-flash-latest",
-] as const
-
-const HEALTH_TIMEOUT_MS = 3_000
+const HEALTH_TIMEOUT_MS = 15_000
 
 function orchestratorUrl(): string {
   return process.env.ORCHESTRATOR_URL ?? "http://localhost:8787"
 }
 
-// Provider attribution for a worker model id:
-// - "preset:*"          -> perplexity (Agent API dynamic presets)
-// - "<provider>/<name>" -> the provider prefix (anthropic, openai, google, ...)
-// - "gemini*"           -> google (bare GeminiModel factory ids)
-function ownerOf(id: string): string {
-  if (id.startsWith("preset:")) return "perplexity"
-  const slash = id.indexOf("/")
-  if (slash > 0) return id.slice(0, slash)
-  if (id.startsWith("gemini")) return "google"
-  return "unknown"
-}
-
-function toModel(id: string): Model {
-  return { id, object: "model", created: 0, owned_by: ownerOf(id) }
-}
-
-// Static fallback catalog: the six presets plus the Gemini ids, used only
-// when the orchestrator is down. Order matches the worker's readiness order
-// (presets first, then Gemini).
-function fallbackModels(): Model[] {
-  return [
-    ...PERPLEXITY_PRESETS.map((preset) => toModel(`preset:${preset}`)),
-    ...GEMINI_MODEL_IDS.map(toModel),
-  ]
-}
-
 type HealthPayload = {
-  // Readiness catalog in worker registration order (presets, sorted live
-  // catalog, gemini). "models" is a count kept for compatibility; older
-  // shapes may have carried the array there, so accept both.
-  model_ids?: unknown
   models?: unknown
+  providers?: Record<string, string>
   default_model?: unknown
-}
-
-function modelIdsOf(payload: HealthPayload): string[] {
-  for (const value of [payload.model_ids, payload.models]) {
-    if (
-      Array.isArray(value) &&
-      value.length > 0 &&
-      value.every((id) => typeof id === "string")
-    ) {
-      return value
-    }
-  }
-  return []
 }
 
 async function fetchHealth(): Promise<HealthPayload | null> {
@@ -98,20 +34,25 @@ async function fetchHealth(): Promise<HealthPayload | null> {
     if (!res.ok) return null
     return (await res.json()) as HealthPayload
   } catch {
-    // Unreachable orchestrator (down stack, timeout, DNS): callers fall back
-    // to the static catalog rather than surfacing an error to the picker.
     return null
   }
 }
 
-// Live model catalog from the orchestrator's /health readiness record, in the
-// exact order the worker wrote it. Falls back to the static preset+Gemini
-// list when the orchestrator is unreachable or reports no models.
+// Preserve the live worker catalog and declared provider, never guess ownership
+// from model IDs or silently replace unavailable models with a hardcoded list.
 export async function listModels(): Promise<Model[]> {
   const payload = await fetchHealth()
-  const ids = payload ? modelIdsOf(payload) : []
-  if (ids.length === 0) return fallbackModels()
-  return ids.map(toModel)
+  if (!payload || !Array.isArray(payload.models) || !payload.models.length) {
+    throw new Error("Live model catalog unavailable; check orchestrator worker readiness")
+  }
+  return payload.models.map((entry: unknown) => {
+    if (!entry || typeof entry !== "object" || !("id" in entry) || !("provider" in entry)
+      || typeof entry.id !== "string" || !entry.id || typeof entry.provider !== "string" || !entry.provider) {
+      throw new Error("Invalid worker model catalog: expected declared model IDs and providers")
+    }
+    return { id: entry.id, object: "model", created: 0, owned_by: entry.provider,
+      provider_label: payload.providers?.[entry.provider] }
+  })
 }
 
 // The worker-selected default model from the readiness record, when

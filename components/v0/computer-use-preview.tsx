@@ -2,7 +2,6 @@
 
 import type { ChatStatus } from "ai"
 import {
-  ExternalLinkIcon,
   GlobeIcon,
   HandIcon,
   Maximize2Icon,
@@ -40,19 +39,19 @@ import { cn } from "@/lib/utils"
 
 import type { ComputerUsePreview as ComputerUsePreviewState } from "./computer-use"
 
-/** Browser handoff modes: agent→stopping→human→instructions→resuming→agent.
- *  The iframe stays mounted across all of them (no query-string control flag);
- *  control is toggled only through same-origin postMessage. */
+/** Server acknowledgments gate human input, steering, and agent resumption. */
 export type BrowserControlMode =
   | "agent"
   | "stopping"
   | "human"
+  | "relinquishing"
   | "instructions"
   | "resuming"
 
 const MODES_LOCKING_CLOSE: ReadonlySet<BrowserControlMode> = new Set([
   "stopping",
   "human",
+  "relinquishing",
   "instructions",
   "resuming",
 ])
@@ -67,6 +66,7 @@ const BADGE: Record<BrowserControlMode, { label: string; className: string }> = 
     label: "You have control",
     className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
   },
+  relinquishing: { label: "Relinquishing", className: AMBER_BADGE },
   instructions: { label: "Paused", className: AMBER_BADGE },
   resuming: { label: "Resuming", className: BLURPLE_BADGE },
 }
@@ -76,6 +76,10 @@ const HEADER_BUTTON =
 
 export type ComputerUsePreviewPanelProps = {
   preview: ComputerUsePreviewState
+  /** Parent keys the panel by this durable chat ID, not a tool call ID. */
+  sessionId?: string
+  /** Seed from server-confirmed ownership when restoring a mounted panel. */
+  initialControlMode?: BrowserControlMode
   isStreaming: boolean
   status: ChatStatus
   pendingApproval: string
@@ -83,89 +87,54 @@ export type ComputerUsePreviewPanelProps = {
   onDeny: () => void
   onClose: () => void
   onTakeControl: () => Promise<void>
+  onReleaseControl?: () => Promise<void>
   onGiveControl: (message: PromptInputMessage) => Promise<void>
   className?: string
 }
 
-/** Browser-takeover preview panel for live Computer Use sessions. Composes the
- *  native Artifact / WebPreview / PromptInput primitives on the IDE's ide-glass
- *  tokens; it never reimplements CDP — reload is forwarded as
- *  {type:'browser-command', method:'Page.reload'} and only while human. */
+/** Native noVNC iframe composed with Artifact, WebPreview and PromptInput.
+ * view_only is a viewer preference; the backend must fence actual VNC input. */
 export function ComputerUsePreviewPanel({
   preview,
+  sessionId,
+  initialControlMode = "agent",
+  isStreaming,
+  status,
   pendingApproval,
   onApprove,
   onDeny,
   onClose,
   onTakeControl,
+  onReleaseControl,
   onGiveControl,
   className,
 }: ComputerUsePreviewPanelProps) {
   const rootRef = useRef<HTMLDivElement>(null)
-  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const handoffPending = useRef(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [fullscreen, setFullscreen] = useState(false)
-  const [mode, setMode] = useState<BrowserControlMode>("agent")
+  const [mode, setMode] = useState<BrowserControlMode>(initialControlMode)
   const [handoffText, setHandoffText] = useState("")
   const [handoffError, setHandoffError] = useState("")
 
-  // Session reset via derived state: a new CDP session adopts agent control on
-  // the same render instead of a setState-in-effect cascade.
-  const [seenSession, setSeenSession] = useState(preview.sessionId)
-  if (preview.sessionId !== seenSession) {
-    setSeenSession(preview.sessionId)
-    setMode("agent")
-    setHandoffText("")
-    setHandoffError("")
-  }
-
-  const iframeSrc = preview.livePreviewUrl || preview.url
-  const closeDisabled = MODES_LOCKING_CLOSE.has(mode)
-
-  // Same-origin control handshake, sent on mode change and every iframe
-  // (re)load. `enabled` is true ONLY in human mode, so transient states and
-  // error fallbacks never leave the iframe interactive.
-  const postControl = useCallback((enabled: boolean) => {
+  let iframeSrc = ""
+  if (preview.viewerType === "novnc" && preview.livePreviewUrl) {
     try {
-      iframeRef.current?.contentWindow?.postMessage(
-        { type: "browser-control", enabled },
-        window.location.origin
-      )
-    } catch {
-      // Cross-origin or dead viewer: interaction stays disabled.
-    }
-  }, [])
-
-  useEffect(() => {
-    postControl(mode === "human")
-  }, [mode, postControl])
-
-  const onIframeLoad = useCallback(
-    () => postControl(mode === "human"),
-    [mode, postControl]
-  )
-
-  // Parent-viewer contract: browser commands are honoured only while human.
-  // A dead viewer (postMessage no-op) falls back to a plain remount.
-  const reconnectViewer = useCallback(() => {
-    if (mode === "human") {
-      try {
-        iframeRef.current?.contentWindow?.postMessage(
-          { type: "browser-command", method: "Page.reload" },
-          window.location.origin
-        )
-      } catch {
-        // Viewer owns CDP; a rejected postMessage leaves the UI unchanged.
+      const url = new URL(preview.livePreviewUrl)
+      if (url.protocol === "http:" || url.protocol === "https:") {
+        url.searchParams.set("view_only", mode === "human" ? "false" : "true")
+        iframeSrc = url.toString()
       }
+    } catch {
+      // A missing/malformed viewer must never fall back to the visited page.
     }
-    setReloadKey((key) => key + 1)
-  }, [mode])
+  }
+  const closeDisabled = MODES_LOCKING_CLOSE.has(mode)
+  const takeoverAvailable = Boolean(sessionId && iframeSrc && onReleaseControl && preview.controlAvailable !== false)
 
-  const openDevtools = useCallback(() => {
-    if (preview.devtoolsFrontendUrl) {
-      window.open(preview.devtoolsFrontendUrl, "_blank", "noopener,noreferrer")
-    }
-  }, [preview.devtoolsFrontendUrl])
+  const reconnectViewer = useCallback(() => {
+    setReloadKey((key) => key + 1)
+  }, [])
 
   const toggleFullscreen = useCallback(async () => {
     const el = rootRef.current
@@ -190,11 +159,10 @@ export function ComputerUsePreviewPanel({
       ? `Could not ${verb}: ${error.message}`
       : `Could not ${verb}.`
 
-  // agent→stopping→human. No optimistic enabling: the iframe is interactive
-  // only after the backend ack resolves (turn lock released). Failure stays in
-  // agent mode and says so explicitly.
+  // A chat-stream stop alone is not a native input ownership acknowledgment.
   const takeControl = useCallback(async () => {
-    if (mode !== "agent") return
+    if (mode !== "agent" || !takeoverAvailable || handoffPending.current) return
+    handoffPending.current = true
     setHandoffError("")
     setMode("stopping")
     try {
@@ -203,15 +171,19 @@ export function ComputerUsePreviewPanel({
     } catch (error) {
       setMode("agent")
       setHandoffError(handoffFailure(error, "take control"))
+    } finally {
+      handoffPending.current = false
     }
-  }, [mode, onTakeControl])
+  }, [mode, onTakeControl, takeoverAvailable])
 
   // instructions→resuming→agent. The handoff awaits the backend (continue-as-
   // new + successor ready); failure returns to instructions with the user's
   // text preserved and the iframe still paused.
   const giveControl = useCallback(
     async (message: PromptInputMessage) => {
-      if (mode !== "instructions" || !message.text?.trim()) return
+      if (mode !== "instructions" || !message.text?.trim() || handoffPending.current) return
+      handoffPending.current = true
+      setHandoffText(message.text)
       setHandoffError("")
       setMode("resuming")
       try {
@@ -221,12 +193,35 @@ export function ComputerUsePreviewPanel({
       } catch (error) {
         setMode("instructions")
         setHandoffError(handoffFailure(error, "resume the agent"))
+        // Native PromptInput retains its input/attachments on rejected submit.
+        throw error
+      } finally {
+        handoffPending.current = false
       }
     },
     [mode, onGiveControl]
   )
 
-  const badge = BADGE[mode]
+  const releaseControl = async () => {
+    if (mode !== "human" || handoffPending.current) return
+    handoffPending.current = true
+    setHandoffError("")
+    setMode("relinquishing")
+    try {
+      if (!onReleaseControl) throw new Error("Native desktop release unavailable")
+      await onReleaseControl()
+      setMode("instructions")
+    } catch (error) {
+      setHandoffError(handoffFailure(error, "release control"))
+      setMode("human")
+    } finally {
+      handoffPending.current = false
+    }
+  }
+
+  const badge = mode === "agent" && !isStreaming
+    ? { label: status === "error" ? "Stream interrupted" : "Chat idle", className: status === "error" ? AMBER_BADGE : BLURPLE_BADGE }
+    : BADGE[mode]
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col" ref={rootRef}>
@@ -243,7 +238,7 @@ export function ComputerUsePreviewPanel({
               <GlobeIcon className="size-4 text-blurple-bright" />
             </span>
             <ArtifactTitle className="truncate font-medium tracking-tight">
-              Browser
+              Linux desktop
             </ArtifactTitle>
             <span
               className={cn(
@@ -260,6 +255,8 @@ export function ComputerUsePreviewPanel({
               <Button
                 className={cn(HEADER_BUTTON, "border-blurple/30 bg-blurple/10 text-blurple-bright hover:bg-blurple/20")}
                 data-testid="take-control"
+                disabled={!takeoverAvailable}
+                title={!takeoverAvailable ? "A chat session, noVNC viewer and native release acknowledgment are required" : undefined}
                 onClick={takeControl}
                 size="sm"
                 type="button"
@@ -273,7 +270,7 @@ export function ComputerUsePreviewPanel({
               <Button
                 className={cn(HEADER_BUTTON, "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20")}
                 data-testid="relinquish"
-                onClick={() => { postControl(false); setMode("instructions") }}
+                onClick={releaseControl}
                 size="sm"
                 type="button"
                 variant="outline"
@@ -296,11 +293,12 @@ export function ComputerUsePreviewPanel({
         </ArtifactHeader>
 
         <ArtifactContent className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
-          <WebPreview className="min-h-0 flex-1 rounded-none border-0 bg-transparent" defaultUrl={preview.url}>
+          <WebPreview className="min-h-0 flex-1 rounded-none border-0 bg-transparent">
             <WebPreviewNavigation className="ide-glass-edge h-11 border-b bg-black/20 px-2">
               <WebPreviewNavigationButton
                 aria-label="Reconnect viewer"
                 data-testid="viewer-reconnect"
+                disabled={!iframeSrc}
                 onClick={reconnectViewer}
                 tooltip="Reconnect viewer"
               >
@@ -311,15 +309,6 @@ export function ComputerUsePreviewPanel({
                 readOnly
                 value={preview.url}
               />
-              <WebPreviewNavigationButton
-                aria-label="Open DevTools"
-                data-testid="open-devtools"
-                disabled={!preview.devtoolsFrontendUrl}
-                onClick={openDevtools}
-                tooltip="Open DevTools"
-              >
-                <ExternalLinkIcon className="size-4" />
-              </WebPreviewNavigationButton>
               <WebPreviewNavigationButton
                 aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
                 data-testid="browser-fullscreen"
@@ -376,15 +365,20 @@ export function ComputerUsePreviewPanel({
               </p>
             ) : null}
 
-            <WebPreviewBody
+            {iframeSrc ? <WebPreviewBody
+              title="Linux desktop via noVNC"
               className={cn(mode === "human" ? "" : "pointer-events-none")}
               data-control-mode={mode}
-              key={`${preview.sessionId}-${iframeSrc}-${reloadKey}`}
-              onLoad={onIframeLoad}
-              ref={iframeRef}
+              key={`${sessionId ?? ""}-${reloadKey}`}
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
               src={iframeSrc}
-            />
+            /> : <p role="status" className="p-3 text-sm text-muted-foreground">Desktop viewer unavailable. A native noVNC URL is required.</p>}
+
+            {iframeSrc ? (
+              <p className="shrink-0 border-t px-3 py-1.5 text-xs text-muted-foreground">
+                Desktop viewer via noVNC. {mode === "human" ? "Your input is enabled." : "Take control to interact; agent screenshots appear in the task timeline."}
+              </p>
+            ) : null}
 
             {mode === "human" ? (
               <p className="ide-glass-edge shrink-0 border-t bg-emerald-500/[0.04] px-3 py-1.5 text-emerald-300/90 text-xs">

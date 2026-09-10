@@ -120,6 +120,12 @@ def build_skill_agent(
     ``model`` is the node's resolved model (its registered ``model_id`` or the
     inherited parent model); the configured base model is the fallback when
     neither is available.
+
+    A node ``skills`` list assigns those registered skills to the sub-agent
+    as **inline tools**: a Pattern-2 ``skill(skill_name)`` tool scoped to
+    exactly those names is added to ``additional_tools`` and the scoped
+    catalog prompt is appended to the sub-agent's system prompt, so it loads
+    their instructions into its own context — never a nested sub-agent.
     """
     try:
         from agentskills.parser import load_instructions
@@ -139,7 +145,17 @@ def build_skill_agent(
     skill = validate_skill_name(node_def["skill"], _skills)
     instructions = load_instructions(skill.path)
     resolved = model or _skill_model or (parent_agent.model if parent_agent else None)
-    agent = _create_skill_agent(skill, instructions, resolved, _skill_tools)
+    assigned = node_def.get("skills") or []
+    tools = list(_skill_tools or [])
+    if assigned:
+        from skills_config import create_inline_skill_tool, skills_prompt
+
+        tools.append(create_inline_skill_tool(assigned))
+    agent = _create_skill_agent(skill, instructions, resolved, tools)
+    if assigned:
+        catalog = skills_prompt(assigned)
+        if catalog:
+            agent.system_prompt = f"{agent.system_prompt}\n\n{catalog}"
     agent.name = node_def["id"]
     return agent
 
@@ -268,7 +284,12 @@ def _build_executor(
         # becomes an agent node, exactly as before.
         nested = {
             "nodes": [
-                {"id": task["task_id"], "type": "skill_agent", "skill": task["skill"]}
+                {
+                    "id": task["task_id"],
+                    "type": "skill_agent",
+                    "skill": task["skill"],
+                    **({"skills": task["skills"]} if task.get("skills") else {}),
+                }
                 if "skill" in task
                 else {
                     "id": task["task_id"],

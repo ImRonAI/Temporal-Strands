@@ -1,0 +1,43 @@
+- generic [active] [ref=f3e1]:
+  - main [ref=f3e2]:
+    - generic [ref=f3e3]:
+      - generic [ref=f3e4]: v0 / studio
+      - navigation [ref=f3e9]:
+        - button "Community" [ref=f3e10]
+        - button "Pricing" [ref=f3e11]
+        - button "Enterprise" [ref=f3e12]
+        - button "Docs" [ref=f3e13]
+      - generic [ref=f3e14]:
+        - button "Compare models" [ref=f3e15] [cursor=pointer]
+        - button "Sign in" [ref=f3e16]
+        - button "Start building" [ref=f3e17]
+    - generic [ref=f3e78]:
+      - log [ref=f3e79]:
+        - generic [ref=f3e81]:
+          - paragraph [ref=f3e86]:
+            - text: "Repeat the visual check now in the existing linux-check-http session: navigate again to"
+            - link "http://127.0.0.1:8799/vision-check.html" [ref=f3e87] [cursor=pointer]:
+              - /url: http://127.0.0.1:8799/vision-check.html
+            - text: to generate a fresh random challenge, inspect screenshot, use computer_click at blue rectangle center, and report the new code from the returned screenshot. No source or DOM inspection. Leave browser open.
+          - generic [ref=f3e91]:
+            - button "Thinking…" [expanded] [ref=f3e93]
+            - generic [ref=f3e118]:
+              - generic [ref=f3e119]: Thinking
+              - generic [ref=f3e120]:
+                - heading "1. DECOMPOSE" [level=3] [ref=f3e121]
+                - paragraph [ref=f3e122]:
+                  - text: "Precise question: Can the existing"
+                  - code [ref=f3e123]: linux-check-http
+                  - text: browser session be navigated to
+                  - code [ref=f3e124]: http://127.
+      - group [ref=f3e128]:
+        - group [ref=f3e129]
+        - textbox "Ask for a change, or start something new…" [ref=f3e131]
+        - group [ref=f3e132]:
+          - generic [ref=f3e133]:
+            - button [ref=f3e134]
+            - button "High (preset)" [ref=f3e135]
+            - button "Web preview" [ref=f3e139]
+          - button "Stop" [ref=f3e141]
+  - button "Open Next.js Dev Tools" [ref=f3e71] [cursor=pointer]
+  - alert [ref=f3e75]

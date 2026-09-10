@@ -186,18 +186,41 @@ def ensure_skills_configured(model_factory: Any | None = None) -> int:
     return len(skills)
 
 
-def skills_prompt() -> str:
+def resolve_skills(skill_names: list[str]) -> list[Any]:
+    """The catalog entries for the given names, in the given order.
+
+    Validation is the reference's own: ``agentskills.tool_utils.
+    validate_skill_name`` raises ``SkillNotFoundError`` (listing the
+    available names) for anything not in the discovered catalog.
+    """
+    agentskills = _import_agentskills()
+    if agentskills is None:
+        raise SkillsUnavailable("agentskills is not installed; Agent Skills are disabled")
+    from agentskills.tool_utils import validate_skill_name
+
+    skill_map = {skill.name: skill for skill in discovered_skills()}
+    return [validate_skill_name(name, skill_map) for name in skill_names]
+
+
+def skills_prompt(skill_names: list[str] | None = None) -> str:
     """The reference Phase-1 catalog prompt: ``agentskills.generate_skills_prompt``.
 
     Exact aws-samples/sample-strands-agents-agentskills wiring (examples 2
     and 3): every skill's name, description, and SKILL.md location in an
     ``<available_skills>`` XML block plus the ``<skills_instructions>``
-    usage policy. Empty string when the package or catalog is unavailable.
+    usage policy. ``skill_names`` scopes the catalog to that subset (same
+    reference function over fewer skills). Empty string when the package or
+    catalog is unavailable.
     """
     agentskills = _import_agentskills()
     if agentskills is None:
         return ""
-    return agentskills.generate_skills_prompt(list(discovered_skills()))
+    skills = (
+        resolve_skills(skill_names)
+        if skill_names is not None
+        else list(discovered_skills())
+    )
+    return agentskills.generate_skills_prompt(skills)
 
 
 def augmented_system_prompt(base: str) -> str:
@@ -208,26 +231,50 @@ def augmented_system_prompt(base: str) -> str:
     return f"{base}\n\n{prompt}"
 
 
-def create_inline_skill_tool() -> Any:
-    """Pattern 2: ``skill(skill_name)`` factory product."""
+def create_inline_skill_tool(skill_names: list[str] | None = None) -> Any:
+    """Pattern 2: ``skill(skill_name)`` factory product.
+
+    ``skill_names`` scopes the tool to that subset of the catalog — the
+    factory's ``skills`` list IS the tool's whole universe (reference
+    ``create_skill_tool`` builds its ``skill_map`` from it), so a scoped
+    tool can only ever load the assigned skills' instructions.
+    """
     agentskills = _import_agentskills()
     if agentskills is None:
         raise SkillsUnavailable("agentskills is not installed; Agent Skills are disabled")
 
-    return agentskills.create_skill_tool(list(discovered_skills()), skills_dir())
+    skills = (
+        resolve_skills(skill_names)
+        if skill_names is not None
+        else list(discovered_skills())
+    )
+    return agentskills.create_skill_tool(skills, skills_dir())
 
 
-def create_use_skill_tool(model: Any) -> Any:
-    """Pattern 3: ``use_skill(skill_name, request)`` factory product."""
+def create_use_skill_tool(
+    model: Any, assigned_skills: list[str] | None = None
+) -> Any:
+    """Pattern 3: ``use_skill(skill_name, request)`` factory product.
+
+    ``assigned_skills`` names skills the caller assigns to each skill
+    sub-agent as **inline tools** (Pattern 2): the sub-agent gets a scoped
+    ``skill(skill_name)`` tool plus those skills' catalog metadata, and
+    consumes them in its own context — the reference ``additional_tools``
+    parameter, filled with the reference ``create_skill_tool`` product.
+    Never nested sub-agents: ``use_skill`` itself is not in the tool list.
+    """
     agentskills = _import_agentskills()
     if agentskills is None:
         raise SkillsUnavailable("agentskills is not installed; Agent Skills are disabled")
 
+    additional_tools = skill_subagent_tools()
+    if assigned_skills:
+        additional_tools.append(create_inline_skill_tool(assigned_skills))
     return agentskills.create_skill_agent_tool(
         list(discovered_skills()),
         skills_dir(),
         base_agent_model=model,
-        additional_tools=skill_subagent_tools(),
+        additional_tools=additional_tools,
     )
 
 

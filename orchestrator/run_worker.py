@@ -15,8 +15,9 @@ Gemini stays selectable through the ``GeminiModel`` factories.
 
 Permanent registry is load_tool + mcp_client. MCP servers from mcp.json are
 StrandsPlugin(mcp_clients=...) factories; the workflow holds TemporalMCPClient
-handles. Remaining community tools and any extra tool repos live under
-orchestrator/tools for official load_tool (cwd()/tools/<name>.py).
+handles. Community tools come from the installed ``strands_tools`` package;
+``load_tool`` resolves a bare module name (``load_tool(name="calculator")``)
+against that package on the worker — no on-disk ``orchestrator/tools/`` copy.
 """
 
 from __future__ import annotations
@@ -25,9 +26,6 @@ import asyncio
 import json
 import logging
 import os
-import tempfile
-import time
-from contextlib import suppress
 from pathlib import Path
 from collections.abc import Callable
 from typing import Any
@@ -52,19 +50,21 @@ from agent_api_tools import (  # noqa: F401 - re-exported public API
     mcp_tools,
     native_tools,
 )
+from catalog_workflow import ModelCatalogWorkflow, model_catalog, set_catalog
 from compare_workflow import CompareWorkflow
-from browser_activity import browser_activity, shutdown_browser_activity
 from config import (
     BUILTIN_SKILLS,
     DEFAULT_MODEL_ID,
-    READINESS_HEARTBEAT_INTERVAL,
     GEMINI_MAX_OUTPUT_TOKENS,
     GEMINI_MODEL_IDS,
     MAX_OUTPUT_TOKENS_CEILING,
     MAX_STEPS_CEILING,
     PERPLEXITY_API_BASE,
     PERPLEXITY_PRESETS,
+    PROVIDER_GOOGLE_AI_STUDIO,
     PROVIDER_OUTPUT_CEILINGS,
+    PROVIDER_PERPLEXITY_AGENT_API,
+    RegisteredModel,
     TASK_QUEUE,
 )
 from gemini_model import GeminiModel
@@ -73,7 +73,7 @@ import computer_use_activity
 import subagent_support
 from graph_activity import graph_activity
 from graph_tool import configure_models
-from load_tool import mcp_client_activity, run_loaded_tool
+from load_tool import load_tool_activity, mcp_client_activity, run_loaded_tool
 from skills_config import ensure_skills_configured, skills_dir
 from telemetry import telemetry_plugins
 from use_agent_activity import use_agent_activity
@@ -86,7 +86,6 @@ os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
 
 logger = logging.getLogger(__name__)
 
-READINESS_PATH = _ROOT / ".runtime" / "worker-readiness.json"
 MCP_CONFIG_PATH = _ROOT / "mcp.json"
 
 PERPLEXITY_MODELS_URL = f"{PERPLEXITY_API_BASE}/v1/models"
@@ -148,10 +147,24 @@ async def fetch_model_ids(api_key: str) -> list[str]:
     return sorted({model_id for model_id in ids if model_id})
 
 
+def _perplexity_label(model_id: str) -> str:
+    """Display label for a Perplexity-registered id.
+
+    Presets render as ``"<Name> (preset)"``; catalog ids keep the id verbatim.
+    """
+    if model_id.startswith(PRESET_PREFIX):
+        name = model_id.removeprefix(PRESET_PREFIX)
+        return f"{name.replace('-', ' ').title()} (preset)"
+    return model_id
+
+
 def build_perplexity_factories(
     api_key: str, model_ids: list[str]
-) -> dict[str, Callable[[], PerplexityModel]]:
-    """One named PerplexityModel factory per preset and catalog id.
+) -> tuple[dict[str, Callable[[], PerplexityModel]], list[RegisteredModel]]:
+    """Named PerplexityModel factories plus their provider-declaring catalog.
+
+    Every id (presets and live catalog) is declared as provider
+    ``perplexity-agent-api``; ids pass through verbatim, never renamed.
 
     The ``model_id=model_id`` default-argument bind is required: without it
     every closure captures the loop variable. The api_key stays captured in
@@ -162,21 +175,27 @@ def build_perplexity_factories(
         "Registered Agent API connectors: %s",
         [tool["server_label"] for tool in tools if tool.get("type") == "connector"],
     )
-    return {
+    registered_ids = [*PRESET_MODEL_IDS, *model_ids]
+    factories = {
+        # PerplexityModel pins base_url to PERPLEXITY_API_BASE and
+        # max_retries=0 in _resolve_client_args, so PERPLEXITY_BASE_URL in the
+        # environment cannot leak in and retries stay entirely with Temporal.
         model_id: lambda model_id=model_id: PerplexityModel(
             model_id=model_id,
             params=model_params(model_id, tools),
-            # An explicit client so the base URL cannot be overridden by
-            # PERPLEXITY_BASE_URL in the environment. max_retries=0 leaves
-            # retries entirely to Temporal.
-            client=perplexity.AsyncPerplexity(
-                api_key=api_key,
-                base_url=PERPLEXITY_API_BASE,
-                max_retries=0,
-            ),
+            api_key=api_key,
         )
-        for model_id in [*PRESET_MODEL_IDS, *model_ids]
+        for model_id in registered_ids
     }
+    catalog = [
+        RegisteredModel(
+            id=model_id,
+            provider=PROVIDER_PERPLEXITY_AGENT_API,
+            label=_perplexity_label(model_id),
+        )
+        for model_id in registered_ids
+    ]
+    return factories, catalog
 
 
 def perplexity_client_factory(api_key: str) -> Callable[[], Any]:
@@ -204,40 +223,13 @@ def agent_identity() -> tuple[str, str]:
     return name, prompt
 
 
-_SKIP_COMMUNITY_FILES = frozenset(
-    {"__init__.py", "load_tool.py", "mcp_client.py", "think.py"}
-)
+def build_model_factory(
+    api_key: str,
+) -> tuple[dict[str, Callable[[], GeminiModel]], list[RegisteredModel]]:
+    """Named GeminiModel factories plus their provider-declaring catalog.
 
-
-def ensure_strands_tools_dir() -> Path:
-    """Real orchestrator/tools/ directory for official load_tool.
-
-    Links unregistered strands-agents-tools modules here. Clone extra
-    tool repos into this same directory as subfolders.
-    """
-    import strands_tools
-
-    src = Path(strands_tools.__file__).resolve().parent
-    dest = _ROOT / "tools"
-    if dest.is_symlink():
-        dest.unlink()
-    dest.mkdir(parents=True, exist_ok=True)
-    for py_file in sorted(src.glob("*.py")):
-        if py_file.name in _SKIP_COMMUNITY_FILES or py_file.name.startswith("_"):
-            continue
-        link = dest / py_file.name
-        if link.exists() and not link.is_symlink():
-            continue
-        if link.is_symlink() and link.resolve() == py_file.resolve():
-            continue
-        if link.is_symlink():
-            link.unlink()
-        link.symlink_to(py_file)
-    return dest
-
-
-def build_model_factory(api_key: str) -> dict[str, Callable[[], GeminiModel]]:
-    """Named GeminiModel factory. Built-in tools go on ``gemini_tools``.
+    Every Gemini id is declared as provider ``google-ai-studio`` (direct),
+    never inferred from the id shape. Built-in tools go on ``gemini_tools``.
 
     https://strandsagents.com/docs/user-guide/concepts/model-providers/google/
     """
@@ -269,21 +261,33 @@ def build_model_factory(api_key: str) -> dict[str, Callable[[], GeminiModel]]:
             ],
         )
 
-    return {
+    factories = {
         model_id: (lambda model_id=model_id: _create_model(model_id))
         for model_id in GEMINI_MODEL_IDS
     }
+    catalog = [
+        RegisteredModel(
+            id=model_id, provider=PROVIDER_GOOGLE_AI_STUDIO, label=model_id
+        )
+        for model_id in GEMINI_MODEL_IDS
+    ]
+    return factories, catalog
 
 
-async def assemble_model_factories() -> tuple[dict[str, Callable[[], Any]], str]:
-    """The combined factory mapping and its default model id.
+async def assemble_model_factories() -> tuple[
+    dict[str, Callable[[], Any]], list[RegisteredModel], str
+]:
+    """The combined factory mapping, its provider catalog, and default model id.
 
     Order: the six presets, then sorted live catalog ids, then Gemini ids.
+    The catalog mirrors the factory mapping one-to-one: every registered id
+    appears exactly once with its worker-declared provider.
     Graceful startup: a missing Perplexity key skips Perplexity with a warning;
     a catalog fetch failure keeps the six preset factories; a missing Google
     key skips Gemini. SystemExit only when no factories remain.
     """
     factories: dict[str, Callable[[], Any]] = {}
+    catalog: list[RegisteredModel] = []
     default_model: str | None = None
 
     perplexity_key = os.environ.get("PERPLEXITY_API_KEY")
@@ -300,7 +304,11 @@ async def assemble_model_factories() -> tuple[dict[str, Callable[[], Any]], str]
                 "Perplexity catalog fetch failed (%s); registering presets only",
                 error,
             )
-        factories.update(build_perplexity_factories(perplexity_key, catalog_ids))
+        perplexity_factories, perplexity_catalog = build_perplexity_factories(
+            perplexity_key, catalog_ids
+        )
+        factories.update(perplexity_factories)
+        catalog.extend(perplexity_catalog)
         perplexity_operations.configure(perplexity_client_factory(perplexity_key))
         default_model = DEFAULT_MODEL_ID
 
@@ -310,7 +318,9 @@ async def assemble_model_factories() -> tuple[dict[str, Callable[[], Any]], str]
             "GOOGLE_API_KEY/GEMINI_API_KEY is not set; skipping Gemini model factories"
         )
     else:
-        factories.update(build_model_factory(gemini_key))
+        gemini_factories, gemini_catalog = build_model_factory(gemini_key)
+        factories.update(gemini_factories)
+        catalog.extend(gemini_catalog)
         if default_model is None:
             default_model = GEMINI_MODEL_IDS[0]
 
@@ -319,79 +329,7 @@ async def assemble_model_factories() -> tuple[dict[str, Callable[[], Any]], str]
             "No model factories could be built: set PERPLEXITY_API_KEY and/or "
             "GOOGLE_API_KEY/GEMINI_API_KEY in .env.local"
         )
-    return factories, default_model
-
-
-def write_readiness(
-    model_ids: list[str], agent_name: str, default_model: str
-) -> None:
-    """Publish a non-secret readiness lease for the API to read.
-
-    The record is a live, expiring lease: it carries this worker's ``pid`` and
-    a monotonic-in-wall-clock ``heartbeat`` (unix seconds) that
-    ``refresh_readiness_lease`` rewrites every ``READINESS_HEARTBEAT_INTERVAL``.
-    The write is atomic (temp file + ``os.replace`` in the same directory) so
-    the API can never observe a torn/partial record.
-    """
-    READINESS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(
-        {
-            "task_queue": TASK_QUEUE,
-            "agent": agent_name,
-            "models": model_ids,
-            "default_model": default_model,
-            "pid": os.getpid(),
-            "heartbeat": time.time(),
-        },
-        indent=2,
-    )
-    fd, tmp_name = tempfile.mkstemp(
-        dir=READINESS_PATH.parent, prefix=".worker-readiness-", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(fd, "w") as handle:
-            handle.write(payload)
-        os.replace(tmp_name, READINESS_PATH)
-    except OSError:
-        with suppress(OSError):
-            os.unlink(tmp_name)
-        raise
-
-
-async def refresh_readiness_lease(
-    model_ids: list[str], agent_name: str, default_model: str
-) -> None:
-    """Rewrite the readiness lease forever; run alongside ``worker.run()``.
-
-    Runs only while the worker task is actually alive (both are awaited in the
-    same TaskGroup-style gather), so a dead/hung worker process cannot keep
-    the lease fresh. A transient write failure logs and retries on the next
-    tick instead of killing the worker.
-    """
-    interval = READINESS_HEARTBEAT_INTERVAL.total_seconds()
-    while True:
-        await asyncio.sleep(interval)
-        try:
-            await asyncio.to_thread(
-                write_readiness, model_ids, agent_name, default_model
-            )
-        except OSError as error:
-            logger.warning("readiness heartbeat write failed: %s", error)
-
-
-def clear_readiness() -> None:
-    """Remove the lease, but only if this process still owns it.
-
-    A restarted worker may have already replaced the file with its own lease;
-    deleting that record would take down a healthy successor's readiness.
-    """
-    try:
-        record = json.loads(READINESS_PATH.read_text())
-    except (OSError, json.JSONDecodeError):
-        return
-    if isinstance(record, dict) and record.get("pid") not in (None, os.getpid()):
-        return
-    READINESS_PATH.unlink(missing_ok=True)
+    return factories, catalog, default_model
 
 
 def workflow_tool_specs() -> list[dict[str, Any]]:
@@ -455,6 +393,35 @@ def validate_outbound_tools() -> None:
     logger.info("Validated %d outbound tool definitions", len(outbound))
 
 
+# The exact activity set ``main`` registers, as a module-level literal so
+# tests can introspect the same list the Worker is built with (the Worker
+# call site below unpacks it: ``activities=[*WORKER_ACTIVITIES]``).
+WORKER_ACTIVITIES = [
+        model_catalog,
+        # The stock browser activity is registered ONLY on the desktop worker
+        # (desktop_worker.py), never here: Temporal routes it to the desktop
+        # task queue, and the host worker must never launch Chromium.
+        graph_activity,
+        use_agent_activity,
+        use_skill_activity,
+        load_tool_activity,
+        mcp_client_activity,
+        run_loaded_tool,
+        think_activity.think,
+        perplexity_operations.create_fast_agent_response,
+        perplexity_operations.create_low_agent_response,
+        perplexity_operations.create_medium_agent_response,
+        perplexity_operations.create_high_agent_response,
+        perplexity_operations.create_xhigh_agent_response,
+        perplexity_operations.create_wide_research_agent_response,
+        perplexity_operations.retrieve_agent_response,
+        perplexity_operations.list_agent_response_files,
+        perplexity_operations.download_agent_response_file,
+        perplexity_operations.list_agent_models,
+        perplexity_operations.cancel_agent_response,
+]
+
+
 def connect_included_mcp_servers() -> list[str]:
     """Start and connect included MCP servers to strands_tools.mcp_client."""
     from strands_tools.mcp_client import mcp_client
@@ -493,8 +460,12 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
     agent_name, _ = agent_identity()
-    model_factories, default_model = await assemble_model_factories()
-    tools_dir = ensure_strands_tools_dir()
+    model_factories, catalog, default_model = await assemble_model_factories()
+    # The catalog is served to the API by ModelCatalogWorkflow -> model_catalog,
+    # not written to a readiness file. Install it before the worker starts
+    # polling so the first execution can never observe an empty catalog.
+    set_catalog(catalog)
+    logger.info("Provider-declaring model catalog: %d entries", len(catalog))
     mcp_clients = mcp_client_factories()
     connected_mcp_servers = connect_included_mcp_servers()
     # Fail fast: one invalid generated tool schema in the outbound array
@@ -512,28 +483,8 @@ async def main() -> None:
     worker = Worker(
         client,
         task_queue=TASK_QUEUE,
-        workflows=[ChatWorkflow, CompareWorkflow],
-        activities=[
-            browser_activity,
-            *computer_use_activity.COMPUTER_USE_ACTIVITIES,
-            graph_activity,
-            use_agent_activity,
-            use_skill_activity,
-            mcp_client_activity,
-            run_loaded_tool,
-            think_activity.think,
-            perplexity_operations.create_fast_agent_response,
-            perplexity_operations.create_low_agent_response,
-            perplexity_operations.create_medium_agent_response,
-            perplexity_operations.create_high_agent_response,
-            perplexity_operations.create_xhigh_agent_response,
-            perplexity_operations.create_wide_research_agent_response,
-            perplexity_operations.retrieve_agent_response,
-            perplexity_operations.list_agent_response_files,
-            perplexity_operations.download_agent_response_file,
-            perplexity_operations.list_agent_models,
-            perplexity_operations.cancel_agent_response,
-        ],
+        workflows=[ChatWorkflow, CompareWorkflow, ModelCatalogWorkflow],
+        activities=[*WORKER_ACTIVITIES],
         workflow_runner=UnsandboxedWorkflowRunner(),
     )
 
@@ -553,34 +504,25 @@ async def main() -> None:
     # the live session model the graph activity resolves per run.
     skill_count = ensure_skills_configured(None)
 
-    write_readiness(list(model_factories), agent_name, default_model)
     logger.info(
-        "Worker up on %r default_model=%s models=%d tools_dir=%s skills=%s skills_dir=%s mcp_servers=%s",
+        "Worker up on %r agent=%s default_model=%s models=%d skills=%s skills_dir=%s mcp_servers=%s",
         TASK_QUEUE,
+        agent_name,
         default_model,
         len(model_factories),
-        tools_dir,
         skill_count,
         skills_dir(),
         list(mcp_clients),
     )
-    heartbeat = asyncio.create_task(
-        refresh_readiness_lease(list(model_factories), agent_name, default_model)
-    )
     try:
         await worker.run()
     finally:
-        heartbeat.cancel()
-        with suppress(asyncio.CancelledError):
-            await heartbeat
-        await asyncio.to_thread(shutdown_browser_activity)
         for name in connected_mcp_servers:
             try:
                 from strands_tools.mcp_client import mcp_client
                 mcp_client(action="disconnect", connection_id=name)
             except Exception:
                 pass
-        clear_readiness()
 
 
 if __name__ == "__main__":

@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import base64
+import copy
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from PIL import Image
 from google import genai
 from strands.models.gemini import GeminiModel as _StrandsGeminiModel
 from strands.types.exceptions import ModelThrottledException
+from temporalio.exceptions import ApplicationError
 
 from gemini_model import GeminiModel, maps_from_grounding, search_from_grounding
+from desktop_observation import resolve_observation, store_observation
 from workflow import (
     TurnDocument,
     TurnImage,
@@ -366,11 +370,22 @@ def test_search_from_grounding_is_none_without_search_fields() -> None:
     assert search_from_grounding(Event()) is None
 
 
-def test_computer_use_function_response_attaches_png_to_latest_result(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "gemini_model.capture_page_png",
-        lambda: (b"png-bytes", "https://example.com/next"),
+@pytest.fixture
+def desktop_image(tmp_path, monkeypatch):
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(tmp_path))
+    (tmp_path / "runtime.json").write_text(json.dumps({
+        "epoch": 7, "owner": {"namespace": "test", "workflow_id": "chat-1"}, "mode": "agent",
+    }))
+    ref = store_observation(
+        Image.new("RGB", (16, 12), "blue"), namespace="test", workflow_id="chat-1",
+        operation_id="capture-1", desktop_epoch=7,
     )
+    monkeypatch.setattr("gemini_model.activity.info", lambda: SimpleNamespace(namespace="test", workflow_id="chat-1"))
+    return ref, resolve_observation(ref, namespace="test", workflow_id="chat-1")
+
+
+def test_computer_use_function_response_attaches_png_to_latest_result(desktop_image) -> None:
+    ref, png = desktop_image
     model = GeminiModel(client_args={"api_key": "test"}, model_id="gemini-3.7-flash")
     contents = model._format_request_content(
         [
@@ -394,6 +409,7 @@ def test_computer_use_function_response_attaches_png_to_latest_result(monkeypatc
                                             "action": "navigate",
                                             "url": "https://example.com",
                                             "screenshot": "should-not-be-sent",
+                                            "observation": ref.model_dump(mode="json"),
                                         }
                                     )
                                 }
@@ -407,19 +423,16 @@ def test_computer_use_function_response_attaches_png_to_latest_result(monkeypatc
     part = contents[-1].parts[0]
     response = part.function_response
     assert response.name == "navigate"
-    assert response.response["url"] == "https://example.com/next"
+    assert response.response["url"] == "https://example.com"
     assert "screenshot" not in response.response
-    assert response.parts[0].inline_data.data == b"png-bytes"
+    assert response.parts[0].inline_data.data == png
     assert response.parts[0].inline_data.mime_type == "image/png"
 
 
 def test_computer_use_function_response_unwraps_temporal_activity_envelope(
-    monkeypatch,
+    desktop_image,
 ) -> None:
-    monkeypatch.setattr(
-        "gemini_model.capture_page_png",
-        lambda: (b"png-bytes", "https://example.com/live"),
-    )
+    ref, png = desktop_image
     model = GeminiModel(client_args={"api_key": "test"}, model_id="gemini-3.7-flash")
     inner = json.dumps(
         {
@@ -428,7 +441,8 @@ def test_computer_use_function_response_unwraps_temporal_activity_envelope(
             "devtoolsFrontendUrl": "http://localhost:9222/devtools/inspector.html?ws=abc",
         }
     )
-    envelope = json.dumps({"status": "success", "content": [{"text": inner}]})
+    envelope = json.dumps({"status": "success", "content": [{"text": inner}],
+                           "observation": ref.model_dump(mode="json")})
     contents = model._format_request_content(
         [
             {
@@ -452,9 +466,93 @@ def test_computer_use_function_response_unwraps_temporal_activity_envelope(
         ]
     )
     response = contents[-1].parts[0].function_response
-    assert response.response["url"] == "https://example.com/live"
+    assert response.response["url"] == "https://example.com"
     assert response.response["devtoolsFrontendUrl"].startswith("http://localhost:9222/")
     assert response.response["action"] == "click"
+    assert response.parts[0].inline_data.data == png
+
+
+@pytest.mark.parametrize("name", ["browser", "click", "take_screenshot"])
+def test_gemini_hydrates_only_latest_reference_without_mutating_messages(desktop_image, name):
+    ref, png = desktop_image
+    old = ref.model_copy(update={"artifact_id": "missing-old-artifact"})
+    messages = []
+    for call_id, observation in (("old", old), ("new", ref)):
+        messages.extend([
+            {"role": "assistant", "content": [{"toolUse": {"toolUseId": call_id, "name": name, "input": {}}}]},
+            {"role": "user", "content": [{"toolResult": {
+                "toolUseId": call_id, "status": "success", "content": [{"text": json.dumps({
+                    "status": "success", "observation": observation.model_dump(mode="json"),
+                })}],
+            }}]},
+        ])
+    before = copy.deepcopy(messages)
+    model = GeminiModel(client_args={"api_key": "test"}, model_id="gemini-3.7-flash")
+    for _ in range(2):
+        contents = model._format_request_content(messages)
+        images = [part.inline_data.data for content in contents for part in content.parts or [] if part.inline_data]
+        responses = [part.function_response for content in contents for part in content.parts or [] if part.function_response]
+        function_images = [part.inline_data.data for response in responses for part in response.parts or []]
+        assert images + function_images == [png]
+        assert responses[0].parts is None
+        assert messages == before
+
+
+def test_gemini_rejects_corrupt_reference_instead_of_capturing_host(desktop_image, monkeypatch):
+    ref, _ = desktop_image
+    def corrupt(*args, **kwargs):
+        raise ValueError("corrupt")
+
+    monkeypatch.setattr("gemini_model.resolve_observation", corrupt)
+    messages = [
+        {"role": "assistant", "content": [{"toolUse": {"toolUseId": "cu", "name": "click", "input": {}}}]},
+        {"role": "user", "content": [{"toolResult": {"toolUseId": "cu", "status": "success", "content": [
+            {"text": json.dumps({"observation": ref.model_dump(mode="json")})},
+        ]}}]},
+    ]
+    model = GeminiModel(client_args={"api_key": "test"}, model_id="gemini-3.7-flash")
+    with pytest.raises(ApplicationError) as error:
+        model._format_request_content(messages)
+    assert error.value.non_retryable
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["browser", "click"])
+async def test_gemini_request_contains_stored_pixels_through_parent_stream(desktop_image, name):
+    ref, png = desktop_image
+    seen = []
+
+    async def generate_content_stream(**kwargs):
+        seen.append(kwargs)
+
+        async def events():
+            for event in _events(None):
+                yield event
+
+        return events()
+
+    model = GeminiModel(client=SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(
+        generate_content_stream=generate_content_stream,
+    ))), model_id="gemini-3.7-flash")
+    messages = [
+        {"role": "assistant", "content": [{"toolUse": {"toolUseId": "cu", "name": name, "input": {}}}]},
+        {"role": "user", "content": [{"toolResult": {"toolUseId": "cu", "status": "success", "content": [
+            {"text": json.dumps({"observation": ref.model_dump(mode="json")})},
+        ]}}]},
+    ]
+    before = copy.deepcopy(messages)
+    assert await _collect(model, messages)
+    contents = seen[0]["contents"]
+    # The SDK dumps its own Content types before calling the genai client.
+    images = []
+    for content in contents:
+        for part in content["parts"]:
+            if part.get("inline_data"):
+                images.append(part["inline_data"]["data"])
+            for response_part in (part.get("function_response") or {}).get("parts") or []:
+                images.append(response_part["inline_data"]["data"])
+    assert [base64.urlsafe_b64decode(image) for image in images] == [png]
+    assert messages == before
 
 
 def test_format_request_tools_uses_official_computer_use_not_action_declarations() -> None:
@@ -506,7 +604,8 @@ def test_model_factory_enables_official_generate_content_computer_use() -> None:
     from config import GEMINI_MODEL_ID
     from run_worker import build_model_factory
 
-    model = build_model_factory("test-key")[GEMINI_MODEL_ID]()
+    factories, _catalog = build_model_factory("test-key")
+    model = factories[GEMINI_MODEL_ID]()
     computer_use = next(
         tool.computer_use
         for tool in model.get_config()["gemini_tools"]

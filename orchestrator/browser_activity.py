@@ -1,89 +1,124 @@
-"""Native Strands browser exposed using Temporal's documented activity adapter.
+"""Native Strands browser exposed as a Temporal activity.
 
-https://github.com/temporalio/sdk-python/blob/main/temporalio/contrib/strands/README.md#tools
+One stock ``LocalChromiumBrowser`` per worker process. This module contains no
+platform code: the worker that registers this activity runs inside the desktop
+environment (Xvfb), so Chromium launches headed on that display via the stock
+tool and its own environment variables (STRANDS_BROWSER_*).
+
+The activity is synchronous: Temporal runs it in its own thread executor, and
+the stock tool manages its own event loop internally.
 """
 
-import asyncio
+import fcntl
 import json
-import socket
-from urllib.parse import urlencode
-from concurrent.futures import ThreadPoolExecutor
+import os
+import platform
+import tempfile
+import time
+from contextlib import contextmanager
+from pathlib import Path
 
-from strands.types.tools import ToolResult
+from PIL import ImageGrab
 from strands_tools.browser import LocalChromiumBrowser
 from strands_tools.browser.models import BrowserInput
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
-# Native browser instances own event loops. Keep their calls on one thread,
-# outside the worker's asyncio loop, and isolate instances by workflow ID.
-_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="strands-browser")
-_browsers: dict[str, LocalChromiumBrowser] = {}
-_ports: dict[str, int] = {}
+from desktop_observation import store_observation
 
-
-def _invoke(workflow_id: str, browser_input: BrowserInput) -> ToolResult:
-    browser = _browsers.get(workflow_id)
-    if browser is None:
-        with socket.socket() as listener:
-            listener.bind(("127.0.0.1", 0))
-            port = listener.getsockname()[1]
-        _ports[workflow_id] = port
-        browser = LocalChromiumBrowser(launch_options={"args": [
-            f"--remote-debugging-port={port}",
-            "--remote-allow-origins=http://localhost:3000,http://127.0.0.1:3000",
-        ]})
-        _browsers[workflow_id] = browser
-    result = browser.browser(browser_input=browser_input)
-    if browser_input.action.type == "close":
-        _browsers.pop(workflow_id, None)
-        _ports.pop(workflow_id, None)
-    elif result.get("status") == "success" and hasattr(browser_input.action, "session_name"):
-        # Viewer metadata is separate from native result content. Ask the
-        # native CDP action for identity; never match pages by URL.
-        target = browser.browser(browser_input=BrowserInput.model_validate({"action": {
-            "type": "execute_cdp", "session_name": browser_input.action.session_name,
-            "method": "Target.getTargetInfo",
-        }}))
-        if target.get("status") == "success":
-            try:
-                info = json.loads(target["content"][0]["text"])["targetInfo"]
-            except (KeyError, IndexError, TypeError, ValueError):
-                return result
-            endpoint = f"localhost:{_ports[workflow_id]}/devtools/page/{info['targetId']}"
-            result = {**result, "browserPreview": {
-                "url": info["url"], "action": browser_input.action.type,
-                "livePreviewUrl": f"/computer-use-live.html?{urlencode({'ws': 'ws://' + endpoint})}",
-                "devtoolsFrontendUrl": f"http://localhost:{_ports[workflow_id]}/devtools/inspector.html?{urlencode({'ws': endpoint})}",
-            }}
-    return result
+_browser = LocalChromiumBrowser(launch_options={"headless": False, "chromium_sandbox": True})
 
 
-@activity.defn(name="browser")
-async def browser_activity(browser_input: BrowserInput) -> ToolResult:
-    """Run the native Strands browser action without changing its schema or result."""
-    operation = asyncio.get_running_loop().run_in_executor(
-        _executor, _invoke, activity.info().workflow_id, browser_input
-    )
+def artifact_root() -> Path:
+    return Path(os.environ.get("DESKTOP_ARTIFACT_ROOT", str(Path(tempfile.gettempdir()) / "kilo" / "gwen-desktop-artifacts")))
+
+
+@contextmanager
+def desktop_state():
+    """Serialize ownership transitions independently of a running GUI action."""
+    root = artifact_root()
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd = os.open(root / "state.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
-        return await asyncio.shield(operation)
-    except asyncio.CancelledError:
-        # Cancelling a Future cannot stop the thread. Drain the native action
-        # before reporting cancellation so it cannot outlive control transfer.
-        await operation
-        raise
-
-
-def shutdown_browser_activity() -> None:
-    """Close native browser resources before the worker exits."""
-    def close_all() -> None:
-        for browser in _browsers.values():
-            browser.browser(browser_input=BrowserInput.model_validate({
-                "action": {"type": "close", "session_name": "worker-shutdown"}
-            }))
-        _browsers.clear()
-        _ports.clear()
-
-    try:
-        _executor.submit(close_all).result()
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        path = root / "runtime.json"
+        state = json.loads(path.read_text()) if path.exists() else {}
+        yield state
+        with tempfile.NamedTemporaryFile(mode="w", dir=root, delete=False) as file:
+            json.dump(state, file)
+            name = file.name
+        os.replace(name, path)
     finally:
-        _executor.shutdown(wait=True)
+        os.close(fd)
+
+
+def initialize_desktop() -> None:
+    if platform.system() != "Linux" or not os.environ.get("DISPLAY"):
+        raise RuntimeError("Desktop activities require the isolated Linux X display")
+    with desktop_state() as state:
+        owner = state.get("owner")
+        state.update(epoch=time.time_ns(), owner=owner, mode="recovery" if owner else "agent")
+
+
+@contextmanager
+def desktop_action():
+    """Keep the native action lock until GUI completion, not Temporal timeout."""
+    if platform.system() != "Linux" or not os.environ.get("DISPLAY"):
+        raise ApplicationError("Desktop input cannot execute on the host", non_retryable=True)
+    info = activity.info()
+    owner = {"namespace": info.namespace, "workflow_id": info.workflow_id}
+    fd = os.open(artifact_root() / "action.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ApplicationError("Desktop action already in flight", non_retryable=True) from error
+        with desktop_state() as state:
+            if state.get("mode") != "agent" or state.get("owner") not in (None, owner):
+                raise ApplicationError("Desktop is owned, paused, or requires recovery", non_retryable=True)
+            state["owner"] = owner
+            epoch = state["epoch"]
+        try:
+            yield epoch
+        except BaseException:
+            with desktop_state() as state:
+                state["mode"] = "recovery"
+            raise
+    finally:
+        os.close(fd)
+
+
+def capture_desktop(epoch: int) -> dict:
+    """Record physical display pixels; only compact metadata enters history."""
+    info = activity.info()
+    image = ImageGrab.grab(xdisplay=os.environ["DISPLAY"])
+    ref = store_observation(image, namespace=info.namespace, workflow_id=info.workflow_id,
+                            operation_id=info.activity_id, desktop_epoch=epoch)
+    return ref.model_dump(mode="json")
+
+
+@activity.defn(name="browser", no_thread_cancel_exception=True)
+def browser_activity(browser_input: BrowserInput) -> dict:
+    """Stock browser on the shared Linux desktop. Results include full-display screenshots.
+
+    Use computer click/move actions for screenshot coordinates (0-999 across
+    the full display); browser selector/CDP coordinates refer to page content.
+    """
+    with desktop_action() as epoch:
+        action = browser_input.action
+        with desktop_state() as state:
+            session = getattr(action, "session_name", None)
+            if action.type == "init_session" and not state.get("session_name"):
+                state["session_name"] = session
+            elif session is not None and session != state.get("session_name"):
+                raise ApplicationError("Browser session does not match desktop owner", non_retryable=True)
+        # Never accept a model-chosen output path. Stock screenshot writing is
+        # scoped to a disposable directory; the model sees the actual display.
+        with tempfile.TemporaryDirectory(prefix="desktop-capture-") as scratch:
+            if action.type == "screenshot":
+                browser_input = browser_input.model_copy(update={"action": action.model_copy(
+                    update={"path": str(Path(scratch) / "page.png")})})
+            result = _browser.browser(browser_input=browser_input)
+        if result.get("status") == "error":
+            raise ApplicationError(str(result), non_retryable=True)
+        return {**result, "action": action.type, "observation": capture_desktop(epoch)}

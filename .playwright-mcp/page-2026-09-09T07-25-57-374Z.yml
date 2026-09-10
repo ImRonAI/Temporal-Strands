@@ -1,0 +1,144 @@
+- generic [ref=f9e1]:
+  - main [ref=f9e2]:
+    - generic [ref=f9e3]:
+      - generic [ref=f9e4]: v0 / studio
+      - navigation [ref=f9e9]:
+        - button "Community" [ref=f9e10]
+        - button "Pricing" [ref=f9e11]
+        - button "Enterprise" [ref=f9e12]
+        - button "Docs" [ref=f9e13]
+      - generic [ref=f9e14]:
+        - button "Compare models" [ref=f9e15] [cursor=pointer]
+        - button "Sign in" [ref=f9e16]
+        - button "Start building" [ref=f9e17]
+    - generic [ref=f9e139]:
+      - generic [ref=f9e141]:
+        - log [ref=f9e142]:
+          - generic [ref=f9e144]:
+            - paragraph [ref=f9e149]:
+              - text: "Use the native browser tool directly: initialize session takeover-demo and navigate to"
+              - link "https://example.com" [ref=f9e150] [cursor=pointer]:
+                - /url: https://example.com/
+              - text: . Stop after navigation and leave the headed desktop open for me to take control. No delegation or research. Report ready for takeover.
+            - generic [ref=f9e154]:
+              - button "Thinking…" [expanded] [ref=f9e156]
+              - generic [ref=f9e169]:
+                - generic [ref=f9e204]:
+                  - generic [ref=f9e205]: Thinking
+                  - generic [ref=f9e206]:
+                    - heading "1. DECOMPOSE" [level=3] [ref=f9e207]
+                    - paragraph [ref=f9e208]:
+                      - text: "Question: Can this environment initialize a headed browser session named"
+                      - code [ref=f9e209]: takeover-demo
+                      - text: ", navigate it to"
+                      - code [ref=f9e210]: https://example.com
+                      - text: ", and leave it open for user takeover?"
+                    - paragraph [ref=f9e211]: "Evidence gaps:"
+                    - list [ref=f9e212]:
+                      - listitem [ref=f9e213]: Availability of a native browser-control tool.
+                      - listitem [ref=f9e214]: Availability of a persistent headed desktop/session takeover capability.
+                    - heading "2. EVIDENCE GATHERING" [level=3] [ref=f9e215]
+                    - paragraph [ref=f9e216]: No suitable tool is available. The provided tools support sandbox commands, research, files, Google Drive, finance, and datasets, but no native browser or headed-desktop session control. Using web search or HTTP retrieval would not satisfy the requested interactive navigation and takeover state.
+                    - heading "3. APPRAISAL" [level=3] [ref=f9e217]
+                    - list [ref=f9e218]:
+                      - listitem [ref=f9e219]: "Claim: No browser/session-takeover tool is exposed in this environment. Quality: HIGH — directly established by the supplied tool inventory."
+                      - listitem [ref=f9e220]: "Claim: A sandbox HTTP fetch cannot create or preserve a headed desktop for takeover. Quality: HIGH — the sandbox tools do not expose an interactive GUI session."
+                    - paragraph [ref=f9e221]: No contradictory evidence exists.
+                    - heading "4. SYNTHESIS" [level=3] [ref=f9e222]
+                    - paragraph [ref=f9e223]: The requested navigation cannot be completed with available capabilities. Reporting “ready for takeover” would fabricate successful execution. Google Drive tools are irrelevant and should not be invoked.
+                    - heading "5. DECIDE AND HAND OFF" [level=3] [ref=f9e224]
+                    - paragraph [ref=f9e225]: "FINDINGS:"
+                    - list [ref=f9e226]:
+                      - listitem [ref=f9e227]: "[HIGH] The requested headed browser session was not initialized."
+                      - listitem [ref=f9e228]:
+                        - text: "[HIGH]"
+                        - code [ref=f9e229]: https://example.com
+                        - text: was not opened in a takeover-capable desktop.
+                      - listitem [ref=f9e230]: "[HIGH] The environment lacks the necessary native browser/session-takeover tool."
+                    - paragraph [ref=f9e231]: "CONFIDENCE: high — the available tool inventory contains no browser automation or persistent headed-desktop capability."
+                    - paragraph [ref=f9e232]: "GAPS: A native browser tool providing session initialization, navigation, and persistent headed takeover is required."
+                    - paragraph [ref=f9e233]:
+                      - text: "NEXT ACTION: REFINE: Route this task to an execution environment with a native headed-browser tool, then initialize session"
+                      - code [ref=f9e234]: takeover-demo
+                      - text: ", navigate to"
+                      - code [ref=f9e235]: https://example.com
+                      - text: ", stop without closing it, and report takeover readiness only after successful navigation."
+                - generic [ref=f9e236]:
+                  - button [expanded] [ref=f9e237]:
+                    - paragraph [ref=f9e242] [cursor=pointer]: Computer use · 3/3 actions finished
+                  - generic [ref=f9e247]:
+                    - button "Browser activity" [expanded] [ref=f9e249]
+                    - generic [ref=f9e262]:
+                      - generic [ref=f9e269]:
+                        - generic [ref=f9e270]: browser
+                        - generic [ref=f9e271]:
+                          - button "browser Error" [expanded] [ref=f9e272]:
+                            - generic [ref=f9e273]:
+                              - generic [ref=f9e276]: browser
+                              - generic [ref=f9e277]: Error
+                          - generic [ref=f9e280]:
+                            - generic [ref=f9e281]:
+                              - heading "Parameters" [level=4] [ref=f9e282]
+                              - code [ref=f9e287]:
+                                - generic [ref=f9e288]: "\"\""
+                            - generic [ref=f9e289]:
+                              - heading "Error" [level=4] [ref=f9e290]
+                              - generic [ref=f9e291]: "Error: missing a required argument: 'browser_input'"
+                      - generic [ref=f9e299]:
+                        - generic [ref=f9e300]: browser
+                        - generic [ref=f9e301]:
+                          - button "browser Error" [expanded] [ref=f9e302]:
+                            - generic [ref=f9e303]:
+                              - generic [ref=f9e306]: browser
+                              - generic [ref=f9e307]: Error
+                          - generic [ref=f9e310]:
+                            - generic [ref=f9e311]:
+                              - heading "Parameters" [level=4] [ref=f9e312]
+                              - code [ref=f9e317]:
+                                - generic [ref=f9e318]: "\"\""
+                            - generic [ref=f9e319]:
+                              - heading "Error" [level=4] [ref=f9e320]
+                              - generic [ref=f9e321]: "Error: missing a required argument: 'browser_input'"
+                      - generic [ref=f9e329]:
+                        - generic [ref=f9e330]: browser
+                        - generic [ref=f9e331]:
+                          - button "browser Error" [expanded] [ref=f9e332]:
+                            - generic [ref=f9e333]:
+                              - generic [ref=f9e336]: browser
+                              - generic [ref=f9e337]: Error
+                          - generic [ref=f9e340]:
+                            - generic [ref=f9e341]:
+                              - heading "Parameters" [level=4] [ref=f9e342]
+                              - code [ref=f9e347]:
+                                - generic [ref=f9e348]: "\"\""
+                            - generic [ref=f9e349]:
+                              - heading "Error" [level=4] [ref=f9e350]
+                              - generic [ref=f9e351]: "Error: missing a required argument: 'browser_input'"
+        - group [ref=f9e179]:
+          - group [ref=f9e180]
+          - textbox "Ask for a change, or start something new…" [active] [ref=f9e182]: "Call browser with EXACT argument structure: {\"browser_input\":{\"action\":{\"type\":\"init_session\",\"session_name\":\"takeover-demo\",\"description\":\"Human takeover test\"},\"wait_time\":1}}. Then browser {\"browser_input\":{\"action\":{\"type\":\"navigate\",\"session_name\":\"takeover-demo\",\"url\":\"https://example.com\"},\"wait_time\":1}}. The outer agent has browser; do not rely on Think's tool inventory. Stop after navigation."
+          - group [ref=f9e183]:
+            - generic [ref=f9e184]:
+              - button [ref=f9e185]
+              - button "High (preset)" [ref=f9e186]
+              - button "Web preview" [pressed] [ref=f9e190]
+            - button "Stop" [ref=f9e192]
+      - generic [ref=f9e355]:
+        - generic [ref=f9e356]:
+          - generic [ref=f9e357]:
+            - paragraph [ref=f9e362]: Browser
+            - generic [ref=f9e363]: Agent working
+          - generic [ref=f9e364]:
+            - button "Take control" [ref=f9e365]
+            - button "Close browser preview" [ref=f9e366]:
+              - generic [aria-hidden] [ref=f9e367]: Close
+              - generic [ref=f9e368]: Close
+        - generic [ref=f9e370]:
+          - generic [ref=f9e371]:
+            - button "Reconnect viewer" [ref=f9e372]
+            - textbox "Enter URL..."
+            - button "Open DevTools" [disabled]
+            - button "Fullscreen" [ref=f9e373]
+          - iframe [ref=f9e375]
+  - button "Open Next.js Dev Tools" [ref=f9e112] [cursor=pointer]
+  - alert [ref=f9e79]

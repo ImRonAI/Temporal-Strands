@@ -787,7 +787,25 @@ describe("POST model-activity retry handling", () => {
     expect(firstText).toBeGreaterThan(pendingEnd)
   })
 
-  it("maps use_skill thinking-topic frames to reasoning-delta", async () => {
+  it("preserves use_skill configuration and nested tools in a per-call agent stream", async () => {
+    stubTurnStream([
+      frame({ topic: "thinking", tool_use: { name: "use_skill", toolUseId: "skill-run-1" },
+        data: { skill_name: "demo-skill", configuration: { systemPrompt: "Exact instructions", userPrompt: "Do research", tools: [], skills: [] } } }),
+      frame({ topic: "thinking", tool_use: { name: "use_skill", toolUseId: "skill-run-1" },
+        data: { skill_name: "demo-skill", event: { type: "tool_use_stream", current_tool_use: { toolUseId: "read-1", name: "file_read", input: { path: "notes.md" } } } } }),
+      frame({ done: true, reply: "Done" }),
+    ])
+    const chunks = parseChunks(await (await postTurn()).text())
+    const runs = chunks.filter(c => c.type === "data-skill-run")
+    expect(runs).toHaveLength(2)
+    expect(runs.map(c => c.id)).toEqual(["skill-skill-run-1", "skill-skill-run-1"])
+    expect(runs[1].data).toMatchObject({
+      toolUseId: "skill-run-1", configuration: { systemPrompt: "Exact instructions" },
+      node: { tools: [{ id: "read-1", name: "file_read", input: '{"path":"notes.md"}' }] },
+    })
+  })
+
+  it("keeps use_skill text inside its agent instead of parent reasoning", async () => {
     stubTurnStream([
       frame({
         topic: "thinking",
@@ -799,8 +817,59 @@ describe("POST model-activity retry handling", () => {
 
     const chunks = parseChunks(await (await postTurn()).text())
     const reasoning = chunks.filter((c) => c.type === "reasoning-delta")
-    expect(reasoning.some((c) => String(c.delta).includes("demo-skill"))).toBe(true)
-    expect(reasoning.some((c) => String(c.delta).includes("Sub-agent chunk"))).toBe(true)
+    expect(reasoning.some((c) => String(c.delta).includes("Sub-agent chunk"))).toBe(false)
+    expect(chunks.find(c => c.type === "data-skill-run")?.data).toMatchObject({
+      skillName: "demo-skill", timeline: [{ kind: "text", text: "Sub-agent chunk" }],
+    })
+  })
+
+  it("reconciles use_skill tokens into one ordered agent update", async () => {
+    // The orchestrator publishes one thinking frame per model token. Gluing
+    // the [skill_name] label onto every delta rendered as
+    // "Using[skill] the[skill] sandbox[skill]..." in Chain of Thought.
+    const tokens = ["Using", " the", " sandbox", " skill", "."]
+    stubTurnStream([
+      ...tokens.map((text) =>
+        frame({
+          topic: "thinking",
+          tool_use: { name: "use_skill", toolUseId: "skill-run-1" },
+          data: { skill_name: "demo-skill", text },
+        })
+      ),
+      frame({ done: true, reply: "Done" }),
+    ])
+
+    const chunks = parseChunks(await (await postTurn()).text())
+    const runs = chunks.filter(c => c.type === "data-skill-run")
+    expect(new Set(runs.map(c => c.id)).size).toBe(1)
+    expect(runs.at(-1)?.data).toMatchObject({
+      timeline: [{ kind: "text", text: "Using the sandbox skill." }],
+    })
+  })
+
+  it("re-labels when the sub-agent speaker changes within one reasoning run", async () => {
+    stubTurnStream([
+      frame({
+        topic: "thinking",
+        tool_use: { name: "use_skill", toolUseId: "skill-run-1" },
+        data: { skill_name: "skill-a", text: "First." },
+      }),
+      frame({
+        topic: "thinking",
+        tool_use: { name: "use_agent", toolUseId: "agent-run-1" },
+        data: { agent_name: "analyst", text: "Second." },
+      }),
+      frame({ done: true, reply: "Done" }),
+    ])
+
+    const chunks = parseChunks(await (await postTurn()).text())
+    const joined = chunks
+      .filter((c) => c.type === "reasoning-delta")
+      .map((c) => String(c.delta))
+      .join("")
+    expect(joined).not.toContain("[skill-a]")
+    expect(joined.split("[analyst]").length - 1).toBe(1)
+    expect(chunks.find(c => c.type === "data-skill-run")?.data).toMatchObject({ skillName: "skill-a" })
   })
 
   it("collapses a retried thinking-topic message into separate reasoning blocks with a data-retry part", async () => {

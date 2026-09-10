@@ -94,6 +94,19 @@ def test_nested_activity_streams_use_documented_default_batch_interval() -> None
     assert THINK_STREAM_BATCH_INTERVAL == timedelta(seconds=2)
 
 
+def test_model_stream_batch_interval() -> None:
+    """Outer TemporalAgent streams stay at Temporal's 200 ms LLM figure.
+
+    Every flushed batch is a durable Signal in the workflow's history, so this
+    is a history-pressure dial, not a latency dial: at 25 ms a single turn
+    produced 5,158 signals and 24,953 history events, and the workflow spent
+    its time replaying history instead of streaming.
+    """
+    from config import MODEL_STREAM_BATCH_INTERVAL
+
+    assert MODEL_STREAM_BATCH_INTERVAL == timedelta(milliseconds=200)
+
+
 def test_model_activity_policy_uses_temporal_defaults() -> None:
     assert MODEL_START_TO_CLOSE is None
     assert MODEL_SCHEDULE_TO_CLOSE is None

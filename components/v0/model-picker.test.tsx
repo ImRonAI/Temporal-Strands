@@ -6,13 +6,14 @@ import { ModelPicker, reasoningLevels } from "./model-picker"
 const h = vi.hoisted(() => ({
   popoverProps: [] as Array<Record<string, unknown>>,
   commandItemProps: [] as Array<Record<string, unknown>>,
+  groupHeadings: [] as string[],
 }))
 
 vi.mock("./use-models", () => ({
   useModels: () => ({
     models: [
-      { id: "gemini-3.8-flash", owned_by: "google" },
-      { id: "openai/gpt-5", owned_by: "openai" },
+      { id: "gemini-3.8-flash", owned_by: "google-ai-studio", provider_label: "Google AI Studio" },
+      { id: "openai/gpt-5", owned_by: "perplexity-agent-api", provider_label: "Perplexity Agent API" },
       { id: "custom-unknown-model", owned_by: "other" },
     ],
     status: "ready",
@@ -40,7 +41,10 @@ vi.mock("@/components/ai-elements/prompt-input", () => ({
   PromptInputCommandInput: (props: Record<string, unknown>) => <input {...props} />,
   PromptInputCommandList: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   PromptInputCommandEmpty: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
-  PromptInputCommandGroup: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  PromptInputCommandGroup: ({ children, heading }: { children?: React.ReactNode; heading: string }) => {
+    h.groupHeadings.push(heading)
+    return <div>{children}</div>
+  },
   PromptInputCommandItem: (props: Record<string, unknown>) => {
     h.commandItemProps.push(props)
     return (
@@ -59,6 +63,7 @@ describe("ModelPicker", () => {
   beforeEach(() => {
     h.popoverProps = []
     h.commandItemProps = []
+    h.groupHeadings = []
   })
 
   it("returns verified reasoning levels from json catalog", () => {
@@ -93,6 +98,12 @@ describe("ModelPicker", () => {
     const latest = h.popoverProps[h.popoverProps.length - 1]
     expect(latest.actionsRef).toBeDefined()
     expect(typeof latest.onOpenChange).toBe("function")
+  })
+
+  it("uses worker-declared provider labels and renders every returned model", () => {
+    renderToStaticMarkup(<ModelPicker value="openai/gpt-5" onValueChange={vi.fn()} />)
+    expect(h.groupHeadings).toEqual(["Google AI Studio", "Perplexity Agent API", "other"])
+    expect(h.commandItemProps.map(item => item.value)).toEqual(["gemini-3.8-flash", "openai/gpt-5", "custom-unknown-model"])
   })
 
   it("closes popover and calls onReasoningEffortChange when selecting a model without reasoning levels", () => {

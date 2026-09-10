@@ -1,0 +1,12 @@
+**
+!browser_activity.py
+!computer_use_activity.py
+!desktop_observation.py
+!workspace_state.py
+!desktop_worker.py
+!config.py
+!telemetry.py
+!desktop/
+!desktop/Dockerfile
+!desktop/requirements.txt
+!desktop/start-desktop.sh

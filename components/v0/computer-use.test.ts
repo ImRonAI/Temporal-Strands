@@ -1,201 +1,126 @@
 import { describe, expect, it } from "vitest"
-
 import type { DynamicToolUIPart } from "ai"
 
 import {
-  COMPUTER_USE_TOOL_NAMES,
-  computerUseFields,
-  computerUsePreview,
-  stripComputerUseScreenshot,
+  COMPUTER_USE_TOOL_NAMES, DESKTOP_NOVNC_URL, computerUseFailed,
+  computerUseFields, computerUsePreview, stripComputerUseScreenshot, unwrapToolOutput,
 } from "./computer-use"
 
-const tool = (
-  toolName: string,
-  overrides: Record<string, unknown> = {}
-): DynamicToolUIPart =>
-  ({
-    type: "dynamic-tool",
-    toolName,
-    toolCallId: "cu-1",
-    state: "input-available",
-    input: {},
-    ...overrides,
-  }) as unknown as DynamicToolUIPart
+const observation = {
+  artifact_id: "879a4f76-2f47-4039-b5ca-30c8bba286bf", generation: "1",
+  sha256: "a".repeat(64), width: 1280, height: 720, mime_type: "image/png",
+}
+const tool = (toolName: string, output?: unknown, toolCallId = "cu-1"): DynamicToolUIPart => ({
+  type: "dynamic-tool", toolName, toolCallId, state: "output-available", input: {}, output,
+})
+const wrapped = (output: unknown) => ({ status: "success", content: [{ text: JSON.stringify(output) }] })
+
+describe("native computer use metadata", () => {
+  it.each([
+    ["direct", (value: unknown) => value],
+    ["JSON", (value: unknown) => JSON.stringify(value)],
+    ["TemporalActivityTool", wrapped],
+    ["SSE text", (value: unknown) => ({ text: JSON.stringify(wrapped(value)) })],
+  ])("decodes %s activity results without losing top-level metadata", (_, wrap) => {
+    const result = { status: "success", action: "screenshot", observation,
+      content: [{ text: JSON.stringify({ action: "untrusted page content" }) }] }
+    const fields = computerUseFields({ toolName: "browser", output: wrap(result) })
+    expect(fields).toEqual({ url: "", action: "screenshot", intent: "", status: "success", observation })
+    expect(unwrapToolOutput(wrap(result))).toEqual(result)
+  })
+
+  it("decodes native browser action inputs before a result exists", () => {
+    expect(computerUseFields({ toolName: "browser", input: {
+      browser_input: { action: { type: "navigate", url: "https://example.test", session_name: "not-chat-id" } },
+    } })).toMatchObject({ action: "navigate", url: "https://example.test", observation: null, status: "" })
+    expect(computerUseFields({ toolName: "click", input: { intent: "Open the result" } }).intent).toBe("Open the result")
+  })
+
+  it.each([
+    { artifact_id: "../../other-session" }, { generation: "0" }, { sha256: "bad" },
+    { width: 0 }, { height: 1.5 }, { mime_type: "image/svg+xml" },
+  ])("rejects invalid observation display metadata %j", (invalid) => {
+    expect(computerUseFields({ toolName: "browser", output: {
+      action: "screenshot", observation: { ...observation, ...invalid },
+    } }).observation).toBeNull()
+  })
+
+  it("does not retain screenshot bytes or legacy transport fields in preview state", () => {
+    const preview = computerUsePreview([tool("browser", wrapped({
+      action: "screenshot", observation: { ...observation, base64: "inline-pixels" },
+      screenshot: "inline-pixels", screenshotUrl: "https://obsolete.test/image",
+      devtoolsFrontendUrl: "https://obsolete.test/inspector", livePreviewUrl: "https://obsolete.test/player",
+    }))], false)
+    expect(preview.observation).toEqual(observation)
+    expect(preview.livePreviewUrl).toBe(DESKTOP_NOVNC_URL)
+    expect(preview).not.toHaveProperty("screenshot")
+    expect(preview).not.toHaveProperty("screenshotUrl")
+    expect(preview).not.toHaveProperty("devtoolsFrontendUrl")
+    expect(JSON.stringify(preview)).not.toContain("inline-pixels")
+  })
+
+  it("removes inline pixels from persisted nested results without modifying the event", () => {
+    const output = wrapped({ action: "click", observation, screenshot: "inline-pixels", content: [
+      { text: "Clicked the target" }, { image: { source: { bytes: "inline-pixels" } } },
+    ] })
+    const cleaned = stripComputerUseScreenshot(output)
+    expect(JSON.stringify(cleaned)).not.toContain("inline-pixels")
+    expect(JSON.stringify(output)).toContain("inline-pixels")
+    expect(unwrapToolOutput(cleaned)).toEqual({ action: "click", observation, content: [{ text: "Clicked the target" }, {}] })
+  })
+
+  it.each([
+    { status: "error", content: [{ text: "Failed" }] },
+    wrapped({ status: "error", content: [{ text: "Failed" }] }),
+    { text: JSON.stringify(wrapped({ status: "error" })) },
+  ])("recognizes actual errors through native text envelopes", (output) => {
+    expect(computerUseFailed(output)).toBe(true)
+  })
+
+  it("does not treat JSON-like page content as an action failure", () => {
+    expect(computerUseFailed({ status: "success", action: "get_text", content: [
+      { text: JSON.stringify({ status: "error" }) },
+    ] })).toBe(false)
+  })
+})
 
 describe("computerUsePreview", () => {
-  it("decodes native browser inputs and nested Temporal screenshot metadata", () => {
-    const fields = computerUseFields({
-      toolName: "browser", input: { browser_input: { action: { type: "screenshot", session_name: "fixture" } } },
-      output: { status: "success", content: [{ text: JSON.stringify({
-        status: "success", content: [{ text: "Screenshot captured" }],
-        browserPreview: { action: "screenshot", screenshotUrl: "http://localhost:8787/browser-observations/fixture/content" },
-      }) }] },
+  it("opens the noVNC viewer during an in-flight action", () => {
+    const part: DynamicToolUIPart = { type: "dynamic-tool", toolName: "navigate", toolCallId: "cu-1",
+      state: "input-available", input: { url: "https://example.test" } }
+    expect(computerUsePreview([part], true)).toMatchObject({
+      open: true, url: "https://example.test", action: "navigate", livePreviewUrl: DESKTOP_NOVNC_URL, viewerType: "novnc",
     })
-    expect(fields.action).toBe("screenshot")
-    expect(fields.screenshotUrl).toContain("/browser-observations/")
-    expect(COMPUTER_USE_TOOL_NAMES.has("browser")).toBe(true)
-    expect(computerUseFields({ toolName: "browser", input: { browser_input: { action: { type: "click" } } } }).action).toBe("click")
-  })
-  it("opens native browser results using their separate viewer metadata", () => {
-    const preview = computerUsePreview([tool("browser", {
-      state: "output-available",
-      output: JSON.stringify({ status: "success", content: [{ text: "Navigated" }],
-        browserPreview: { url: "https://example.com", action: "navigate",
-          livePreviewUrl: "/computer-use-live.html?ws=ws%3A%2F%2Flocalhost%3A9222%2Fdevtools%2Fpage%2FABC" } }),
-    })], false)
-    expect(preview.open).toBe(true)
-    expect(preview.livePreviewUrl).toContain("/computer-use-live.html")
-    expect(preview.action).toBe("navigate")
-  })
-  it("lists Gemini Computer Use action names", () => {
-    expect(COMPUTER_USE_TOOL_NAMES.has("navigate")).toBe(true)
-    expect(COMPUTER_USE_TOOL_NAMES.has("click")).toBe(true)
-    expect(COMPUTER_USE_TOOL_NAMES.has("click_at")).toBe(true)
   })
 
-  it("opens while a Computer Use action is in flight", () => {
-    const preview = computerUsePreview(
-      [
-        tool("navigate", {
-          state: "input-available",
-          input: { url: "https://example.com" },
-        }),
-      ],
-      true
-    )
-    expect(preview.open).toBe(true)
-    expect(preview.url).toBe("https://example.com")
-    expect(preview.action).toBe("navigate")
-  })
-
-  it("uses the url and intent from the tool output", () => {
-    const preview = computerUsePreview(
-      [
-        tool("click", {
-          state: "output-available",
-          input: { x: 10, y: 20, intent: "Open the result" },
-          output: {
-            action: "click",
-            url: "https://example.com/search",
-            intent: "Open the result",
-            livePreviewUrl:
-              "http://localhost:3000/computer-use-live.html?ws=ws%3A%2F%2Flocalhost%3A9222%2Fdevtools%2Fpage%2FABC",
-            devtoolsFrontendUrl:
-              "http://localhost:9222/devtools/inspector.html?ws=localhost%3A9222%2Fdevtools%2Fpage%2FABC",
-          },
-        }),
-      ],
-      true
-    )
-    expect(preview.open).toBe(true)
-    expect(preview.url).toBe("https://example.com/search")
-    expect(preview.livePreviewUrl).toBe(
-      "http://localhost:3000/computer-use-live.html?ws=ws%3A%2F%2Flocalhost%3A9222%2Fdevtools%2Fpage%2FABC"
-    )
-    expect(preview.devtoolsFrontendUrl).toBe(
-      "http://localhost:9222/devtools/inspector.html?ws=localhost%3A9222%2Fdevtools%2Fpage%2FABC"
-    )
-    expect(preview.screenshot).toBeNull()
-    expect(preview.intent).toBe("Open the result")
-  })
-
-  it("stays open after the turn if a page URL is known", () => {
-    const preview = computerUsePreview(
-      [
-        tool("navigate", {
-          state: "output-available",
-          output: { action: "navigate", url: "https://example.com" },
-        }),
-      ],
-      false
-    )
-    expect(preview.open).toBe(true)
-    expect(preview.url).toBe("https://example.com")
-  })
-
-  it("stays open between Computer Use actions while the turn is streaming", () => {
-    const preview = computerUsePreview(
-      [
-        tool("navigate", {
-          toolCallId: "cu-1",
-          state: "output-available",
-          output: {
-            action: "navigate",
-            url: "https://example.com",
-          },
-        }),
-        tool("wait", {
-          toolCallId: "cu-2",
-          state: "output-available",
-          output: { action: "wait" },
-        }),
-      ],
-      true
-    )
-    expect(preview.open).toBe(true)
-    expect(preview.url).toBe("https://example.com")
-    expect(preview.sessionId).toBe("cu-1")
-  })
-
-  it("unwraps Temporal activity tool envelopes from tool_results", () => {
-    const envelope = {
-      status: "success",
-      content: [
-        {
-          text: JSON.stringify({
-            action: "click",
-            url: "https://example.com/search",
-            livePreviewUrl:
-              "http://localhost:3000/computer-use-live.html?ws=ws%3A%2F%2Flocalhost%3A9222%2Fdevtools%2Fpage%2FABC",
-            devtoolsFrontendUrl:
-              "http://localhost:9222/devtools/inspector.html?ws=localhost%3A9222%2Fdevtools%2Fpage%2FABC",
-            intent: "Open the result",
-          }),
-        },
-      ],
-    }
-    const preview = computerUsePreview(
-      [
-        tool("click", {
-          state: "output-available",
-          output: envelope,
-        }),
-      ],
-      true
-    )
-    expect(preview.livePreviewUrl).toBe(
-      "http://localhost:3000/computer-use-live.html?ws=ws%3A%2F%2Flocalhost%3A9222%2Fdevtools%2Fpage%2FABC"
-    )
-    expect(preview.devtoolsFrontendUrl).toBe(
-      "http://localhost:9222/devtools/inspector.html?ws=localhost%3A9222%2Fdevtools%2Fpage%2FABC"
-    )
-    expect(preview.url).toBe("https://example.com/search")
-    expect(preview.intent).toBe("Open the result")
-  })
-
-  it("unwraps {text: json} tool output from the SSE bridge", () => {
-    expect(
-      computerUseFields({
-        toolName: "navigate",
-        output: { text: JSON.stringify({ url: "https://example.com", screenshot: "abc" }) },
-      }).url
-    ).toBe("https://example.com")
-    expect(
-      computerUseFields({
-        toolName: "navigate",
-        output: JSON.stringify({
-          action: "navigate",
-          url: "https://example.com",
-          screenshot: "abc",
-        }),
-      }).screenshot
-    ).toEqual({ base64: "abc", mediaType: "image/jpeg" })
-    expect(
-      stripComputerUseScreenshot({
-        action: "click",
-        url: "https://example.com",
-        screenshot: "abc",
+  it("keeps the viewer and most recent page between actions and after streaming", () => {
+    const parts = [tool("navigate", { action: "navigate", url: "https://example.test", intent: "Open page" }),
+      tool("wait", { action: "wait" }, "cu-2")]
+    for (const streaming of [true, false]) {
+      expect(computerUsePreview(parts, streaming)).toMatchObject({
+        open: true, url: "https://example.test", intent: "Open page", sessionId: "cu-1",
       })
-    ).toEqual({ action: "click", url: "https://example.com" })
+    }
+  })
+
+  it("reports an emitted blank page honestly without replacing the noVNC viewer", () => {
+    const preview = computerUsePreview([
+      tool("browser", { action: "navigate", url: "https://example.test" }),
+      tool("browser", { action: "navigate", url: "about:blank" }, "cu-2"),
+    ], true)
+    expect(preview.url).toBe("about:blank")
+    expect(preview.livePreviewUrl).toBe(DESKTOP_NOVNC_URL)
+  })
+
+  it("does not open for unrelated tools or invent a durable chat ID", () => {
+    expect(computerUsePreview([tool("graph")], true).open).toBe(false)
+    expect(computerUsePreview(undefined, false).sessionId).toBe("")
+  })
+
+  it("recognizes native computer and browser actions without restoring removed tools", () => {
+    for (const action of ["browser", "navigate", "click", "click_at", "take_screenshot", "press_key", "scroll"]) {
+      expect(COMPUTER_USE_TOOL_NAMES.has(action)).toBe(true)
+    }
+    expect(COMPUTER_USE_TOOL_NAMES.has("computer_click")).toBe(false)
   })
 })

@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
 
 from strands.tools.mcp import MCPClient
 from strands.tools.registry import ToolRegistry
@@ -24,8 +25,8 @@ from load_tool import (
     unload_community_tool,
     wrap_loaded_io_tool,
 )
-from strands_tools.load_tool import load_tool as _official_load_tool
-from run_worker import MCP_CONFIG_PATH, _ROOT, ensure_strands_tools_dir
+from strands_tools.load_tool import load_tool as _official_load_tool  # noqa: F401
+from run_worker import MCP_CONFIG_PATH, _ROOT
 from workflow import PERMANENT_COMMUNITY_TOOLS, mcp_client_factories, temporal_mcp_clients
 
 
@@ -36,7 +37,7 @@ def test_permanent_registry_includes_skills_and_graph() -> None:
     assert sorted(registry.registry) == [
         "browser", "graph", "load_tool", "mcp_client", "use_agent", "use_skill",
     ]
-    assert registry.registry["load_tool"].tool_type != "temporal_activity"
+    assert registry.registry["load_tool"].tool_type == "temporal_activity"
     assert registry.registry["use_skill"].tool_type == "temporal_activity"
     assert registry.registry["use_agent"].tool_type == "temporal_activity"
     assert registry.registry["mcp_client"].tool_type == "temporal_activity"
@@ -60,14 +61,16 @@ def test_mcp_json_servers_use_temporal_mcp_client() -> None:
     assert all(handle._cache_tools for handle in handles)
 
 
-def test_strands_tools_dir_exposes_the_installed_package() -> None:
-    tools_dir = ensure_strands_tools_dir()
-    assert tools_dir == _ROOT / "tools"
-    assert tools_dir == STRANDS_TOOLS_DIR
-    assert (tools_dir / "file_read.py").is_file()
-    assert (tools_dir / "shell.py").is_file()
-    assert tool_file_path("file_read.py") == str(tools_dir / "file_read.py")
-    assert tool_file_path("tools/file_read.py") == str(tools_dir / "file_read.py")
+def test_strands_tools_dir_is_the_installed_package() -> None:
+    """The search root is the installed strands_tools package, not a farm."""
+    import strands_tools
+
+    assert STRANDS_TOOLS_DIR == Path(strands_tools.__file__).resolve().parent
+    assert not (_ROOT / "tools").exists()
+    assert (STRANDS_TOOLS_DIR / "file_read.py").is_file()
+    assert (STRANDS_TOOLS_DIR / "shell.py").is_file()
+    assert tool_file_path("file_read.py") == str(STRANDS_TOOLS_DIR / "file_read.py")
+    assert tool_file_path("tools/file_read.py") == str(STRANDS_TOOLS_DIR / "file_read.py")
     assert os.path.isfile(tool_file_path("file_read"))
     assert tool_file_path("skills_loader.py") == str(_ROOT / "skills_loader.py")
     assert tool_file_path("orchestrator/skills_loader.py") == str(_ROOT / "skills_loader.py")
@@ -165,16 +168,18 @@ class _Agent:
         self.tool_registry = ToolRegistry()
 
 
-def test_permanent_load_tool_is_the_official_strands_tool() -> None:
-    assert PERMANENT_COMMUNITY_TOOLS[0] is _official_load_tool
-    assert PERMANENT_COMMUNITY_TOOLS[0].tool_type != "temporal_activity"
+def test_permanent_load_tool_is_the_public_activity_wrapper() -> None:
+    """The permanent ``load_tool`` is the public official call as an activity."""
+    permanent = PERMANENT_COMMUNITY_TOOLS[0]
+    assert permanent.tool_name == "load_tool"
+    assert permanent.tool_type == "temporal_activity"
+    assert permanent._activity_name == "load_tool"
 
 
 def test_load_tool_registers_io_community_tool_as_activity() -> None:
     os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
-    tools_dir = ensure_strands_tools_dir()
     agent = _Agent()
-    path = str(tools_dir / "file_read.py")
+    path = str(STRANDS_TOOLS_DIR / "file_read.py")
     result = _official_load_tool(path=path, name="file_read", agent=agent)
     assert result["status"] == "success"
     # The official loader registers the raw I/O tool; the workflow hook then

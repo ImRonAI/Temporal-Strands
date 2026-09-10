@@ -18,7 +18,9 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import unittest.mock
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncGenerator, Callable
 
 import pytest
@@ -229,6 +231,7 @@ async def client() -> AsyncGenerator[Client, None]:
                 browser_activity,
             ],
             workflow_runner=UnsandboxedWorkflowRunner(),
+            activity_executor=ThreadPoolExecutor(max_workers=1),
         )
         async with worker:
             yield env.client
@@ -323,6 +326,7 @@ async def test_take_control_waits_for_turn_and_blocks_new_turns(client: Client) 
     await poll(turn_started)
 
     await handle.execute_update("claim_control")
+
 
     assert (await handle.query("control_status"))["human_control"] is True
     assert await handle.query(ChatWorkflow.turn_start_offset) is None
@@ -678,3 +682,43 @@ def test_workflow_uses_config_closable() -> None:
     )
     assert not hasattr(workflow, "_closable")
     assert not hasattr(workflow, "_UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE")
+
+
+def test_workflow_builds_agent_with_config_model_stream_batch_interval() -> None:
+    """The outer TemporalAgent stream uses config's batch interval.
+
+    Every flushed batch is a durable Signal appended to workflow history, so
+    the batch interval is a history-pressure dial, not a latency dial (at 25 ms
+    a single turn produced 5,158 signals and 24,953 history events). The value
+    must live in config.py, not as a literal at the construction site.
+    """
+    import config
+    import workflow
+
+    from types import SimpleNamespace
+
+    wf = workflow.ChatWorkflow.__new__(workflow.ChatWorkflow)
+    wf._extra_mcp_servers = []
+    wf._model_id = config.DEFAULT_MODEL_ID
+    wf._system_prompt = "system"
+    wf._human_control = [False]
+    wf._handoff_requested = [False]
+    wf._handoffs = SimpleNamespace(publish=lambda *a, **k: None)
+    wf._tool_results = SimpleNamespace(publish=lambda *a, **k: None)
+    wf._loaded_tools = []
+    wf._connected_mcp_servers = []
+    # _ThinkFirstHook reads turn-scoped notes off the workflow's own stream.
+    wf._stream = SimpleNamespace(get_state=lambda **k: SimpleNamespace(log=[], base_offset=0))
+
+    with (
+        unittest.mock.patch.object(workflow, "TemporalAgent") as ta,
+        unittest.mock.patch.object(workflow, "temporal_mcp_clients", return_value=()),
+    ):
+        agent = wf._build_agent([])
+
+    assert agent is ta.return_value
+    ta.assert_called_once()
+    assert (
+        ta.call_args.kwargs["streaming_batch_interval"]
+        == config.MODEL_STREAM_BATCH_INTERVAL
+    )

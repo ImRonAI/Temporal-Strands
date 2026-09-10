@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import traceback
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from strands import Agent
@@ -24,6 +25,22 @@ from temporalio import activity
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
 
 from config import THINK_STREAM_BATCH_INTERVAL
+
+
+@dataclass(frozen=True)
+class ThinkInput:
+    """Hook-side dispatch payload (``activity_as_hook`` ``activity_input``).
+
+    The model-callable ``think`` tool keeps its multi-argument signature;
+    the think-first hook dispatches through this single frozen dataclass,
+    which the JSON converter reconstructs from ``arg_types`` type hints.
+    """
+
+    thought: str
+    cycle_count: int = 1
+    system_prompt: str = ""
+    thinking_system_prompt: str | None = None
+
 
 logger = logging.getLogger(__name__)
 # Activities have no console; outside STRANDS_TOOL_CONSOLE_MODE console_util
@@ -75,7 +92,8 @@ async def _run_cycle(prompt: str, system_prompt: str, model: Any,
 
 
 @activity.defn(name="think")
-async def think(thought: str, cycle_count: int, system_prompt: str,
+async def think(thought: str | ThinkInput, cycle_count: int = 1,
+                system_prompt: str = "",
                 thinking_system_prompt: str | None = None) -> dict[str, Any]:
     """Recursive thinking tool for sophisticated thought generation.
 
@@ -83,7 +101,9 @@ async def think(thought: str, cycle_count: int, system_prompt: str,
     conclusion, reaching a depth a single pass cannot.
 
     Args:
-        thought: The detailed thought, question, or problem to process.
+        thought: The detailed thought, question, or problem to process — a
+            plain string from the model-callable tool, or a ThinkInput from
+            the think-first hook's ``activity_as_hook`` dispatch.
         cycle_count: Number of cycles (1-10); 3-5 balances depth against time.
         system_prompt: WHO the thinker is — persona and expertise domain,
             applied to every cycle.
@@ -96,6 +116,13 @@ async def think(thought: str, cycle_count: int, system_prompt: str,
         concatenated cycles, or the failure detail.
     """
     from workflow import THINKING_TOPIC  # lazy: workflow imports this module
+
+    if isinstance(thought, dict):  # decoded without type hints
+        thought = ThinkInput(**thought)
+    if isinstance(thought, ThinkInput):  # hook dispatch unpacks to locals
+        thought, cycle_count, system_prompt, thinking_system_prompt = (
+            thought.thought, thought.cycle_count,
+            thought.system_prompt or system_prompt, thought.thinking_system_prompt)
 
     try:
         model = await _session_model()
@@ -111,6 +138,9 @@ async def think(thought: str, cycle_count: int, system_prompt: str,
                 out.append(f"Cycle {cycle}/{cycle_count}:\n{reply}")
                 current = (f"Previous cycle concluded: {reply}\n"
                            "Continue developing these ideas further.")
+            # Hook dispatches discard the return value; deliver the notes as
+            # one durable frame the workflow folds into the prompt.
+            topic.publish({"think_notes": "\n\n".join(out)}, force_flush=True)
         return {"status": "success", "content": [{"text": "\n\n".join(out)}]}
     except Exception as error:  # noqa: BLE001 - upstream's error envelope
         logger.error("Error in think tool: %s", error)

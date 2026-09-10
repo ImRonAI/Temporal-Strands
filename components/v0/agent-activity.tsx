@@ -1,7 +1,5 @@
 "use client"
 
-import NextImage from "next/image"
-
 import {
   isDynamicToolUIPart,
   isReasoningUIPart,
@@ -39,7 +37,6 @@ import {
   WrenchIcon,
 } from "lucide-react"
 
-import { Image } from "@/components/ai-elements/image"
 import { MessageResponse } from "@/components/ai-elements/message"
 import { cn } from "@/lib/utils"
 
@@ -143,10 +140,9 @@ import {
   parseDataObservation,
 } from "./data-observation"
 import { DataObservationPanel } from "./data-observation-panel"
-import {
-  COMPUTER_USE_TOOL_NAMES,
-  computerUseFields,
-} from "./computer-use"
+import { ComputerUseActivity, buildActivitySegments } from "./computer-use-activity"
+import { SkillAgent } from "./skill-agent"
+import type { SkillRunSnapshot } from "./skill-run"
 
 // Native Agent API tool payloads, forwarded verbatim by the orchestrator and
 // emitted as `data-native-tool` parts by app/api/orchestrator/route.ts. Field
@@ -789,113 +785,6 @@ function dynamicToolStatus(
     return "active"
   }
   return "complete"
-}
-
-function computerUseStepLabel(part: DynamicToolUIPart): string {
-  const { intent, action, url } = computerUseFields(part)
-  const label = intent || action.replaceAll("_", " ") || part.toolName
-  return url && action === "navigate" ? `${label}: ${url}` : label
-}
-
-/** One Task per computer-use run; steps are TaskItems (native task.tsx pattern). */
-function ComputerUseTask({
-  parts,
-  isThinking,
-}: {
-  parts: DynamicToolUIPart[]
-  isThinking: boolean
-}) {
-  const running = isThinking && parts.some((p) => dynamicToolStatus(p, true) === "active")
-  const active = running || isThinking
-  const [open, setOpen] = useState(active)
-  const [seenActive, setSeenActive] = useState(active)
-  if (active !== seenActive) {
-    setSeenActive(active)
-    if (active) setOpen(true)
-  }
-  return (
-    <Task
-      className="app-glass app-glass-edge"
-      open={open}
-      onOpenChange={setOpen}
-    >
-      <TaskTrigger title="Computer use">
-        <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
-          {stepIcon("monitor", { active })}
-          <p className="text-sm">Computer use</p>
-          <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
-        </div>
-      </TaskTrigger>
-      <TaskContent>
-        {parts.map((part) => {
-          const { screenshot, screenshotUrl } = computerUseFields(part)
-          const label = computerUseStepLabel(part)
-          const status = part.state === "output-error" ? "Failed"
-            : part.state === "output-available" ? "Completed"
-            : part.state === "approval-requested" ? "Awaiting approval"
-            : "Running"
-          return (
-            <div key={part.toolCallId} className="space-y-2" data-computer-action={part.toolCallId}>
-              <TaskItem>{label} <span className="text-xs text-muted-foreground">{status}</span></TaskItem>
-              {screenshotUrl ? (
-                <ChainOfThoughtImage caption={label}>
-                  <NextImage alt={label} src={screenshotUrl} width={1440} height={900}
-                    unoptimized className="h-auto max-w-full rounded-md" />
-                </ChainOfThoughtImage>
-              ) : screenshot ? (
-                <ChainOfThoughtImage caption={label}>
-                  <Image
-                    alt={label}
-                    base64={screenshot.base64}
-                    mediaType={screenshot.mediaType}
-                    uint8Array={new Uint8Array()}
-                  />
-                </ChainOfThoughtImage>
-              ) : null}
-              {part.state === "output-error" ? (
-                <p className="text-destructive text-xs">{part.errorText}</p>
-              ) : null}
-            </div>
-          )
-        })}
-      </TaskContent>
-    </Task>
-  )
-}
-
-type ActivitySegment =
-  | { kind: "single"; part: UIMessage["parts"][number]; index: number }
-  | { kind: "computer-use"; parts: DynamicToolUIPart[] }
-
-function buildActivitySegments(parts: UIMessage["parts"]): ActivitySegment[] {
-  const segments: ActivitySegment[] = []
-  let i = 0
-  while (i < parts.length) {
-    const part = parts[i]
-    if (
-      isDynamicToolUIPart(part) &&
-      part.toolName !== "think" &&
-      COMPUTER_USE_TOOL_NAMES.has(part.toolName)
-    ) {
-      const group: DynamicToolUIPart[] = []
-      while (i < parts.length) {
-        const current = parts[i]
-        if (
-          !isDynamicToolUIPart(current) ||
-          !COMPUTER_USE_TOOL_NAMES.has(current.toolName)
-        ) {
-          break
-        }
-        group.push(current)
-        i++
-      }
-      segments.push({ kind: "computer-use", parts: group })
-      continue
-    }
-    segments.push({ kind: "single", part, index: i })
-    i++
-  }
-  return segments
 }
 
 // Search results — every search-shaped native renders as the Chain of Thought
@@ -1881,6 +1770,13 @@ export function AgentActivity({
   const thinkParts = dynamicTools.filter((p) => p.toolName === "think")
   const toolParts = dynamicTools.filter((p) => p.toolName !== "think")
   const reasoningText = reasoningParts.map((p) => p.text).join("")
+  const skillRuns = new Map<string, SkillRunSnapshot>()
+  for (const part of parts) {
+    if (part.type === "data-skill-run") {
+      const run = part.data as SkillRunSnapshot
+      skillRuns.set(run.toolUseId, run)
+    }
+  }
   // Native Agent API server-side tools: web/people/finance search, URL fetch,
   // sandbox execution, MCP calls, and shared files.
   const nativeTools = parts.filter(
@@ -1911,7 +1807,8 @@ export function AgentActivity({
     toolParts.length === 0 &&
     thinkParts.length === 0 &&
     nativeTools.length === 0 &&
-    agentRuns.length === 0
+    agentRuns.length === 0 &&
+    skillRuns.size === 0
   ) {
     if (!isThinking) return null
     return (
@@ -1935,7 +1832,7 @@ export function AgentActivity({
     [...runByChainKey.values()].map((run) => run.activityId)
   )
 
-  const segments = buildActivitySegments(parts)
+  const segments = buildActivitySegments(parts, isThinking)
 
   return (
     <ChainOfThought
@@ -1949,11 +1846,11 @@ export function AgentActivity({
     >
       <ChainOfThoughtHeader>{isThinking ? "Thinking…" : "Chain of Thought"}</ChainOfThoughtHeader>
       <ChainOfThoughtContent>
-        {segments.map((segment, segmentIndex) => {
+        {segments.map((segment) => {
           if (segment.kind === "computer-use") {
             return (
-              <ComputerUseTask
-                key={`computer-use-${segment.parts[0]?.toolCallId ?? segmentIndex}`}
+              <ComputerUseActivity
+                key={`computer-use-${segment.index}`}
                 parts={segment.parts}
                 isThinking={isThinking}
               />
@@ -1962,6 +1859,13 @@ export function AgentActivity({
 
           const part = segment.part
           const i = segment.index
+
+          if (part.type === "data-skill-run") {
+            const run = part.data as SkillRunSnapshot
+            if (dynamicTools.some(tool => tool.toolName === "use_skill" && tool.toolCallId === run.toolUseId)) return null
+            return <SkillAgent key={`skill-${run.toolUseId}`} run={skillRuns.get(run.toolUseId)} isThinking={isThinking}
+              renderNative={event => <NativeToolStep native={event as NativeTool} />} />
+          }
 
           // GWEN-6: route.ts emits one reconciled data-retry part (stable id
           // "retry") when the workflow's model retry policy re-runs a turn.
@@ -2019,6 +1923,10 @@ export function AgentActivity({
           }
 
           if (isDynamicToolUIPart(part)) {
+            if (part.toolName === "use_skill") {
+              return <SkillAgent key={part.toolCallId} part={part} run={skillRuns.get(part.toolCallId)} isThinking={isThinking}
+                renderNative={event => <NativeToolStep native={event as NativeTool} />} />
+            }
             if (part.toolName === "think") {
               if (part.state === "output-error") {
                 return (

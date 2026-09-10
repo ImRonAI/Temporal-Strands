@@ -22,11 +22,17 @@ from temporalio import activity
 from temporalio.client import Client
 from temporalio.contrib.strands import StrandsPlugin
 from temporalio.exceptions import ApplicationError
-from temporalio.testing import WorkflowEnvironment
+from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 import load_tool as load_tool_module
-from load_tool import STRANDS_TOOLS_DIR, mcp_client_activity, run_loaded_tool
+import think_activity
+from load_tool import (
+    STRANDS_TOOLS_DIR,
+    load_tool_activity,
+    mcp_client_activity,
+    run_loaded_tool,
+)
 from workflow import ChatInput, ChatWorkflow, TurnInput, mcp_client_factories
 
 os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
@@ -108,6 +114,30 @@ def tool_use_events(tool_use_id: str, name: str, arguments: dict[str, Any]) -> l
     ]
 
 
+def test_strands_tools_dir_is_the_installed_package_not_a_symlink_farm() -> None:
+    """``load_tool`` resolves against the installed ``strands_tools`` package.
+
+    The former ``orchestrator/tools/`` symlink farm is gone; the search root is
+    the package directory itself (todo 8).
+    """
+    import strands_tools
+
+    assert STRANDS_TOOLS_DIR == Path(strands_tools.__file__).resolve().parent
+    assert (STRANDS_TOOLS_DIR / "calculator.py").is_file()
+    assert not (Path(__file__).resolve().parents[1] / "tools").exists()
+
+
+@pytest.mark.asyncio
+async def test_load_tool_activity_rejects_a_missing_file() -> None:
+    """A nonexistent path fails fast as an ApplicationError, never a hang."""
+    env = ActivityEnvironment()
+    with pytest.raises(ApplicationError) as excinfo:
+        await env.run(load_tool_activity, "does/not/exist.py", "x")
+    message = str(excinfo.value)
+    assert "Failed to load tool" in message
+    assert "does/not/exist.py" in message
+
+
 def test_loaded_tool_activity_options_satisfy_temporal_timeout_rule() -> None:
     """Temporal requires start_to_close or schedule_to_close on every activity.
 
@@ -137,7 +167,13 @@ async def client() -> AsyncGenerator[Client, None]:
             env.client,
             task_queue=TASK_QUEUE,
             workflows=[ChatWorkflow],
-            activities=[run_loaded_tool, mcp_client_activity, stub_list_agent_models],
+            activities=[
+                load_tool_activity,
+                run_loaded_tool,
+                mcp_client_activity,
+                stub_list_agent_models,
+                think_activity.think,
+            ],
             workflow_runner=UnsandboxedWorkflowRunner(),
         )
         async with worker:
@@ -244,6 +280,47 @@ async def test_load_tool_file_read_runs_as_activity(
     assert "file_read" in types
     messages = await handle.query(ChatWorkflow.messages)
     assert any(FILE_READ_MARKER in text for text in tool_result_texts(messages))
+
+    await handle.signal(ChatWorkflow.end_chat)
+    await handle.result()
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_load_tool_hot_loads_calculator_by_bare_name(client: Client) -> None:
+    """``load_tool`` runs as an activity and resolves a bare module name.
+
+    No ``orchestrator/tools/`` copy exists any more: ``path="calculator"``
+    resolves inside the installed ``strands_tools`` package (todo 7 + 8).
+    """
+    handle = await start_session(client, "hot-load-calculator")
+
+    SCRIPTS.append(
+        tool_use_events(
+            "load-calc",
+            "load_tool",
+            {"path": "calculator", "name": "calculator"},
+        )
+    )
+    SCRIPTS.append(text_events("loaded calculator"))
+    assert (
+        await handle.execute_update(
+            ChatWorkflow.turn, TurnInput(prompt="load calculator")
+        )
+        == "loaded calculator"
+    )
+    # load_tool itself must have run off-workflow, as a Temporal activity.
+    assert "load_tool" in scheduled_activity_types(await handle.fetch_history())
+
+    SCRIPTS.append(tool_use_events("calc-1", "calculator", {"expression": "17 * 3"}))
+    SCRIPTS.append(text_events("calculated"))
+    assert (
+        await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="17 * 3"))
+        == "calculated"
+    )
+
+    assert "calculator" in scheduled_activity_types(await handle.fetch_history())
+    messages = await handle.query(ChatWorkflow.messages)
+    assert any("51" in text for text in tool_result_texts(messages))
 
     await handle.signal(ChatWorkflow.end_chat)
     await handle.result()

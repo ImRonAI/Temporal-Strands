@@ -1,0 +1,54 @@
+TASK 11 — turn-stream pump: direct subscription iteration (no queue/consumer/drain)
+date: 2026-09-09T07:10:53Z
+
+== SDK FACT ==
+.venv/lib/python3.13/site-packages/temporalio/contrib/workflow_streams/_client.py:487-612
+subscribe() returns ONLY on AcceptedUpdateCompletedWorkflow (:572-578), RPC
+timeout (:580-583), or terminal workflow status (:584-595). ChatWorkflow stays
+Running between turns => a per-turn pump must stop on update_handle.result(),
+never on iterator exhaustion.
+
+== FAILING-FIRST PROOF (old queue pump temporarily reinstated in current server.py) ==
+test_turn_subscribes_before_update_and_keeps_the_first_frame -> rc=1
+  E AssertionError: assert ['start_update', 'subscribe'] == ['subscribe', 'start_update']
+  (real bug: old pump created the consume() TASK first but subscribe() was not
+   called until that task was scheduled, i.e. AFTER start_update => lost early frames)
+test_turn_update_failure_closes_subscription_not_the_workflow -> rc=1
+  E AssertionError: the pump must aclose() the subscription it opened
+test_turn_pump_iterates_the_subscription_directly -> rc=1
+  E AssertionError: asyncio.Queue still present in server.py
+
+== ACCEPTANCE GREP ==
+$ grep -n "asyncio.Queue\|asyncio.sleep(0.2)\|def consume" orchestrator/server.py
+(no output above; match count below)
+count = 0
+
+== GATE: tests/test_server.py ==
+$ cd orchestrator && .venv/bin/python -m pytest tests/test_server.py -q
+............................                                             [100%]
+28 passed in 2.60s
+
+== GATE: full suite ==
+$ cd orchestrator && .venv/bin/python -m pytest tests -q
+FAILED tests/test_framework_adherence.py::test_f_no_timedelta_outside_config
+FAILED tests/test_framework_adherence.py::test_h_no_empty_except_handler - Fa...
+FAILED tests/test_hot_load.py::test_load_tool_file_read_runs_as_activity - As...
+FAILED tests/test_hot_load.py::test_load_tool_hot_loads_calculator_by_bare_name
+FAILED tests/test_hot_load.py::test_load_tool_survives_continue_as_new - Asse...
+FAILED tests/test_run_worker.py::test_perplexity_client_pins_base_url_and_retries
+FAILED tests/test_workflow.py::test_browser_survives_handoff_rollover - Asser...
+8 failed, 714 passed, 5 warnings in 23.12s
+
+Pre-existing failures, all owned by concurrent lanes; none touch server.py:
+  test_framework_adherence f -> orchestrator/compare_workflow.py:81 (timedelta literal)
+  test_framework_adherence h -> orchestrator/graph_activity.py:579 (bare except pass)
+  test_browser_activity / test_hot_load x3 / test_run_worker / test_workflow -> other lanes
+(the announced test_catalog_workflow collection error did not reproduce this run)
+
+== ADVERSARIAL ==
+cancel/resume: finally block cancels only anext_task + the client-side result waiter
+  and awaits subscription.aclose(); handle.cancel is never called. Pinned by
+  handle.cancel.assert_not_called() in both new tests.
+hung commands: every pytest invocation ran under an explicit background kill -9
+  watchdog; fake subscriptions that block forever (TrackedSubscription(block=True))
+  are terminated by the update result, not by the test timing out.

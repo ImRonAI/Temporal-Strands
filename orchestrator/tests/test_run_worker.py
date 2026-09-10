@@ -1,4 +1,4 @@
-"""run_worker model-factory assembly, params, and readiness. No network.
+"""run_worker model-factory assembly, params, and catalog registration. No network.
 
 Run from inside orchestrator/ (no conftest.py):
 
@@ -7,7 +7,7 @@ Run from inside orchestrator/ (no conftest.py):
 
 from __future__ import annotations
 
-import json
+import ast
 import sys
 from pathlib import Path
 from typing import Any
@@ -58,6 +58,46 @@ def _patch_catalog(monkeypatch: pytest.MonkeyPatch, ids: list[str]) -> None:
     monkeypatch.setattr(run_worker, "fetch_model_ids", fake_fetch)
 
 
+# --- provider-declaring catalog --------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_catalog_declares_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every registered id carries a declared provider; Gemini ids are google-ai-studio."""
+    from config import (
+        PROVIDER_GOOGLE_AI_STUDIO,
+        PROVIDER_PERPLEXITY_AGENT_API,
+        RegisteredModel,
+    )
+
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "pplx-test")
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-test")
+    _patch_catalog(monkeypatch, CATALOG_IDS)
+
+    factories, catalog, default_model = await run_worker.assemble_model_factories()
+
+    assert default_model == DEFAULT_MODEL_ID
+    # 6 presets + 3 catalog ids + 3 Gemini ids, in registration order.
+    assert len(catalog) == len(PRESET_IDS) + len(SORTED_CATALOG) + len(GEMINI_MODEL_IDS)
+    assert [entry.id for entry in catalog] == list(factories)
+
+    known_providers = {PROVIDER_PERPLEXITY_AGENT_API, PROVIDER_GOOGLE_AI_STUDIO}
+    for entry in catalog:
+        assert isinstance(entry, RegisteredModel)
+        assert entry.provider in known_providers
+        assert entry.label
+
+    by_id = {entry.id: entry for entry in catalog}
+    for preset_id in PRESET_IDS:
+        assert by_id[preset_id].provider == PROVIDER_PERPLEXITY_AGENT_API
+        assert by_id[preset_id].label.endswith("(preset)")
+    for catalog_id in SORTED_CATALOG:
+        assert by_id[catalog_id].provider == PROVIDER_PERPLEXITY_AGENT_API
+        assert by_id[catalog_id].label == catalog_id
+    for gemini_id in GEMINI_MODEL_IDS:
+        assert by_id[gemini_id].provider == PROVIDER_GOOGLE_AI_STUDIO
+
+
 # --- factory union and order ---------------------------------------------------
 
 
@@ -67,7 +107,7 @@ async def test_factory_union_order_and_default(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("GOOGLE_API_KEY", "google-test")
     _patch_catalog(monkeypatch, CATALOG_IDS)
 
-    factories, default_model = await run_worker.assemble_model_factories()
+    factories, _catalog, default_model = await run_worker.assemble_model_factories()
 
     assert list(factories) == [*PRESET_IDS, *SORTED_CATALOG, *GEMINI_MODEL_IDS]
     assert default_model == DEFAULT_MODEL_ID == "preset:high"
@@ -89,10 +129,15 @@ async def test_perplexity_client_pins_base_url_and_retries(
     monkeypatch.setenv("PERPLEXITY_BASE_URL", "https://api.perplexity.ai/router")
     _patch_catalog(monkeypatch, CATALOG_IDS)
 
-    factories, _ = await run_worker.assemble_model_factories()
+    factories, _catalog, _default = await run_worker.assemble_model_factories()
     model = factories["preset:high"]()
-    assert str(model.client.base_url).rstrip("/") == "https://api.perplexity.ai"
-    assert model.client.max_retries == 0
+    # PerplexityModel resolves its own client args per request; the pinned base
+    # URL and max_retries=0 live there, not in a preconstructed SDK client.
+    client_args = model._resolve_client_args()
+    assert client_args["base_url"] == "https://api.perplexity.ai/v1"
+    assert client_args["max_retries"] == 0
+    assert client_args["api_key"] == "pplx-test"
+    assert "api_key" not in model.get_config()
 
 
 # --- model params ---------------------------------------------------------------
@@ -264,7 +309,7 @@ async def test_missing_perplexity_key_registers_gemini_only(
 ) -> None:
     monkeypatch.setenv("GOOGLE_API_KEY", "google-test")
 
-    factories, default_model = await run_worker.assemble_model_factories()
+    factories, _catalog, default_model = await run_worker.assemble_model_factories()
     assert list(factories) == list(GEMINI_MODEL_IDS)
     assert default_model == GEMINI_MODEL_IDS[0]
 
@@ -276,7 +321,7 @@ async def test_missing_gemini_key_registers_perplexity_only(
     monkeypatch.setenv("PERPLEXITY_API_KEY", "pplx-test")
     _patch_catalog(monkeypatch, CATALOG_IDS)
 
-    factories, default_model = await run_worker.assemble_model_factories()
+    factories, _catalog, default_model = await run_worker.assemble_model_factories()
     assert list(factories) == [*PRESET_IDS, *SORTED_CATALOG]
     assert default_model == "preset:high"
 
@@ -292,7 +337,7 @@ async def test_catalog_failure_degrades_to_presets_only(
 
     monkeypatch.setattr(run_worker, "fetch_model_ids", broken_fetch)
 
-    factories, default_model = await run_worker.assemble_model_factories()
+    factories, _catalog, default_model = await run_worker.assemble_model_factories()
     assert list(factories) == PRESET_IDS
     assert default_model == "preset:high"
 
@@ -314,6 +359,40 @@ def test_workflow_tool_specs_include_all_registered_tools() -> None:
 
 def test_validate_outbound_tools_accepts_current_registry() -> None:
     run_worker.validate_outbound_tools()  # must not raise
+
+
+# --- installed strands_tools package (no symlink farm) --------------------------
+
+
+def test_worker_has_no_symlink_farm_bootstrap() -> None:
+    """The ``orchestrator/tools/`` symlink farm and its bootstrap are gone.
+
+    ``strands_tools`` is consumed as the installed package; ``load_tool``
+    resolves module names inside it (todo 8).
+    """
+    assert not hasattr(run_worker, "ensure_strands_tools_dir")
+    assert not hasattr(run_worker, "_SKIP_COMMUNITY_FILES")
+    assert not (run_worker._ROOT / "tools").exists()
+    source = (run_worker._ROOT / "run_worker.py").read_text(encoding="utf-8")
+    assert "ensure_strands_tools_dir" not in source
+    assert "_SKIP_COMMUNITY_FILES" not in source
+
+
+def test_worker_activities_register_the_public_load_tool_activity() -> None:
+    """The worker boots with ``load_tool`` as a registered Temporal activity."""
+    from temporalio import activity
+
+    from load_tool import load_tool_activity
+
+    names = {
+        defn.name
+        for defn in (
+            activity._Definition.from_callable(fn) for fn in run_worker.WORKER_ACTIVITIES
+        )
+        if defn is not None
+    }
+    assert "load_tool" in names
+    assert load_tool_activity in run_worker.WORKER_ACTIVITIES
 
 
 def test_validate_outbound_tools_rejects_bad_spec(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -339,20 +418,72 @@ def test_validate_outbound_tools_rejects_unserializable(monkeypatch: pytest.Monk
         run_worker.validate_outbound_tools()
 
 
-# --- readiness ------------------------------------------------------------------
+# --- Temporal-native catalog registration ---------------------------------------
+# The custom JSON readiness lease is gone: liveness is DescribeTaskQueue and the
+# catalog is served by ModelCatalogWorkflow + the model_catalog activity. These
+# checks read run_worker.main's own AST, so no worker/Temporal is started.
 
 
-def test_write_readiness_includes_models_order_and_default(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    readiness = tmp_path / "worker-readiness.json"
-    monkeypatch.setattr(run_worker, "READINESS_PATH", readiness)
+def _main_worker_call() -> ast.Call:
+    tree = ast.parse(Path(run_worker.__file__).read_text(encoding="utf-8"))
+    main = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "main"
+    )
+    for node in ast.walk(main):
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == "Worker":
+            return node
+    raise AssertionError("run_worker.main does not construct a Worker")
 
-    model_ids = [*PRESET_IDS, *SORTED_CATALOG, *GEMINI_MODEL_IDS]
-    run_worker.write_readiness(model_ids, "Gwen", "preset:high")
 
-    record = json.loads(readiness.read_text())
-    assert record["models"] == model_ids
-    assert record["default_model"] == "preset:high"
-    assert record["agent"] == "Gwen"
-    assert record["task_queue"] == "perplexity-orchestrator"
+def _kwarg_elements(call: ast.Call, name: str) -> list[str]:
+    for keyword in call.keywords:
+        if keyword.arg == name:
+            assert isinstance(keyword.value, ast.List), f"{name} must be a list literal"
+            return [ast.unparse(element) for element in keyword.value.elts]
+    raise AssertionError(f"Worker(...) has no {name}= argument")
+
+
+def test_worker_registers_model_catalog_workflow_and_activity() -> None:
+    call = _main_worker_call()
+    assert "ModelCatalogWorkflow" in _kwarg_elements(call, "workflows")
+    from temporalio import activity
+
+    from catalog_workflow import model_catalog
+
+    assert model_catalog in run_worker.WORKER_ACTIVITIES
+    assert (
+        activity._Definition.from_callable(model_catalog).name == "model_catalog"
+    )
+
+
+def test_worker_installs_the_boot_catalog() -> None:
+    source = Path(run_worker.__file__).read_text(encoding="utf-8")
+    assert "set_catalog(model_catalog" in source or "set_catalog(" in source
+    tree = ast.parse(source)
+    main = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "main"
+    )
+    calls = [
+        ast.unparse(node.func)
+        for node in ast.walk(main)
+        if isinstance(node, ast.Call)
+    ]
+    assert any(name.endswith("set_catalog") for name in calls), calls
+
+
+def test_no_readiness_lease_symbols_remain() -> None:
+    """Nothing named for the deleted JSON lease survives in run_worker.
+
+    Catches the whole family at once (the writer, the heartbeat task, the
+    ownership-scoped cleanup, and the file path) rather than a fixed list, so a
+    partially-reverted lease cannot slip back in under a new name.
+    """
+    leftovers = [name for name in vars(run_worker) if "readiness" in name.lower()]
+    assert leftovers == [], (
+        f"run_worker still exposes {leftovers}; the JSON lease is replaced by "
+        f"Temporal-native liveness + ModelCatalogWorkflow"
+    )

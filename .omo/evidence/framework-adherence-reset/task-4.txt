@@ -1,0 +1,267 @@
+=== Task 4: _ThinkFirstHook re-expressed on activity_as_hook ===
+
+--- grep -n execute_activity orchestrator/workflow.py ---
+247:    execute = executor or workflow.execute_activity
+701:      ``ThinkInput``. The hook carries no ``workflow.execute_activity`` call of
+
+(only non-hook site: render_agent_api_models, a ContextInjector render callable — not a HookProvider)
+
+--- grep -c activity_as_hook orchestrator/workflow.py ---
+4
+
+=== Gate 1: think_hook + think_activity + config ===
+............................                                             [100%]
+28 passed in 0.96s
+
+=== Gate 2: test_workflow.py (needs temporal CLI) ===
+...F..........                                                           [100%]
+=================================== FAILURES ===================================
+____________________ test_browser_survives_handoff_rollover ____________________
+
+client = <temporalio.client._client.Client object at 0x1168afd90>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x116a9aad0>
+tmp_path = PosixPath('/private/var/folders/c8/y41r0sp91172dqm_0jk3wcww0000gn/T/pytest-of-tims-stuff/pytest-67/test_browser_survives_handoff_0')
+
+    @pytest.mark.asyncio(loop_scope="module")
+    async def test_browser_survives_handoff_rollover(client: Client, monkeypatch, tmp_path) -> None:
+        import json
+    
+        monkeypatch.setenv("STRANDS_BROWSER_HEADLESS", "true")
+        monkeypatch.setenv("STRANDS_BROWSER_USER_DATA_DIR", str(tmp_path))
+        handle = await start_session(client, "chat-real-browser-handoff")
+        session = "browser-handoff-session"
+        SCRIPTS.extend([
+            browser_events("create", {"type": "init_session", "session_name": session, "description": "Handoff test"}),
+            browser_events("before", {"type": "execute_cdp", "session_name": session, "method": "Target.getTargetInfo"}),
+            text_events("ready for user"),
+        ])
+        await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="Open browser"))
+    
+        def target_id(messages):
+            results = [block["toolResult"] for message in messages for block in message["content"] if "toolResult" in block]
+            for result in reversed(results):
+                envelope = json.loads(result["content"][0]["text"])
+                content = envelope.get("content", [])
+                if content and "text" in content[0] and "targetInfo" in content[0]["text"]:
+                    return json.loads(content[0]["text"])["targetInfo"]["targetId"]
+            raise AssertionError("No native target result")
+    
+>       before = target_id(await handle.query(ChatWorkflow.messages))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_workflow.py:400: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+messages = [{'content': [{'text': 'Open browser'}, {'text': '\n\n<think_notes>\nCycle 1/1:\nscripted think notes\n</think_notes>'...age': {'inputTokens': 1, 'outputTokens': 1, 'totalTokens': 2}, 'metrics': {'latencyMs': 1, 'timeToFirstByteMs': 224}}}]
+
+    def target_id(messages):
+        results = [block["toolResult"] for message in messages for block in message["content"] if "toolResult" in block]
+        for result in reversed(results):
+            envelope = json.loads(result["content"][0]["text"])
+            content = envelope.get("content", [])
+            if content and "text" in content[0] and "targetInfo" in content[0]["text"]:
+                return json.loads(content[0]["text"])["targetInfo"]["targetId"]
+>       raise AssertionError("No native target result")
+E       AssertionError: No native target result
+
+tests/test_workflow.py:398: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+Tool #1: browser
+
+Tool #2: browser
+ready for user
+------------------------------ Captured log call -------------------------------
+WARNING  strands.tools.mcp.mcp_client:mcp_client.py:218 server_name=<datacommons>, error=<environment variable 'DATACOMMONS_MCP_URL' is not set> | MCP server config failed, skipping
+WARNING  strands.tools.mcp.mcp_client:mcp_client.py:218 server_name=<pophive>, error=<environment variable 'POPHIVE_MCP_URL' is not set> | MCP server config failed, skipping
+=========================== short test summary info ============================
+FAILED tests/test_workflow.py::test_browser_survives_handoff_rollover - Asser...
+1 failed, 13 passed in 10.81s
+
+=== Gate 3: full suite (ignoring test_catalog_workflow.py, another lane's known collection failure) ===
+..F..................................................................... [ 10%]
+........................................................................ [ 20%]
+........................................................................ [ 30%]
+................F.F..................................................... [ 40%]
+........................................................................ [ 50%]
+........................................................................ [ 60%]
+........................................................................ [ 70%]
+......................................................F................. [ 80%]
+........................................................................ [ 90%]
+......................................................................   [100%]
+=================================== FAILURES ===================================
+______________ test_native_browser_runs_through_temporal_activity ______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x11a4d5cd0>
+tmp_path = PosixPath('/private/var/folders/c8/y41r0sp91172dqm_0jk3wcww0000gn/T/pytest-of-tims-stuff/pytest-68/test_native_browser_runs_throu0')
+
+    @pytest.mark.asyncio
+    async def test_native_browser_runs_through_temporal_activity(monkeypatch, tmp_path) -> None:
+        from browser_activity import browser_activity
+    
+        monkeypatch.setenv("STRANDS_BROWSER_HEADLESS", "true")
+        monkeypatch.setenv("STRANDS_BROWSER_USER_DATA_DIR", str(tmp_path))
+        async with await WorkflowEnvironment.start_local() as env:
+            client = await Client.connect(
+                env.client.service_client.config.target_host,
+                plugins=[StrandsPlugin(models={})],
+            )
+            queue = f"browser-test-{uuid4()}"
+            async with Worker(
+                client,
+                task_queue=queue,
+                workflows=[BrowserToolWorkflow],
+                activities=[browser_activity],
+                workflow_runner=UnsandboxedWorkflowRunner(),
+            ):
+                result = await client.execute_workflow(
+                    BrowserToolWorkflow.run,
+                    id=f"browser-test-{uuid4()}",
+                    task_queue=queue,
+                    execution_timeout=timedelta(seconds=60),
+                )
+>       assert result == ["success"] * 4
+E       AssertionError: assert ['error', 'er...r', 'success'] == ['success', '...s', 'success']
+E         
+E         At index 0 diff: 'error' != 'success'
+E         Use -v to get more diff
+
+tests/test_browser_activity.py:101: AssertionError
+----------------------------- Captured stdout call -----------------------------
+Temporal CLI 1.8.3 (Server 1.31.2, UI 2.50.1)
+
+Temporal Server:      localhost:56878
+Temporal Persistence: in-memory
+Temporal Metrics:     http://localhost:56879/metrics
+______________________ test_f_no_timedelta_outside_config ______________________
+
+    def test_f_no_timedelta_outside_config() -> None:
+        for path in _source_modules():
+            if path.name == "config.py":
+                continue
+            tree = _parse(path)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                fn = ast.unparse(node.func)
+                if fn == "timedelta" or fn == "datetime.timedelta":
+>                   pytest.fail(
+                        f"(f) {_file_label(path)}:{node.lineno} timedelta literal "
+                        f"outside config.py; move the constant to config.py and "
+                        f"reference it"
+                    )
+E                   Failed: (f) orchestrator/compare_workflow.py:81 timedelta literal outside config.py; move the constant to config.py and reference it
+
+tests/test_framework_adherence.py:214: Failed
+________________________ test_h_no_empty_except_handler ________________________
+
+    def test_h_no_empty_except_handler() -> None:
+        for path in _source_modules():
+            tree = _parse(path)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ExceptHandler):
+                    continue
+                if len(node.body) == 1 and isinstance(node.body[0], ast.Pass):
+>                   pytest.fail(
+                        f"(h) {_file_label(path)}:{node.lineno} empty except "
+                        f"handler (bare `pass`); handle the error or propagate it"
+                    )
+E                   Failed: (h) orchestrator/graph_activity.py:579 empty except handler (bare `pass`); handle the error or propagate it
+
+tests/test_framework_adherence.py:252: Failed
+____________________ test_browser_survives_handoff_rollover ____________________
+
+client = <temporalio.client._client.Client object at 0x11d053df0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x11d225160>
+tmp_path = PosixPath('/private/var/folders/c8/y41r0sp91172dqm_0jk3wcww0000gn/T/pytest-of-tims-stuff/pytest-68/test_browser_survives_handoff_0')
+
+    @pytest.mark.asyncio(loop_scope="module")
+    async def test_browser_survives_handoff_rollover(client: Client, monkeypatch, tmp_path) -> None:
+        import json
+    
+        monkeypatch.setenv("STRANDS_BROWSER_HEADLESS", "true")
+        monkeypatch.setenv("STRANDS_BROWSER_USER_DATA_DIR", str(tmp_path))
+        handle = await start_session(client, "chat-real-browser-handoff")
+        session = "browser-handoff-session"
+        SCRIPTS.extend([
+            browser_events("create", {"type": "init_session", "session_name": session, "description": "Handoff test"}),
+            browser_events("before", {"type": "execute_cdp", "session_name": session, "method": "Target.getTargetInfo"}),
+            text_events("ready for user"),
+        ])
+        await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="Open browser"))
+    
+        def target_id(messages):
+            results = [block["toolResult"] for message in messages for block in message["content"] if "toolResult" in block]
+            for result in reversed(results):
+                envelope = json.loads(result["content"][0]["text"])
+                content = envelope.get("content", [])
+                if content and "text" in content[0] and "targetInfo" in content[0]["text"]:
+                    return json.loads(content[0]["text"])["targetInfo"]["targetId"]
+            raise AssertionError("No native target result")
+    
+>       before = target_id(await handle.query(ChatWorkflow.messages))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_workflow.py:400: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+messages = [{'content': [{'text': 'Open browser'}, {'text': '\n\n<think_notes>\nCycle 1/1:\nscripted think notes\n</think_notes>'...age': {'inputTokens': 1, 'outputTokens': 1, 'totalTokens': 2}, 'metrics': {'latencyMs': 1, 'timeToFirstByteMs': 221}}}]
+
+    def target_id(messages):
+        results = [block["toolResult"] for message in messages for block in message["content"] if "toolResult" in block]
+        for result in reversed(results):
+            envelope = json.loads(result["content"][0]["text"])
+            content = envelope.get("content", [])
+            if content and "text" in content[0] and "targetInfo" in content[0]["text"]:
+                return json.loads(content[0]["text"])["targetInfo"]["targetId"]
+>       raise AssertionError("No native target result")
+E       AssertionError: No native target result
+
+tests/test_workflow.py:398: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+Tool #1: browser
+
+Tool #2: browser
+ready for user
+=============================== warnings summary ===============================
+tests/test_hot_load.py: 9 warnings
+tests/test_mcp_shell.py: 1 warning
+  /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands_tools/load_tool.py:222: DeprecationWarning: load_tool_from_filepath is deprecated and will be removed in Strands SDK 2.0. `process_tools` automatically handles loading tools from a filepath.
+    current_agent.tool_registry.load_tool_from_filepath(tool_name=name, tool_path=path)
+
+tests/test_hot_load.py: 9 warnings
+tests/test_mcp_shell.py: 1 warning
+  /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/tools/registry.py:186: DeprecationWarning: ToolLoader.load_tools is deprecated and will be removed in Strands SDK 2.0. Use the `load_tools_from_string` or `load_tools_from_module` methods instead.
+    loaded_tools = ToolLoader.load_tools(tool_path, tool_name)
+
+tests/test_hot_load.py: 9 warnings
+tests/test_mcp_shell.py: 1 warning
+  /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/tools/loader.py:346: DeprecationWarning: ToolLoader.load_python_tool is deprecated and will be removed in Strands SDK 2.0. Use the `load_tools_from_string` or `load_tools_from_module` methods instead.
+    return cls.load_python_tools(abs_path, tool_name)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_browser_activity.py::test_native_browser_runs_through_temporal_activity
+FAILED tests/test_framework_adherence.py::test_f_no_timedelta_outside_config
+FAILED tests/test_framework_adherence.py::test_h_no_empty_except_handler - Fa...
+FAILED tests/test_workflow.py::test_browser_survives_handoff_rollover - Asser...
+4 failed, 714 passed, 30 warnings in 23.20s
+Failed to export span batch due to timeout, max retries or shutdown.
+Transient error HTTPSConnectionPool(host='collector.example', port=443): Max retries exceeded with url: /v1/traces?token=secret/v1/traces (Caused by NameResolutionError("HTTPSConnection(host='collector.example', port=443): Failed to resolve 'collector.example' ([Errno 8] nodename nor servname provided, or not known)")) encountered while exporting span batch, retrying in 1.09s.
+Transient error HTTPSConnectionPool(host='collector.example', port=443): Max retries exceeded with url: /v1/traces?token=secret/v1/traces (Caused by NameResolutionError("HTTPSConnection(host='collector.example', port=443): Failed to resolve 'collector.example' ([Errno 8] nodename nor servname provided, or not known)")) encountered while exporting span batch, retrying in 2.25s.
+Transient error HTTPSConnectionPool(host='collector.example', port=443): Max retries exceeded with url: /v1/traces?token=secret/v1/traces (Caused by NameResolutionError("HTTPSConnection(host='collector.example', port=443): Failed to resolve 'collector.example' ([Errno 8] nodename nor servname provided, or not known)")) encountered while exporting span batch, retrying in 3.83s.
+Failed to export span batch due to timeout, max retries or shutdown.
+
+=== ACCEPTANCE: test_framework_adherence.py check (e) ===
+============================= test session starts ==============================
+platform darwin -- Python 3.13.13, pytest-9.1.1, pluggy-1.6.0 -- /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 1 item
+
+tests/test_framework_adherence.py::test_e_no_execute_activity_in_hook_provider PASSED [100%]
+
+============================== 1 passed in 0.06s ===============================

@@ -41,8 +41,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import logging
-from datetime import timedelta
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
@@ -54,16 +52,18 @@ from strands.hooks.events import (
     BeforeInvocationEvent,
     BeforeModelCallEvent,
     BeforeToolCallEvent,
+    MessageAddedEvent,
 )
 from strands.types.content import Messages
 from strands.types.exceptions import EventLoopException
 from strands.types.interrupt import InterruptResponseContent
+from strands.tools.executors import SequentialToolExecutor
 from temporalio import workflow
-from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 from temporalio.contrib.strands import TemporalAgent, TemporalMCPClient
-from temporalio.contrib.strands.workflow import activity_as_tool
+from temporalio.contrib.strands.workflow import activity_as_hook, activity_as_tool
 from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamState
+from temporalio.contrib.workflow_streams._types import _decode_payload
 
 from config import (
     AGENT_CREATE_RETRY_POLICY,
@@ -72,6 +72,10 @@ from config import (
     AGENT_OPERATION_SCHEDULE_TO_CLOSE,
     AGENT_OPERATION_START_TO_CLOSE,
     BROWSER_RETRY_POLICY,
+    DESKTOP_BROWSER_TASK_QUEUE,
+    DESKTOP_MUTATION_TIMEOUT,
+    DESKTOP_TASK_TIMEOUT,
+    DESKTOP_HANDOFF_TIMEOUT,
     closable_activity_options,
     GRAPH_HEARTBEAT_TIMEOUT,
     GRAPH_RETRY_POLICY,
@@ -86,6 +90,10 @@ from config import (
     MODEL_RETRY_POLICY,
     MODEL_SCHEDULE_TO_CLOSE,
     MODEL_START_TO_CLOSE,
+    MODEL_STREAM_BATCH_INTERVAL,
+    THINK_HEARTBEAT_TIMEOUT,
+    THINK_RETRY_POLICY,
+    THINK_START_TO_CLOSE,
 )
 
 with workflow.unsafe.imports_passed_through():
@@ -95,25 +103,20 @@ with workflow.unsafe.imports_passed_through():
     from computer_use_activity import COMPUTER_USE_ACTIVITIES, COMPUTER_USE_TOOL_NAMES
     from graph_activity import graph_activity
     from load_tool import (
+        STRANDS_TOOLS_DIR,
+        load_tool_activity,
         mcp_client_activity,
         register_community_tool,
         tool_file_path,
         wrap_loaded_io_tool,
     )
+    from think_activity import ThinkInput
     from use_agent_activity import use_agent_activity
     from use_skill_activity import use_skill_activity
 
-    from strands import tool
     from strands.tools.mcp import MCPClient
     from strands.vended_plugins.context_injector import ContextInjector
-    from strands_tools.load_tool import load_tool
     from strands_tools import stop as native_stop
-
-    # Official load_tool is sync; Strands stream() uses asyncio.to_thread, which
-    # Temporal workflows block. Not in PERMANENT — swap at execution via hook.
-    @tool
-    async def _load_tool_workflow_exec(path: str, name: str, agent: Any = None) -> dict[str, Any]:
-        return load_tool._tool_func(path=tool_file_path(path), name=name, agent=agent)
 
 # Temporal validates that every activity carries start_to_close_timeout OR
 # schedule_to_close_timeout (_workflow_instance._outbound_schedule_activity).
@@ -150,11 +153,23 @@ _USE_AGENT_ACTIVITY_OPTIONS = dict(
     retry_policy=USE_AGENT_RETRY_POLICY,
 )
 
+_DESKTOP_ACTIVITY_OPTIONS = dict(
+    task_queue=DESKTOP_BROWSER_TASK_QUEUE,
+    start_to_close_timeout=DESKTOP_MUTATION_TIMEOUT,
+    schedule_to_close_timeout=DESKTOP_TASK_TIMEOUT,
+    retry_policy=BROWSER_RETRY_POLICY,
+    cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+)
+
 PERMANENT_COMMUNITY_TOOLS = (
-    load_tool,
+    # The official strands_tools load_tool, run on the worker as an activity
+    # (the official sync @tool cannot run inside a workflow).
+    activity_as_tool(load_tool_activity, **_MCP_ACTIVITY_OPTIONS),
+    # Stock strands browser, executed only by the desktop worker: Temporal
+    # routes this activity to the desktop task queue natively.
     activity_as_tool(
         browser_activity,
-        **{**_MCP_ACTIVITY_OPTIONS, "retry_policy": BROWSER_RETRY_POLICY},
+        **_DESKTOP_ACTIVITY_OPTIONS,
     ),
     activity_as_tool(mcp_client_activity, **_MCP_ACTIVITY_OPTIONS),
     activity_as_tool(graph_activity, **_GRAPH_ACTIVITY_OPTIONS),
@@ -163,17 +178,16 @@ PERMANENT_COMMUNITY_TOOLS = (
 )
 
 # The think activity streams nested-agent cycles on THINKING_TOPIC and
-# heartbeats per chunk. No THINK_* timeout constants exist in config.py yet,
-# so the envelope lives here: one attempt (a failed thought is re-thought by
-# the orchestrator, not blindly replayed), 10 minutes per attempt, and a
-# heartbeat window generous enough for slow model chunks.
-_THINK_ACTIVITY_OPTIONS = dict(
-    start_to_close_timeout=timedelta(minutes=10),
-    heartbeat_timeout=timedelta(minutes=2),
-    retry_policy=RetryPolicy(maximum_attempts=1),
+# heartbeats per chunk. The envelope lives in config.py: one attempt (a
+# failed thought is re-thought by the orchestrator, not blindly replayed),
+# 10 minutes per attempt, and a heartbeat window generous enough for slow
+# model chunks.
+THINK_TOOL = activity_as_tool(
+    think_activity.think,
+    start_to_close_timeout=THINK_START_TO_CLOSE,
+    heartbeat_timeout=THINK_HEARTBEAT_TIMEOUT,
+    retry_policy=THINK_RETRY_POLICY,
 )
-
-THINK_TOOL = activity_as_tool(think_activity.think, **_THINK_ACTIVITY_OPTIONS)
 
 # Perplexity Agent API sub-agent operations (perplexity_operations.py).
 # Background preset runs can research for many minutes; the AGENT_OPERATION_*
@@ -531,14 +545,36 @@ class _ToolResultHook(HookProvider):
 
     def __init__(self, publish: Any) -> None:
         self._publish = publish
+        self._recorded: set[str] = set()
 
     def register_hooks(self, registry: HookRegistry, **kwargs: object) -> None:
+        registry.add_callback(BeforeToolCallEvent, self._bind_skill_activity)
         registry.add_callback(AfterToolCallEvent, self._record)
+        registry.add_callback(MessageAddedEvent, self._reconcile)
+
+    def _reconcile(self, event: MessageAddedEvent) -> None:
+        # Sequential cancellation emits result messages without AfterToolCall.
+        for block in event.message.get("content", []):
+            result = block.get("toolResult")
+            if result and result["toolUseId"] not in self._recorded:
+                self._publish({"tool_use_id": result["toolUseId"],
+                               "status": result.get("status", "error"),
+                               "content": result.get("content", [])})
+        self._recorded.clear()
+
+    def _bind_skill_activity(self, event: BeforeToolCallEvent) -> None:
+        if event.tool_use.get("name") == "use_skill" and workflow.patched("skill-agent-stream-correlation-v1"):
+            # Native Temporal activity IDs correlate streamed skill frames with
+            # the caller's tool part, including concurrent calls to one skill.
+            event.selected_tool = activity_as_tool(
+                use_skill_activity, **{**_MCP_ACTIVITY_OPTIONS, "activity_id": event.tool_use["toolUseId"]}
+            )
 
     def _record(self, event: AfterToolCallEvent) -> None:
         result = event.result
         if not result:
             return
+        self._recorded.add(result.get("toolUseId", event.tool_use["toolUseId"]))
         if event.exception is not None and result.get("status") == "error":
             result = event.result = {
                 **result,
@@ -597,9 +633,6 @@ class _HotLoadHook(HookProvider):
         registry.add_callback(AfterToolCallEvent, self._after)
 
     def _before(self, event: BeforeToolCallEvent) -> None:
-        if event.tool_use.get("name") == "load_tool":
-            event.selected_tool = _load_tool_workflow_exec
-
         inp = event.tool_use.get("input") or {}
         if event.tool_use.get("name") != "mcp_client" or inp.get("action") != "load_tools":
             return
@@ -619,10 +652,23 @@ class _HotLoadHook(HookProvider):
         if name == "load_tool":
             path = inp.get("path")
             tool_name = inp.get("name")
+            # The activity tool's success envelope is serialized to text by
+            # TemporalActivityTool, so the official load_tool result lives
+            # inside the ToolResult content blocks, not on the event result.
+            result = result if result.get("status") == "success" else (
+                _tool_result_payload(result) or {}
+            )
             if result.get("status") != "success" or not path or not tool_name:
                 return
             path = tool_file_path(path)
-            wrap_loaded_io_tool(event.agent, tool_name, path)
+            if not Path(path).exists():
+                package = STRANDS_TOOLS_DIR / f"{tool_name}.py"
+                if package.is_file():
+                    path = str(package)
+            # Register the loaded file on the live agent and wrap it as an
+            # activity — the same call the continue-as-new rebuild makes
+            # (``register_community_tool`` = official load + wrap_loaded_io_tool).
+            register_community_tool(event.agent, path, tool_name)
             if not any(rec.name == tool_name for rec in self._loaded_tools):
                 self._loaded_tools.append(LoadedTool(path=path, name=tool_name))
             return
@@ -672,104 +718,115 @@ def _prompt_text_from_message(message: Any) -> str | None:
     return joined or None
 
 
-def _think_notes_text(result: Any) -> str:
-    """Joined content[].text of the think activity's returned dict."""
-    if not isinstance(result, dict):
-        return ""
-    parts: list[str] = []
-    for block in result.get("content") or []:
-        if isinstance(block, dict) and isinstance(block.get("text"), str):
-            parts.append(block["text"])
-    return "\n".join(parts).strip()
-
-
 class _ThinkFirstHook(HookProvider):
     """Runs the ``think`` activity BEFORE the model on each new user prompt.
 
-    Registered on ``BeforeInvocationEvent``: at hook time the new user message
-    is ``event.messages`` (not yet appended to ``agent.messages``), so folding
-    the think notes into the last message's content mutates exactly what the
-    model will see. ``HookRegistry.invoke_callbacks_async`` awaits coroutine
-    callbacks, and awaiting ``workflow.execute_activity`` inside an async hook
-    is the same pattern the SDK's own MCP refresh hook uses on
-    ``BeforeModelCallEvent`` — the hook itself is deterministic apart from the
-    activity call, so it is replay-safe.
+    Two callbacks, both deterministic apart from the dispatched activity:
+
+    - ``BeforeInvocationEvent`` → ``activity_as_hook(think_activity.think,
+      ...)``: the new user message is ``event.messages[-1]`` (not yet appended
+      to ``agent.messages``), so the think dispatch receives its text as a
+      ``ThinkInput``. The hook carries no ``workflow.execute_activity`` call of
+      its own; ``activity_as_hook`` owns dispatch. The activity publishes its
+      final notes as one ``{"think_notes": ...}`` frame on THINKING_TOPIC
+      before returning.
+    - ``BeforeModelCallEvent`` → ``_fold_think_notes``: reads the durable
+      stream state, takes the LAST ``think_notes`` frame at or after this
+      turn's start offset, and appends it as a ``<think_notes>`` text block to
+      the conversation's last user message — exactly what the model will see.
 
     Guards:
     - Skips interruptResponse resumes and any non-user/non-text message.
-    - Runs at most once per turn (``mark_turn_start`` resets the flag).
-    - A failed think activity is logged and swallowed; the turn proceeds
-      without notes (graceful degradation, telemetry.py convention).
-
-    ``executor`` defaults to ``workflow.execute_activity`` and is injectable
-    for unit tests.
+    - Applies at most once per turn (``begin_turn`` resets the guard; the
+      applied offset doubles as a stale-frame guard on cancel/replay).
+    - A think activity returning ``status: "error"`` publishes no notes, so
+      the model proceeds with the bare prompt; infra errors propagate like
+      any other activity failure.
     """
 
-    def __init__(
-        self,
-        system_prompt: str,
-        executor: Callable[..., Any] | None = None,
-        think_system_prompt: str | None = None,
-        thinking_system_prompt: str | None = None,
-    ) -> None:
-        self._system_prompt = system_prompt
-        self._executor = executor
+    def __init__(self, system_prompt: str, stream: WorkflowStream) -> None:
         # WHO the nested thinker is, from agent.json's ``think`` key; without
-        # one the session's own system prompt is used, as before.
-        self._think_system_prompt = think_system_prompt
-        # HOW the nested thinker works, from agent.json's ``think`` key. The
-        # activity carries no prompt text of its own, so an absent methodology
-        # means upstream strands_tools' default instructions.
-        self._thinking_system_prompt = thinking_system_prompt
-        self._ran_this_turn = False
+        # one the session's own system prompt is used, as before. The
+        # activity resolves the persona/methodology itself from its inputs.
+        self._system_prompt = THINK_SYSTEM_PROMPT or system_prompt
+        self._stream = stream
+        self._applied_offset: int | None = None
+        self._turn_start_offset: int | None = None
 
-    def mark_turn_start(self) -> None:
-        """Reset the once-per-turn flag; called at the start of ``turn``."""
-        self._ran_this_turn = False
+    def begin_turn(self, turn_start_offset: int) -> None:
+        """Reset the once-per-turn guard; called at the start of ``turn``."""
+        self._applied_offset = None
+        self._turn_start_offset = turn_start_offset
 
     def register_hooks(self, registry: HookRegistry, **kwargs: object) -> None:
-        registry.add_callback(BeforeInvocationEvent, self._think_first)
+        registry.add_callback(
+            BeforeInvocationEvent,
+            activity_as_hook(
+                think_activity.think,
+                activity_input=self._input,
+                start_to_close_timeout=THINK_START_TO_CLOSE,
+                heartbeat_timeout=THINK_HEARTBEAT_TIMEOUT,
+                retry_policy=THINK_RETRY_POLICY,
+            ),
+        )
+        registry.add_callback(BeforeModelCallEvent, self._fold_think_notes)
 
-    async def _think_first(self, event: BeforeInvocationEvent) -> None:
-        if self._ran_this_turn:
-            return
+    def _input(self, event: BeforeInvocationEvent) -> ThinkInput | None:
+        """The think activity input for a fresh user prompt, or None to skip."""
         messages = event.messages
         if not messages:  # None on some invocation paths, or empty
-            return
+            return None
         prompt = _prompt_text_from_message(messages[-1])
         if prompt is None:
+            return None
+        return ThinkInput(
+            thought=prompt,
+            cycle_count=1,
+            system_prompt=self._system_prompt,
+            thinking_system_prompt=THINK_METHODOLOGY_PROMPT,
+        )
+
+    def _fold_think_notes(self, event: BeforeModelCallEvent) -> None:
+        """Fold the turn's published think notes into the last user message."""
+        messages = getattr(event.agent, "messages", None)
+        if not messages:
             return
-        self._ran_this_turn = True
-        executor = self._executor or workflow.execute_activity
-        # thought, cycle_count, system_prompt[, thinking_system_prompt] --
-        # the methodology is only sent when agent.json supplies one, so an
-        # absent key leaves upstream's default thinking instructions in place.
-        args: list[Any] = [prompt, 1, self._think_system_prompt or self._system_prompt]
-        if self._thinking_system_prompt is not None:
-            args.append(self._thinking_system_prompt)
-        try:
-            result = await executor(
-                think_activity.think,
-                args=args,
-                **_THINK_ACTIVITY_OPTIONS,
-            )
-        except Exception as error:
-            # workflow.logger requires the workflow event loop; unit tests
-            # drive the hook outside one.
-            log = workflow.logger if workflow.in_workflow() else logging.getLogger(__name__)
-            log.warning(
-                "think-first hook failed; continuing without notes: %s", error
-            )
+        last = messages[-1]
+        if _prompt_text_from_message(last) is None:
             return
-        notes = _think_notes_text(result)
-        if not notes:
+        if self._turn_start_offset is None:
             return
-        message = messages[-1]
-        content = message.get("content")
+        notes: str | None = None
+        offset = self._turn_start_offset
+        state = self._stream.get_state()
+        for index in range(len(state.log) - 1, -1, -1):
+            item = state.log[index]
+            frame_offset = state.base_offset + index
+            if frame_offset < self._turn_start_offset:
+                break
+            if item.topic != THINKING_TOPIC:
+                continue
+            data = item.data
+            if isinstance(data, str):  # wire form: base64 proto Payload
+                try:
+                    data = workflow.payload_converter().from_payload(
+                        _decode_payload(data)
+                    )
+                except Exception:  # noqa: BLE001 - a foreign frame, not ours
+                    continue
+            if isinstance(data, dict) and isinstance(data.get("think_notes"), str):
+                notes, offset = data["think_notes"], frame_offset
+                break
+        if notes is None or not notes.strip():
+            return
+        if self._applied_offset is not None and self._applied_offset >= offset:
+            return
+        content = last.get("content")
         if isinstance(content, list):
             content.append(
                 {"text": "\n\n<think_notes>\n" + notes + "\n</think_notes>"}
             )
+            self._applied_offset = offset
 
 
 class _ComputerUseSafetyHook(HookProvider):
@@ -840,11 +897,7 @@ class _HumanControlHook(HookProvider):
 
     def _after_tool(self, event: AfterToolCallEvent) -> None:
         if self._human_control[0]:
-            native_stop.stop(
-                {"toolUseId": event.tool_use["toolUseId"], "name": "stop",
-                 "input": {"reason": "User took browser control"}},
-                request_state=event.invocation_state.setdefault("request_state", {}),
-            )
+            event.agent.cancel()
 
     def _before_model(self, event: BeforeModelCallEvent) -> None:
         if self._human_control[0]:
@@ -852,11 +905,7 @@ class _HumanControlHook(HookProvider):
 
     def _gate(self, event: BeforeToolCallEvent) -> None:
         if self._human_control[0]:
-            native_stop.stop(
-                {"toolUseId": event.tool_use["toolUseId"], "name": "stop",
-                 "input": {"reason": "User took browser control"}},
-                request_state=event.invocation_state.setdefault("request_state", {}),
-            )
+            event.agent.cancel()
             event.cancel_tool = "human has control of the browser session"
             return
 
@@ -930,27 +979,10 @@ class ChatWorkflow:
             for name in self._extra_mcp_servers
             if name not in catalog_names
         )
-        # Computer Use is Gemini-only (the tools drive Gemini's native
-        # computer_use function calls). Non-Gemini sessions get neither the
-        # tools nor their gating hooks.
         is_gemini = self._model_id.startswith("gemini")
-        computer_use_tools = (
-            tuple(
-                activity_as_tool(
-                    computer_use_activity,
-                    **closable_activity_options(
-                        dict(
-                            start_to_close_timeout=COMPUTER_USE_START_TO_CLOSE,
-                            schedule_to_close_timeout=COMPUTER_USE_SCHEDULE_TO_CLOSE,
-                            heartbeat_timeout=COMPUTER_USE_HEARTBEAT,
-                            retry_policy=BROWSER_RETRY_POLICY,
-                        )
-                    ),
-                )
-                for computer_use_activity in COMPUTER_USE_ACTIVITIES
-            )
-            if is_gemini
-            else ()
+        computer_use_tools = tuple(
+            activity_as_tool(action, **_DESKTOP_ACTIVITY_OPTIONS)
+            for action in COMPUTER_USE_ACTIVITIES
         )
         computer_use_hooks = [
             _HumanControlHook(
@@ -958,11 +990,7 @@ class ChatWorkflow:
             ),
             *([_ComputerUseSafetyHook()] if is_gemini else []),
         ]
-        self._think_hook = _ThinkFirstHook(
-            self._system_prompt,
-            think_system_prompt=THINK_SYSTEM_PROMPT,
-            thinking_system_prompt=THINK_METHODOLOGY_PROMPT,
-        )
+        self._think_hook = _ThinkFirstHook(self._system_prompt, self._stream)
         model_options = closable_activity_options(
             dict(
                 start_to_close_timeout=MODEL_START_TO_CLOSE,
@@ -977,18 +1005,18 @@ class ChatWorkflow:
             schedule_to_close_timeout=model_options["schedule_to_close_timeout"],
             heartbeat_timeout=MODEL_HEARTBEAT,
             retry_policy=MODEL_RETRY_POLICY,
-            # Temporal's own value for LLM streaming (docs.temporal.io,
-            # "Stream LLM output"). Every batch is a durable Signal appended to
-            # workflow history, so this is a history-pressure dial, not a
-            # latency dial: at 25ms a single turn produced 5,158 signals and
-            # 24,953 history events, and the workflow spent its time replaying
-            # history instead of streaming.
-            streaming_batch_interval=timedelta(milliseconds=200),
+            # Every batch is a durable Signal appended to workflow history,
+            # so this is a history-pressure dial, not a latency dial: at 25 ms
+            # a single turn produced 5,158 signals and 24,953 history events,
+            # and the workflow spent its time replaying history instead of
+            # streaming. Value lives in config.MODEL_STREAM_BATCH_INTERVAL.
+            streaming_batch_interval=MODEL_STREAM_BATCH_INTERVAL,
             # Publishes every StreamEvent on EVENTS_TOPIC from inside the model
             # activity. server.py subscribes to the identical name.
             streaming_topic=EVENTS_TOPIC,
             system_prompt=self._system_prompt,
             messages=list(messages),
+            tool_executor=SequentialToolExecutor(),
             plugins=[
                 # Default "userTurn" trigger: the catalog is folded into the
                 # fresh user ask only. With "everyTurn" Strands appends it
@@ -1071,14 +1099,27 @@ class ChatWorkflow:
             turn_start_offset = self._stream_offset()
             self._turn_start_offset = turn_start_offset
 
-            # New turn: the think-first hook runs once for this turn's fresh
-            # user prompt, and never again for HITL interrupt resumes below.
+            # New turn: the think-first hook folds this turn's notes once,
+            # keyed to frames at or after this offset — never re-applied on
+            # HITL interrupt resumes below.
             if self._think_hook is not None:
-                self._think_hook.mark_turn_start()
+                self._think_hook.begin_turn(turn_start_offset)
 
             if self._resume_prompt:
                 turn.prompt = self._resume_prompt
                 self._resume_prompt = ""
+                # Native activity and tool-result content give the new run a
+                # fresh physical view of human changes before its first model call.
+                capture = next(t for t in agent.tool_registry.registry.values() if t.tool_name == "take_screenshot")
+                tool_use = {"toolUseId": f"resume-{workflow.info().run_id}",
+                            "name": "take_screenshot", "input": {}}
+                agent.messages.append({"role": "assistant", "content": [{"toolUse": tool_use}]})
+                async for event in capture.stream(tool_use, {}):
+                    if "tool_result" in event:
+                        agent.messages.append({"role": "user", "content": [{"toolResult": event["tool_result"]}]})
+                        result = event["tool_result"]
+                        self._tool_results.publish({"tool_use_id": tool_use["toolUseId"],
+                                                    "status": result["status"], "content": result["content"]})
             blocks = self._content_blocks(turn)
 
             # EventLoopException is Strands' wrapper for a model/tool activity
@@ -1227,7 +1268,7 @@ class ChatWorkflow:
     async def claim_control(self) -> None:
         """Acknowledge ownership only after all in-flight turn work has settled."""
         self.take_control()
-        await workflow.wait_condition(lambda: not self._lock.locked())
+        await workflow.wait_condition(lambda: not self._lock.locked(), timeout=DESKTOP_HANDOFF_TIMEOUT)
         self._turn_start_offset = None
 
     @workflow.update

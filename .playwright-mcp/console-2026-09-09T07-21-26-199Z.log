@@ -1,0 +1,32 @@
+[   10425ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   10758ms] [LOG] [HMR] connected @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   12460ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   16719ms] [LOG] [Fast Refresh] done in 4359ms @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   26815ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   28376ms] [LOG] [Fast Refresh] done in 1662ms @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   83533ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   85707ms] [LOG] [Fast Refresh] done in 2275ms @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  107649ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  109094ms] [LOG] [Fast Refresh] done in 1557ms @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  114431ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  116280ms] [LOG] [Fast Refresh] done in 1950ms @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  130306ms] [WARNING] An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing. @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:7474
+[  130660ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  143594ms] [LOG] [Fast Refresh] done in 13107ms @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  219249ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  231017ms] [LOG] [Fast Refresh] done in 11870ms @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  274987ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  280969ms] [ERROR] Failed to load resource: net::ERR_NETWORK_IO_SUSPENDED @ http://127.0.0.1:3001/api/orchestrator:0
+[  283083ms] [LOG] [HMR] connected @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[12843294ms] [LOG] [Fast Refresh] done in 12568450ms @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[12878994ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[12883043ms] [LOG] [Fast Refresh] done in 4150ms @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[13250930ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[13251976ms] [LOG] [Fast Refresh] done in 1161ms @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[13301056ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[13301467ms] [LOG] [HMR] connected @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[13301648ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[13301899ms] [LOG] [Fast Refresh] done in 382ms @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[13361741ms] [LOG] [HMR] connected @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[13745133ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[13750590ms] [LOG] [Fast Refresh] done in 5560ms @ http://127.0.0.1:3001/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489

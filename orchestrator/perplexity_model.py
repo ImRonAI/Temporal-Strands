@@ -1,60 +1,66 @@
+"""Perplexity Agent API provider, rebased onto Strands' OpenAI Responses provider.
+
+The Agent API is OpenAI-compatible (docs.perplexity.ai/docs/agent-api/
+openai-compatibility), so message formatting, block sequencing, tool-call
+accumulation, and error classification all come from ``OpenAIResponsesModel``;
+three methods are overridden. The native-event tap sits at the HTTP layer
+because that is the only observation point -- the parent builds its own
+``openai.AsyncOpenAI`` (openai_responses.py:321) and its loop neither yields
+nor stores events it has no branch for (:334-449).
+
+The same tap records custom-function ``arguments``. The Agent API carries them
+only on the ``function_call`` item of ``response.output_item.added``/``.done``
+and emits no ``response.function_call_arguments.delta``/``.done`` (see
+``.tmp/external-context/perplexity-agent-api/async-responses-streaming-2026-07-30.md``);
+the parent reads arguments only from those OpenAI events (:403-417), so its
+tool-use delta would otherwise carry ``input: ""`` and every tool call would
+reach the agent as ``{}`` (``missing a required argument: 'path'``).
+"""
+
 from __future__ import annotations
 
-import base64
+import asyncio
 import copy
+import inspect
 import json
-import mimetypes
-from collections.abc import AsyncGenerator, AsyncIterable
-from typing import Any, TypedDict, TypeVar, cast
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping
+from typing import Any
 
-import perplexity
-from perplexity import AsyncPerplexity
-from pydantic import BaseModel
-from strands.models import Model
-from strands.types.content import Messages, SystemContentBlock
-from strands.models._openai_errors import classify_openai_error
-from strands.types.exceptions import ContextWindowOverflowException
+import httpx
+from openai.resources.responses import AsyncResponses
+from strands.models.openai_responses import OpenAIResponsesModel
 from strands.types.streaming import StreamEvent
-from strands.types.tools import ToolChoice, ToolSpec
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-
-class ModelConfig(TypedDict, total=False):
-    model_id: str
-    params: dict[str, Any]
-
+from config import NATIVE_OUTPUT_ITEM_TYPES, PERPLEXITY_API_BASE
+from desktop_observation import latest_observation, resolve_observation
+from workspace_state import StateConflict
 
 PRESET_PREFIX = "preset:"
 PRESETS = frozenset({"fast", "low", "medium", "high", "xhigh", "wide-research"})
+# Request fields this adapter owns; a caller-supplied value would be silently
+# overwritten or would corrupt the request envelope.
+_RESERVED_PARAMS = frozenset(
+    "api_key extra_body extra_headers extra_query input model preset "
+    "previous_response_id stream timeout".split())
+# Named kwargs of ``AsyncOpenAI.responses.create``; Agent-API-only fields
+# (``preset``, ``max_steps``, ``skills``, ``models``, ``language_preference``)
+# ride in ``extra_body``, the SDK's documented verbatim JSON passthrough.
+_OPENAI_FIELDS = frozenset(inspect.signature(AsyncResponses.create).parameters) - {"self"}
 
 
-T = TypeVar("T", bound=BaseModel)
-
-
-def _value(value: Any, name: str, default: Any = None) -> Any:
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
-
-
-def _application_error(message: str, *, non_retryable: bool) -> ApplicationError:
+def _error(message: str, *, non_retryable: bool) -> ApplicationError:
     return ApplicationError(message, type="PerplexityModelError", non_retryable=non_retryable)
 
 
 def _ensure_object_properties(schema: Any) -> Any:
-    """Provider-side schema normalization for the Agent API.
+    """Add ``properties: {}`` to every ``object`` node lacking one.
 
-    The Perplexity Agent API rejects any function parameter schema containing
-    an ``object`` node without ``properties`` (verified live: 400 ``invalid
-    request`` for ``{"type": "object"}`` alone, with ``additionalProperties``,
-    or as array ``items``). Community tools such as ``mcp_client`` declare
-    free-form ``dict`` arguments that serialize exactly that way, so the
-    adapter adds an empty ``properties`` map -- the same provider-adapter
-    role Strands' own ``ensure_strict_json_schema`` plays for Bedrock
-    (``strands/models/_strict_schema.py``). Tools that need the model to fill
-    a structured object must declare it with typed Pydantic fields; this
-    normalization only keeps the request valid, it cannot invent structure.
+    The Agent API rejects such a schema (verified live: 400 ``invalid
+    request``) and tools like ``mcp_client`` declare free-form ``dict`` args
+    that serialize exactly that way -- the provider-adapter role Strands'
+    ``ensure_strict_json_schema`` plays for Bedrock.
     """
     if isinstance(schema, dict):
         normalized = {key: _ensure_object_properties(value) for key, value in schema.items()}
@@ -66,546 +72,221 @@ def _ensure_object_properties(schema: Any) -> Any:
     return schema
 
 
-class PerplexityModel(Model):
+def _is_native(payload: Any) -> bool:
+    """Whether an SSE payload is a Perplexity-only server-side tool event."""
+    if not isinstance(payload, dict) or not isinstance(kind := payload.get("type"), str):
+        return False
+    if kind.startswith("response.reasoning.") or kind == "response.skill.loaded":
+        return True
+    item = payload.get("item") if kind == "response.output_item.done" else None
+    return isinstance(item, dict) and item.get("type") in NATIVE_OUTPUT_ITEM_TYPES
+
+
+def _function_call_item(payload: Any) -> dict[str, Any] | None:
+    """The ``function_call`` item of an ``output_item.added``/``.done`` event, else None.
+
+    The Agent API delivers custom-function arguments only as the JSON-string
+    ``arguments`` field of that item; it defines no
+    ``response.function_call_arguments.*`` events (OpenAPI + SDK
+    ``ResponseStreamChunk`` union). The parent parser fills arguments from
+    those OpenAI-only events, so without this record every tool call would
+    reach the agent with an empty input.
+    """
+    if not isinstance(payload, dict) or payload.get("type") not in (
+        "response.output_item.added",
+        "response.output_item.done",
+    ):
+        return None
+    item = payload.get("item")
+    if not isinstance(item, dict) or item.get("type") != "function_call":
+        return None
+    return item if isinstance(item.get("call_id"), str) else None
+
+
+def _enqueue_native(
+    queue: asyncio.Queue[dict[str, Any]],
+    raw: bytes,
+    arguments: dict[str, str] | None = None,
+) -> None:
+    """Queue one ``data:`` line iff it carries a Perplexity-only event.
+
+    ``arguments`` (``call_id`` -> JSON-string arguments) is updated from every
+    ``function_call`` item seen; a later item for the same call wins, so the
+    ``.done`` record is authoritative when the server sends both.
+
+    Total by construction: a truncated or non-JSON line is dropped and left to
+    the SDK's own decoder, so the tap can never interrupt the stream.
+    """
+    if not (line := raw.strip()).startswith(b"data:"):
+        return
+    try:
+        payload = json.loads(line[len(b"data:") :])
+    except (ValueError, UnicodeDecodeError):
+        return
+    if _is_native(payload):
+        queue.put_nowait(payload)
+    if arguments is not None and (item := _function_call_item(payload)) is not None:
+        if isinstance(args := item.get("arguments"), str) and args:
+            arguments[item["call_id"]] = args
+
+
+def _fill_tool_arguments(
+    chunk: StreamEvent, arguments: Mapping[str, str], current: str | None
+) -> tuple[StreamEvent, str | None]:
+    """Put the recorded ``function_call`` arguments into the parent's tool-use delta.
+
+    The parent emits one ``contentBlockStart`` (``toolUseId``) then one
+    ``contentBlockDelta`` per tool call; against the Agent API that delta's
+    ``input`` is ``""`` because no argument-delta event ever arrived, and
+    Strands would then parse the tool input as ``{}``. Returns the (possibly
+    replaced) chunk plus the tool-use id the block sequence is currently in.
+    """
+    if not isinstance(chunk, dict):
+        return chunk, current
+    if (start := chunk.get("contentBlockStart")) is not None:
+        tool_use = (start.get("start") or {}).get("toolUse") or {}
+        return chunk, tool_use.get("toolUseId")
+    if "contentBlockStop" in chunk:
+        return chunk, None
+    delta = ((chunk.get("contentBlockDelta") or {}).get("delta") or {}).get("toolUse")
+    if delta is None or current is None or delta.get("input") or current not in arguments:
+        return chunk, current
+    return {"contentBlockDelta": {"delta": {"toolUse": {"input": arguments[current]}}}}, current
+
+
+class PerplexityModel(OpenAIResponsesModel):
     """Strands model adapter for Perplexity's Agent Responses API."""
 
     def __init__(
-        self,
-        *,
-        model_id: str,
-        params: dict[str, Any] | None = None,
-        api_key: str | None = None,
-        client: Any | None = None,
+        self, *, model_id: str, params: dict[str, Any] | None = None, api_key: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None, **model_config: Any,
     ) -> None:
-        self.config: ModelConfig = {"model_id": model_id, "params": copy.deepcopy(params or {})}
-        self._validate_config(self.config)
-        self.client = client or AsyncPerplexity(api_key=api_key, max_retries=0)
-
-    def update_config(self, **model_config: Any) -> None:
-        unknown = set(model_config) - {"model_id", "params"}
-        if unknown:
-            raise _application_error(
-                f"Unsupported model configuration: {', '.join(sorted(unknown))}",
-                non_retryable=True,
-            )
-        updated = cast(ModelConfig, {**self.config, **copy.deepcopy(model_config)})
-        self._validate_config(updated)
-        self.config = updated
-
-    def get_config(self) -> ModelConfig:
-        return cast(ModelConfig, copy.deepcopy(self.config))
+        params = copy.deepcopy(params or {})
+        self._validate_config(model_id, params)
+        self._api_key, self._transport = api_key, transport
+        self._native_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        # call_id -> JSON-string arguments, from the turn's function_call items.
+        self._call_arguments: dict[str, str] = {}
+        self._reasoning_effort: str | None = None
+        # ``store`` in params only survives if the model reports itself
+        # stateful: the parent writes ``"store": self.stateful`` AFTER merging
+        # **params (openai_responses.py:558-564).
+        model_config.setdefault("stateful", bool(params.get("store")))
+        super().__init__(model_id=model_id, params=params, **model_config)
 
     @staticmethod
     def _preset_name(model_id: str) -> str | None:
-        """Return the validated preset name for `preset:<name>` ids, else None."""
+        """Validated preset name for ``preset:<name>`` ids, else None."""
         if not model_id.startswith(PRESET_PREFIX):
             return None
-        name = model_id[len(PRESET_PREFIX) :]
-        if name not in PRESETS:
-            raise _application_error(
-                f"Unknown Perplexity preset: {name!r}. Valid presets: {', '.join(sorted(PRESETS))}",
-                non_retryable=True,
-            )
+        if (name := model_id[len(PRESET_PREFIX) :]) not in PRESETS:
+            valid = ", ".join(sorted(PRESETS))
+            raise _error(f"Unknown Perplexity preset: {name!r}. Valid presets: {valid}", non_retryable=True)
         return name
 
     @classmethod
-    def _validate_config(cls, config: ModelConfig) -> None:
-        model_id = config.get("model_id")
-        if isinstance(model_id, str):
-            cls._preset_name(model_id)
-        params = config.get("params") or {}
-        forbidden = {
-            "api_key",
-            "extra_body",
-            "extra_headers",
-            "extra_query",
-            "input",
-            "model",
-            "preset",
-            "previous_response_id",
-            "stream",
-            "timeout",
-        } & params.keys()
-        if forbidden:
-            raise _application_error(
-                f"Unsupported model parameters: {', '.join(sorted(forbidden))}",
-                non_retryable=True,
-            )
+    def _validate_config(cls, model_id: Any, params: dict[str, Any]) -> str | None:
+        """Reject adapter-owned params; return the preset name, if any."""
+        if forbidden := _RESERVED_PARAMS & params.keys():
+            names = ", ".join(sorted(forbidden))
+            raise _error(f"Unsupported model parameters: {names}", non_retryable=True)
+        return cls._preset_name(model_id) if isinstance(model_id, str) else None
 
-    @staticmethod
-    def _image_part(image: dict[str, Any]) -> dict[str, str]:
-        image_url = image.get("image_url")
-        if isinstance(image_url, str) and image_url:
-            return {"type": "input_image", "image_url": image_url}
-        source = image.get("source", {})
-        if "url" in source and isinstance(source["url"], str):
-            return {"type": "input_image", "image_url": source["url"]}
-        if "image_url" in source and isinstance(source["image_url"], str):
-            return {"type": "input_image", "image_url": source["image_url"]}
-        if "bytes" in source:
-            fmt = str(image.get("format", "")).lower().lstrip(".")
-            if fmt == "jpg":
-                fmt = "jpeg"
-            mime = f"image/{fmt}" if fmt in {"png", "jpeg", "gif", "webp"} else mimetypes.types_map.get(f".{fmt}", "application/octet-stream")
-            raw_bytes = source["bytes"]
-            encoded = base64.b64encode(raw_bytes).decode("ascii") if isinstance(raw_bytes, bytes) else str(raw_bytes)
-            return {"type": "input_image", "image_url": f"data:{mime};base64,{encoded}"}
-        raise _application_error("Unsupported image source", non_retryable=True)
-
-    @classmethod
-    def _message_items(cls, messages: Messages) -> list[dict[str, Any]]:
-        result: list[dict[str, Any]] = []
-        for message in messages:
-            role = message["role"]
-            message_parts: list[dict[str, str]] = []
-            for block in message["content"]:
-                if "text" in block:
-                    message_parts.append({"type": "input_text", "text": block["text"]})
-                    continue
-                if "image" in block:
-                    message_parts.append(cls._image_part(block["image"]))
-                    continue
-                if "toolUse" in block:
-                    if message_parts:
-                        result.append(cls._message_item(role, message_parts))
-                        message_parts = []
-                    tool = block["toolUse"]
-                    call: dict[str, Any] = {
-                        "type": "function_call",
-                        "call_id": tool["toolUseId"],
-                        "name": tool["name"],
-                        "arguments": json.dumps(tool["input"], ensure_ascii=False),
-                    }
-                    signature = tool.get("reasoningSignature")
-                    if signature:
-                        call["thought_signature"] = signature
-                    result.append(call)
-                    continue
-                if "toolResult" in block:
-                    if message_parts:
-                        result.append(cls._message_item(role, message_parts))
-                        message_parts = []
-                    tool_result = block["toolResult"]
-                    contents = []
-                    for content in tool_result.get("content", []):
-                        if "json" in content:
-                            contents.append(json.dumps(content["json"], ensure_ascii=False))
-                        elif "text" in content:
-                            contents.append(content["text"])
-                        else:
-                            raise _application_error("Unsupported function output content", non_retryable=True)
-                    output: dict[str, Any] = {
-                        "type": "function_call_output",
-                        "call_id": tool_result["toolUseId"],
-                        "output": "\n".join(contents),
-                    }
-                    result.append(output)
-                    continue
-                if "reasoningContent" in block:
-                    continue
-                raise _application_error("Unsupported Strands content block", non_retryable=True)
-            if message_parts:
-                result.append(cls._message_item(role, message_parts))
-        return result
-
-    @staticmethod
-    def _message_item(role: str, parts: list[dict[str, str]]) -> dict[str, Any]:
-        content: str | list[dict[str, str]]
-        if len(parts) == 1 and parts[0]["type"] == "input_text":
-            content = parts[0]["text"]
-        else:
-            content = parts
-        return {"type": "message", "role": role, "content": content}
-
-    def _format_request(
-        self,
-        messages: Messages,
-        tool_specs: list[ToolSpec] | None,
-        system_prompt: str | None,
-    ) -> dict[str, Any]:
-        params = copy.deepcopy(self.config.get("params") or {})
-        native_tools = params.pop("tools", None) or []
-        converted_tools = [
-            {
-                "type": "function",
-                "name": spec["name"],
-                "description": spec.get("description", ""),
-                "parameters": _ensure_object_properties(spec["inputSchema"]["json"]),
-            }
-            for spec in tool_specs or []
-        ]
-        model_id = self.config["model_id"]
-        preset = self._preset_name(model_id)
-        request: dict[str, Any] = {
-            "input": self._message_items(messages),
-            "stream": True,
-            **params,
+    def _resolve_client_args(self) -> dict[str, Any]:
+        # Agent API endpoint, no SDK retries (Temporal owns them), plus the
+        # tap. A fresh httpx client per call: the parent closes the SDK client,
+        # and with it this transport, at the end of every ``async with`` block.
+        return {
+            "base_url": f"{PERPLEXITY_API_BASE}/v1",
+            "api_key": self._api_key,
+            "max_retries": 0,
+            "http_client": httpx.AsyncClient(
+                transport=self._transport, event_hooks={"response": [self._tap_sse]}),
         }
-        # Exactly one of `model`, `models`, or `preset` goes out. A fallback
-        # chain in params ("models") is authoritative over the configured id.
-        if "models" not in request:
-            if preset is not None:
-                request["preset"] = preset
-            else:
-                request["model"] = model_id
-        request["tools"] = [*native_tools, *converted_tools]
-        if system_prompt is not None:
-            request["instructions"] = system_prompt
+
+    async def _tap_sse(self, response: httpx.Response) -> None:
+        """Observe Perplexity-only events, forwarding every byte unchanged."""
+        if not response.headers.get("content-type", "").startswith("text/event-stream"):
+            return
+        original, queue, arguments = response.aiter_bytes, self._native_queue, self._call_arguments
+
+        async def tapped(chunk_size: int | None = None) -> AsyncIterator[bytes]:
+            buffer = b""
+            async for chunk in original() if chunk_size is None else original(chunk_size):
+                buffer += chunk
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    _enqueue_native(queue, line, arguments)
+                yield chunk
+
+        response.aiter_bytes = tapped  # type: ignore[method-assign]
+
+    def _format_request(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Parent request, retargeted at the Agent API's own envelope."""
+        request = super()._format_request(*args, **kwargs)
+        # Exactly one of `model` or `preset` goes out.
+        params = dict(self.config.get("params") or {})
+        if preset := self._validate_config(str(self.config.get("model_id", "")), params):
+            request["preset"] = preset
+            request.pop("model", None)
+        request["tools"] = [
+            _ensure_object_properties(t) if t.get("type") == "function" else t
+            for t in request.get("tools", [])]
+        if (effort := self._reasoning_effort) is not None:
+            request["reasoning"] = {**(request.get("reasoning") or {}), "effort": effort}
+        if extra := {k: request.pop(k) for k in list(request) if k not in _OPENAI_FIELDS}:
+            request["extra_body"] = extra
         return request
 
-    @staticmethod
-    def _raise_sdk_error(error: Exception) -> None:
-        # Throttling stays an ordinary retryable ApplicationError, retried by
-        # Temporal's activity retry_policy. TemporalAgent sets
-        # agent_kwargs["retry_strategy"] = None unconditionally
-        # (_temporal_agent.py:62) -- "TemporalAgent disables Strands' built-in
-        # ModelRetryStrategy so retries are handled exclusively by Temporal"
-        # (contrib/strands README) -- so raising ModelThrottledException would
-        # bypass the only retry mechanism that exists here.
-        #
-        # ContextWindowOverflowException IS raised: it is one of the four types
-        # in StrandsFailureConverter._TERMINAL_EXCEPTIONS
-        # (_failure_converter.py:28-33), which the converter marks
-        # non_retryable=True so the conversation manager can react to it.
-        if classify_openai_error(error) == "context_overflow":
-            raise ContextWindowOverflowException(str(error)) from error
-
-        non_retryable = isinstance(
-            error,
-            (
-                perplexity.AuthenticationError,
-                perplexity.PermissionDeniedError,
-                perplexity.BadRequestError,
-                perplexity.NotFoundError,
-                perplexity.UnprocessableEntityError,
-                perplexity.APIResponseValidationError,
-            ),
-        )
-        raise _application_error(str(error), non_retryable=non_retryable) from error
-
-    @staticmethod
-    def _native_event(event: Any) -> StreamEvent | None:
-        """Carry a native server-side tool event through unchanged.
-
-        The SDK event serializes itself in one call, so the whole payload goes
-        through as-is. StreamEvent is total=False, so it rides under
-        `perplexity` with nothing dropped.
-        """
-        event_type = _value(event, "type")
-        if not isinstance(event_type, str):
-            return None
-        if not (
-            event_type.startswith("response.reasoning.")
-            or event_type == "response.skill.loaded"
-        ):
-            return None
-        if not hasattr(event, "model_dump"):
-            return None
-        return {"perplexity": event.model_dump(mode="json")}
-
-    @staticmethod
-    def _raise_failed(error: Any) -> None:
-        code = str(_value(error, "code", "") or _value(error, "type", "")).lower()
-        non_retryable = any(
-            marker in code for marker in ("auth", "permission", "invalid", "validation", "unsupported", "not_found")
-        )
-        message = str(_value(error, "message", "Perplexity response failed"))
-        raise _application_error(message, non_retryable=non_retryable)
-
-    async def stream(
-        self,
-        messages: Messages,
-        tool_specs: list[ToolSpec] | None = None,
-        system_prompt: str | None = None,
-        *,
-        tool_choice: ToolChoice | None = None,
-        system_prompt_content: list[SystemContentBlock] | None = None,
-        invocation_state: dict[str, Any] | None = None,
-        model_state: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterable[StreamEvent]:
-        del model_state
-        unsupported = []
-        if tool_choice is not None:
-            unsupported.append("tool_choice")
-        unsupported.extend(sorted(kwargs))
-        if unsupported:
-            raise _application_error(
-                f"Unsupported Strands options: {', '.join(unsupported)}",
-                non_retryable=True,
-            )
+    async def stream(self, *args: Any, **kwargs: Any) -> AsyncGenerator[StreamEvent, None]:
+        """Parent frames, with native server-side tool events interleaved."""
+        # A fresh queue and argument record per turn: a replayed activity
+        # attempt must not surface the previous attempt's native frames or
+        # tool arguments.
+        self._native_queue = asyncio.Queue()
+        self._call_arguments = {}
+        self._reasoning_effort = (kwargs.get("invocation_state") or {}).get("reasoning_effort")
+        current_tool_use: str | None = None
         try:
-            effective_system_prompt = system_prompt
-            if system_prompt_content is not None:
-                effective_system_prompt = "\n".join(
-                    block["text"] for block in system_prompt_content if "text" in block
-                ) or None
-            request = self._format_request(messages, tool_specs, effective_system_prompt)
-            effort = (invocation_state or {}).get("reasoning_effort")
-            if effort is not None:
-                request["reasoning"] = {"effort": effort}
-            provider_stream = await self.client.responses.create(**request)
-        except ApplicationError:
-            raise
-        except (KeyError, TypeError, ValueError) as error:
-            raise _application_error(f"Unsupported Perplexity request: {error}", non_retryable=True) from error
-        except perplexity.APIError as error:
-            self._raise_sdk_error(error)
-
-        # GWEN-6: a Temporal retry of this activity republishes every frame
-        # from the start while the failed attempt's partial frames are already
-        # in the stream log. Carrying the attempt number lets downstream
-        # consumers distinguish attempts. Guarded so streaming outside an
-        # activity context (unit tests, direct use) stays byte-identical —
-        # optional infra degrades gracefully, never raises (see telemetry.py).
-        message_start: dict[str, Any] = {"role": "assistant"}
-        if activity.in_activity():
-            message_start["attempt"] = activity.info().attempt
-        yield cast(StreamEvent, {"messageStart": message_start})
-        next_index = 0
-        next_output_index = 0
-        output_blocks: dict[int, dict[str, Any]] = {}
-        calls: dict[int, dict[str, Any]] = {}
-        terminal = None
-
-        def flush_ready() -> list[StreamEvent]:
-            nonlocal next_index, next_output_index
-            events: list[StreamEvent] = []
-            while (state := output_blocks.get(next_output_index)) is not None:
-                if state["type"] == "skip":
-                    pass
-                elif state["type"] == "text":
-                    if not state["open"]:
-                        state["open"] = True
-                        state["content_index"] = next_index
-                        next_index += 1
-                        events.append(
-                            {
-                                "contentBlockStart": {
-                                    "contentBlockIndex": state["content_index"],
-                                    "start": {},
-                                }
-                            }
-                        )
-                    while state["emitted"] < len(state["fragments"]):
-                        fragment = state["fragments"][state["emitted"]]
-                        state["emitted"] += 1
-                        events.append(
-                            {
-                                "contentBlockDelta": {
-                                    "contentBlockIndex": state["content_index"],
-                                    "delta": {"text": fragment},
-                                }
-                            }
-                        )
-                    if not state["done"]:
-                        break
-                    events.append({"contentBlockStop": {"contentBlockIndex": state["content_index"]}})
+            messages = args[0] if args else kwargs.get("messages", [])
+            try:
+                observation = latest_observation(messages)
+                if observation:
+                    call_id, _, ref = observation
+                    info = activity.info()
+                    if not info.workflow_id:
+                        raise ValueError("Desktop observation requires a workflow identity")
+                    png = await asyncio.to_thread(
+                        resolve_observation, ref, namespace=info.namespace, workflow_id=info.workflow_id,
+                    )
+            except (OSError, ValueError, StateConflict, RuntimeError) as error:
+                raise _error("Desktop observation unavailable; obtain a fresh screenshot", non_retryable=True) from error
+            if observation:
+                # Image bytes exist only in this activity's outgoing request, not
+                # in Temporal messages. Perplexity function outputs stay strings.
+                messages = [*messages, {"role": "user", "content": [
+                    {"text": f"Desktop screenshot from tool call {call_id}"},
+                    {"image": {"format": "png", "source": {"bytes": png}}},
+                ]}]
+                if args:
+                    args = (messages, *args[1:])
                 else:
-                    if not state["done"]:
-                        break
-                    content_index = next_index
-                    next_index += 1
-                    tool_use = {"toolUseId": state["call_id"], "name": state["name"]}
-                    if state["signature"]:
-                        tool_use["reasoningSignature"] = state["signature"]
-                    events.append(
-                        {
-                            "contentBlockStart": {
-                                "contentBlockIndex": content_index,
-                                "start": {"toolUse": tool_use},
-                            }
-                        }
-                    )
-                    for argument_fragment in state["fragments"]:
-                        events.append(
-                            {
-                                "contentBlockDelta": {
-                                    "contentBlockIndex": content_index,
-                                    "delta": {"toolUse": {"input": argument_fragment}},
-                                }
-                            }
-                        )
-                    events.append({"contentBlockStop": {"contentBlockIndex": content_index}})
-                del output_blocks[next_output_index]
-                next_output_index += 1
-            return events
+                    kwargs = {**kwargs, "messages": messages}
+            async for chunk in super().stream(*args, **kwargs):
+                for native in self._drain():
+                    yield native
+                chunk, current_tool_use = _fill_tool_arguments(
+                    chunk, self._call_arguments, current_tool_use
+                )
+                yield chunk
+            for native in self._drain():
+                yield native
+        finally:
+            self._reasoning_effort = None
 
-        try:
-            async for provider_event in provider_stream:
-                event_type = _value(provider_event, "type")
-                if event_type == "response.output_text.delta":
-                    output_index = _value(provider_event, "output_index", 0)
-                    if not isinstance(output_index, int):
-                        output_index = 0
-                    state = output_blocks.setdefault(
-                        output_index,
-                        {"type": "text", "fragments": [], "emitted": 0, "done": False, "open": False},
-                    )
-                    state["fragments"].append(_value(provider_event, "delta", ""))
-                elif event_type == "response.output_text.done":
-                    output_index = _value(provider_event, "output_index", 0)
-                    if not isinstance(output_index, int):
-                        output_index = 0
-                    state = output_blocks.setdefault(
-                        output_index,
-                        {"type": "text", "fragments": [], "emitted": 0, "done": False, "open": False},
-                    )
-                    completed_text = _value(provider_event, "text", "") or ""
-                    streamed_text = "".join(state["fragments"])
-                    if completed_text.startswith(streamed_text) and len(completed_text) > len(streamed_text):
-                        state["fragments"].append(completed_text[len(streamed_text) :])
-                    state["done"] = True
-                elif event_type in ("response.output_item.added", "response.output_item.done"):
-                    item = _value(provider_event, "item")
-                    item_type = _value(item, "type")
-                    if item_type != "function_call":
-                        output_index = _value(provider_event, "output_index")
-                        if event_type == "response.output_item.done" and isinstance(output_index, int):
-                            # Terminal payload for a native server-side tool
-                            # (search_results, fetch_url_results,
-                            # sandbox_results, mcp_call, ... -- the OutputItem
-                            # union in perplexity/types/output_item.py). The
-                            # block itself is a no-op in the text/tool
-                            # sequencing below, but the item is emitted intact
-                            # rather than thrown away. "message" is excluded:
-                            # its text already streamed as output_text deltas.
-                            if (
-                                item_type
-                                and item_type != "message"
-                                and hasattr(item, "model_dump")
-                            ):
-                                yield {"perplexity": item.model_dump(mode="json")}
-                            output_blocks[output_index] = {"type": "skip", "done": True}
-                            for stream_event in flush_ready():
-                                yield stream_event
-                        continue
-                    output_index = _value(provider_event, "output_index")
-                    if not isinstance(output_index, int):
-                        raise _application_error("Function call missing output index", non_retryable=True)
-                    state = calls.get(output_index)
-                    if state is None:
-                        state = {
-                            "call_id": _value(item, "call_id"),
-                            "name": _value(item, "name"),
-                            "signature": _value(item, "thought_signature"),
-                            "arguments": "",
-                            "fragments": [],
-                            "done": False,
-                        }
-                        calls[output_index] = state
-                        state["type"] = "call"
-                        output_blocks[output_index] = state
-                    arguments = _value(item, "arguments", "") or ""
-                    if event_type == "response.output_item.done":
-                        status = _value(item, "status", "missing")
-                        if status != "completed":
-                            raise _application_error(
-                                f"Non-completed function call: {status}",
-                                non_retryable=False,
-                            )
-                        state.update(
-                            call_id=_value(item, "call_id"),
-                            name=_value(item, "name"),
-                            signature=_value(item, "thought_signature"),
-                        )
-                    previous = state["arguments"]
-                    fragment = arguments[len(previous) :] if arguments.startswith(previous) else arguments
-                    if fragment:
-                        state["fragments"].append(fragment)
-                        state["arguments"] = arguments
-                    if event_type == "response.output_item.done":
-                        try:
-                            json.loads(arguments)
-                        except (TypeError, json.JSONDecodeError) as error:
-                            raise _application_error("Malformed function arguments", non_retryable=True) from error
-                        state["done"] = True
-                elif event_type == "response.failed":
-                    self._raise_failed(_value(provider_event, "error"))
-                elif event_type is not None and (
-                    event_type.startswith("response.reasoning.")
-                    or event_type == "response.skill.loaded"
-                ):
-                    # Native server-side tool activity, passed through exactly
-                    # as the SDK delivered it. One API event, one stream event.
-                    native = self._native_event(provider_event)
-                    if native is not None:
-                        yield native
-                    if event_type.startswith("response.reasoning."):
-                        # A reasoning event's `thought` also surfaces as native
-                        # Strands reasoningContent (one per event) so Chain of
-                        # Thought renders it; the raw envelope above still
-                        # feeds the tool cards.
-                        thought = _value(provider_event, "thought")
-                        if isinstance(thought, str) and thought:
-                            content_index = next_index
-                            next_index += 1
-                            yield {
-                                "contentBlockStart": {
-                                    "contentBlockIndex": content_index,
-                                    "start": {},
-                                }
-                            }
-                            yield {
-                                "contentBlockDelta": {
-                                    "contentBlockIndex": content_index,
-                                    "delta": {"reasoningContent": {"text": thought + "\n"}},
-                                }
-                            }
-                            yield {"contentBlockStop": {"contentBlockIndex": content_index}}
-                elif event_type == "response.completed":
-                    response = _value(provider_event, "response")
-                    if response is None or _value(response, "status") != "completed":
-                        error = _value(response, "error")
-                        if error:
-                            self._raise_failed(error)
-                        raise _application_error(
-                            f"Non-completed terminal response: {_value(response, 'status', 'missing')}",
-                            non_retryable=False,
-                        )
-                    terminal = response
-                for stream_event in flush_ready():
-                    yield stream_event
-        except ApplicationError:
-            raise
-        except perplexity.APIError as error:
-            self._raise_sdk_error(error)
-
-        if terminal is None:
-            raise _application_error("Stream ended without authoritative terminal completion", non_retryable=False)
-        if any(not state["done"] for state in calls.values()):
-            raise _application_error("Incomplete function call", non_retryable=False)
-        for state in output_blocks.values():
-            if state["type"] == "text":
-                state["done"] = True
-        for stream_event in flush_ready():
-            yield stream_event
-
-        output = _value(terminal, "output", []) or []
-        has_calls = any(_value(item, "type") == "function_call" for item in output)
-        yield {"messageStop": {"stopReason": "tool_use" if has_calls else "end_turn"}}
-        usage = _value(terminal, "usage")
-        if usage is not None:
-            yield {
-                "metadata": {
-                    "usage": {
-                        "inputTokens": _value(usage, "input_tokens", 0),
-                        "outputTokens": _value(usage, "output_tokens", 0),
-                        "totalTokens": _value(usage, "total_tokens", 0),
-                    },
-                }
-            }
-
-    async def structured_output(
-        self,
-        output_model: type[T],
-        prompt: Messages,
-        system_prompt: str | None = None,
-        **kwargs: Any,
-    ) -> AsyncGenerator[dict[str, T | Any], None]:
-        text: list[str] = []
-        async for event in self.stream(prompt, system_prompt=system_prompt, **kwargs):
-            delta = event.get("contentBlockDelta", {}).get("delta", {})
-            if "text" in delta:
-                text.append(delta["text"])
-        yield {"output": output_model.model_validate_json("".join(text))}
+    def _drain(self) -> list[StreamEvent]:
+        """Every native event observed since the last parent chunk."""
+        queue, events = self._native_queue, []
+        while not queue.empty():
+            events.append({"perplexity": queue.get_nowait()})
+        return events  # type: ignore[return-value]

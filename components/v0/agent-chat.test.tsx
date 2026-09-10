@@ -75,6 +75,8 @@ vi.mock("ai", () => ({
     }
   },
   isTextUIPart: (part: { type?: string }) => part.type === "text",
+  isDynamicToolUIPart: (part: { type?: string }) => part.type === "dynamic-tool",
+  isReasoningUIPart: (part: { type?: string }) => part.type === "reasoning",
   isFileUIPart: (part: { type?: string }) => part.type === "file",
 }))
 
@@ -240,6 +242,7 @@ vi.mock("@/components/v0/composer", () => ({
 }))
 
 vi.mock("@/components/v0/computer-use", () => ({
+  COMPUTER_USE_TOOL_NAMES: new Set(["browser", "computer_click", "scroll", "press_key"]),
   computerUsePreview: () => h.computerUsePreviewResult,
 }))
 

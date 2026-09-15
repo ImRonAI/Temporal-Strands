@@ -11,6 +11,9 @@ __v0_jsx-dev-runtime.ts
 
 # Common ignores
 node_modules
+orchestrator/.venv/
+__pycache__/
+*.pyc
 .next/
 .DS_Store
 .worktrees/

@@ -38,9 +38,12 @@ from strands.types.streaming import StreamEvent
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from config import NATIVE_OUTPUT_ITEM_TYPES, PERPLEXITY_API_BASE
+import agent_api_tools
+from config import NATIVE_OUTPUT_ITEM_TYPES, PERMANENT_HTTP_STATUSES, PERPLEXITY_API_BASE
 from desktop_observation import latest_observation, resolve_observation
 from workspace_state import StateConflict
+
+logger = logging.getLogger(__name__)
 
 PRESET_PREFIX = "preset:"
 PRESETS = frozenset({"fast", "low", "medium", "high", "xhigh", "wide-research"})
@@ -53,20 +56,38 @@ _RESERVED_PARAMS = frozenset(
 # (``preset``, ``max_steps``, ``skills``, ``models``, ``language_preference``)
 # ride in ``extra_body``, the SDK's documented verbatim JSON passthrough.
 _OPENAI_FIELDS = frozenset(inspect.signature(AsyncResponses.create).parameters) - {"self"}
-logger = logging.getLogger(__name__)
+# HTTP client errors the SDK raises as ``openai.APIError`` subclasses that no
+# Temporal retry can fix; the set is shared with perplexity_operations.
+_PERMANENT_HTTP_STATUSES = PERMANENT_HTTP_STATUSES
 
 
 @dataclass
 class _Invocation:
+    """Per-turn tap state: native-event queue, recorded call arguments, effort."""
+
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     arguments: dict[str, str] = field(default_factory=dict)
     effort: str | None = None
-    unavailable: dict[str, str] = field(default_factory=dict)
-    execution_started: bool = False
 
 
 def _error(message: str, *, non_retryable: bool) -> ApplicationError:
     return ApplicationError(message, type="PerplexityModelError", non_retryable=non_retryable)
+
+
+def _is_permanent(error: APIError) -> bool:
+    """Whether an SDK error is a client error no retry can fix.
+
+    ``APIStatusError`` carries ``status_code``. A bare ``APIError`` raised from
+    the SSE loop (``openai/_streaming.py``) has none, but keeps the API's own
+    ``code``/``type`` from the error body; the Agent API puts the numeric HTTP
+    status in ``code`` (``{"type": "external_connector_error", "code": 424}``).
+    """
+    if getattr(error, "status_code", None) in _PERMANENT_HTTP_STATUSES:
+        return True
+    code = getattr(error, "code", None)
+    if isinstance(code, int) or (isinstance(code, str) and code.isdigit()):
+        return int(code) in _PERMANENT_HTTP_STATUSES
+    return False
 
 
 def _ensure_object_properties(schema: Any) -> Any:
@@ -230,26 +251,12 @@ class PerplexityModel(OpenAIResponsesModel):
         async def tapped(chunk_size: int | None = None) -> AsyncIterator[bytes]:
             buffer = b""
             async for chunk in original() if chunk_size is None else original(chunk_size):
-                buffer += chunk
-                while b"\n" in buffer:
-                    line, buffer = buffer.split(b"\n", 1)
+                # SSE permits CR, LF and CRLF. A chunk-split CRLF becomes an
+                # extra empty line here, harmless to this line observer; the
+                # SDK still receives the original bytes for decoding.
+                *lines, buffer = re.split(b"\r\n|\r|\n", buffer + chunk)
+                for line in lines:
                     _enqueue_native(queue, line, arguments)
-                    if line.startswith(b"data:") and line[5:].strip() != b"[DONE]":
-                        try:
-                            payload = json.loads(line[5:])
-                        except ValueError:
-                            state.execution_started = True
-                            continue
-                        if not isinstance(payload, dict):
-                            state.execution_started = True
-                            continue
-                        kind = payload.get("type")
-                        item = payload.get("item") or {}
-                        catalog = kind in {"response.output_item.added", "response.output_item.done"} and item.get("type") == "mcp_list_tools"
-                        if not catalog and kind not in {"response.created", "response.queued", "response.in_progress", "response.failed", "error"}:
-                            state.execution_started = True
-                        if (payload.get("response") or {}).get("output"):
-                            state.execution_started = True
                 yield chunk
 
         response.aiter_bytes = tapped  # type: ignore[method-assign]
@@ -268,11 +275,6 @@ class PerplexityModel(OpenAIResponsesModel):
         state = self._invocation.get()
         if state and (effort := state.effort) is not None:
             request["reasoning"] = {**(request.get("reasoning") or {}), "effort": effort}
-        if state and state.unavailable:
-            request["tools"] = [tool for tool in request["tools"]
-                                if not (tool.get("type") == "connector" and tool.get("id") in state.unavailable)]
-            notice = "Connector availability for this request: " + "; ".join(state.unavailable.values())
-            request["input"] = [*request["input"], {"role": "user", "content": [{"type": "input_text", "text": notice}]}]
         if extra := {k: request.pop(k) for k in list(request) if k not in _OPENAI_FIELDS}:
             request["extra_body"] = extra
         return request
@@ -312,53 +314,20 @@ class PerplexityModel(OpenAIResponsesModel):
                     args = (messages, *args[1:])
                 else:
                     kwargs = {**kwargs, "messages": messages}
-            message_started = False
-            model_state = args[4] if len(args) > 4 else kwargs.get("model_state")
-            original_model_state = copy.deepcopy(model_state) if model_state is not None else None
-            # Each configured connector can be isolated once, and only before
-            # execution. Never retry an ambiguous or partly executed response.
-            while True:
-                state.execution_started = False
-                state.arguments.clear()
-                try:
-                    async for chunk in super().stream(*args, **kwargs):
-                        for native in self._drain():
-                            yield native
-                        if "messageStart" in chunk:
-                            if message_started:
-                                continue
-                            message_started = True
-                        chunk, current_tool_use = _fill_tool_arguments(chunk, state.arguments, current_tool_use)
-                        yield chunk
+            try:
+                async for chunk in super().stream(*args, **kwargs):
                     for native in self._drain():
                         yield native
-                    break
-                except (APIError, RuntimeError) as error:
-                    for native in self._drain():
-                        yield native
-                    match = re.search(r'Managed connector "([a-zA-Z0-9_-]+)" is not connected', str(error))
-                    if not match:
-                        if state.execution_started or getattr(error, "status_code", None) in {400, 401, 403, 404, 422}:
-                            raise _error(str(error), non_retryable=True) from error
-                        raise
-                    connector_id = match[1]
-                    connector = next((tool for tool in (self.config.get("params") or {}).get("tools", [])
-                                      if tool.get("type") == "connector" and tool.get("id") == connector_id), None)
-                    status = getattr(error, "status_code", None)
-                    if not connector or connector_id in state.unavailable or state.execution_started or status not in (None, 400):
-                        raise _error(f"Connector {connector_id} unavailable; safe initialization recovery exhausted or execution may have started. Request not replayed.", non_retryable=True) from error
-                    if model_state is not None:
-                        model_state.clear()
-                        model_state.update(original_model_state)
-                    label = connector["server_label"]
-                    detail = f"{label} ({connector_id}) is unavailable for this request. Continue independent work; do not claim access to it. Recheck on the next request."
-                    state.unavailable[connector_id] = detail
-                    logger.warning("Connector initialization failed: id=%s label=%s; continuing independent work without replaying actions", connector_id, label)
-                    # Existing native ToolResult presentation, explicitly a
-                    # harness availability notice, never a fabricated tool call.
-                    yield {"perplexity": {"type": "mcp_list_tools", "id": f"availability-{connector_id}",
-                                           "connector_id": connector_id, "server_label": label,
-                                           "tools": [], "error": detail}}
+                    chunk, current_tool_use = _fill_tool_arguments(chunk, state.arguments, current_tool_use)
+                    yield chunk
+            except APIError as error:
+                # Client errors are permanent: Temporal must not retry them.
+                # Throttling/overflow were already translated by the parent.
+                if _is_permanent(error):
+                    raise _error(str(error), non_retryable=True) from error
+                raise
+            for native in self._drain():
+                yield native
         finally:
             self._invocation.reset(token)
 
@@ -369,10 +338,5 @@ class PerplexityModel(OpenAIResponsesModel):
             return []
         queue, events = state.queue, []
         while not queue.empty():
-            payload = queue.get_nowait()
-            item = payload.get("item") or payload
-            if item.get("connector_id") and (item.get("error") or (item.get("type") == "mcp_list_tools" and item.get("tools") == [])):
-                logger.warning("Connector unavailable: id=%s label=%s code=%s", item["connector_id"], item.get("server_label"),
-                               item.get("error") if isinstance(item.get("error"), str) and item["error"] in {"AUTH_REQUIRED", "INVALID_ARGUMENTS", "POLICY_DENIED", "CONNECTOR_UNAVAILABLE", "CONNECTOR_INTERNAL_ERROR", "TOOL_ERROR"} else "EMPTY_CATALOG_OR_TOOL_ERROR")
-            events.append({"perplexity": payload})
+            events.append({"perplexity": queue.get_nowait()})
         return events  # type: ignore[return-value]

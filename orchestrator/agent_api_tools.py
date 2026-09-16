@@ -9,14 +9,12 @@ API stays unchanged.
 
 Members built here, in order: the static ``NATIVE_TOOLS`` union members,
 one ``{"type": "mcp"}`` entry per configured remote server, then one
-``{"type": "connector"}`` entry per configured connector
-(``config.CONNECTORS``, overridable via ``PERPLEXITY_CONNECTOR_IDS``).
+``{"type": "connector"}`` entry per connector in ``config.CONNECTORS``.
 """
 
 from __future__ import annotations
 
 import os
-import re
 from typing import Any
 
 from config import CONNECTORS
@@ -28,7 +26,7 @@ from config import CONNECTORS
 #
 #   web_search      fetch_url       people_search
 #   finance_search  sandbox         mcp (one entry per server URL)
-#   connector       (one entry per explicitly configured connector)
+#   connector       (one entry per config.CONNECTORS entry)
 #
 # With sandbox enabled the model loads the pplx_sdk skill and searches from
 # inside sandbox code, so results arrive as sandbox_results rather than
@@ -67,11 +65,6 @@ MCP_SERVERS: dict[str, dict[str, Any]] = {
     "pophive": {"url_env": "POPHIVE_MCP_URL"},
 }
 
-# Explicit API Group setup: comma-separated label=id pairs copied from the
-# portal after authorization, not evidence of a live connection by itself.
-CONNECTOR_IDS_ENV = "PERPLEXITY_CONNECTOR_IDS"
-
-
 def mcp_tools() -> list[dict[str, Any]]:
     """A native {"type": "mcp"} entry per configured remote server.
 
@@ -101,43 +94,14 @@ def mcp_tools() -> list[dict[str, Any]]:
 
 
 def connector_tools() -> list[dict[str, Any]]:
-    """Configured native connectors; IDs do not prove API Group authorization.
+    """A native {"type": "connector"} entry per ``config.CONNECTORS`` item.
 
-    The public OpenAPI and installed SDK expose no connector list/status API.
-    Keep the configured connector capabilities intact; service IDs and factory
-    construction do not establish authorization for the API Group.
+    Exactly the documented request shape (``type``, ``id``, ``server_label``,
+    optional ``server_description``); the connector id references an
+    integration the API Group connected in the Perplexity portal.
     https://docs.perplexity.ai/docs/agent-api/tools/connectors
-
-    The existing override replaces the connector selection, retaining metadata
-    for matching configured labels. Invalid entries fail, never silently drop.
     """
-    override = os.environ.get(CONNECTOR_IDS_ENV)
-    if not override or not override.strip():
-        return [{"type": "connector", **connector} for connector in CONNECTORS]
-    defaults = {connector["server_label"]: connector for connector in CONNECTORS}
-    tools: list[dict[str, Any]] = []
-    labels_seen: set[str] = set()
-    for index, pair in enumerate(override.split(","), start=1):
-        label, _, connector_id = pair.partition("=")
-        label, connector_id = label.strip(), connector_id.strip()
-        if (
-            not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", label)
-            or not connector_id
-            or label in labels_seen
-        ):
-            raise ValueError(
-                f"Invalid {CONNECTOR_IDS_ENV} entry {index}: expected a unique "
-                "1-64 character alphanumeric/underscore/hyphen label and a "
-                "nonempty portal connector ID (label=id). No entries were skipped."
-            )
-        labels_seen.add(label)
-        tools.append({
-            "type": "connector",
-            **defaults.get(label, {}),
-            "id": connector_id,
-            "server_label": label,
-        })
-    return tools
+    return [{"type": "connector", **connector} for connector in CONNECTORS]
 
 
 def native_tools() -> list[dict[str, Any]]:

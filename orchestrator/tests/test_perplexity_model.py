@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 import pytest
+from openai import APIError
 from PIL import Image
 from pydantic import BaseModel
 from strands.models.openai_responses import OpenAIResponsesModel
@@ -638,8 +639,7 @@ async def test_astra_invocation_reasoning_effort_is_honored_without_leaking(thin
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("connector_override", [False, True], ids=["unconfigured", "explicit-config"])
-async def test_astra_factory_matches_live_model_native_requests(monkeypatch, connector_override) -> None:
+async def test_astra_factory_matches_live_model_native_requests(monkeypatch) -> None:
     # Import the real worker factories without loading the protected .env.local.
     monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
     from config import BUILTIN_SKILLS, CONNECTORS, MAX_STEPS_CEILING, THINK_MODEL_ID
@@ -648,14 +648,7 @@ async def test_astra_factory_matches_live_model_native_requests(monkeypatch, con
     monkeypatch.setenv("DATACOMMONS_MCP_URL", "https://dc.example/mcp")
     monkeypatch.setenv("DC_API_KEY", "dc-test-key")
     monkeypatch.setenv("POPHIVE_MCP_URL", "https://pophive.example/mcp")
-    monkeypatch.delenv("PERPLEXITY_CONNECTOR_IDS", raising=False)
     connectors = [{"type": "connector", **connector} for connector in CONNECTORS]
-    if connector_override:
-        monkeypatch.setenv("PERPLEXITY_CONNECTOR_IDS", "drive=connector_test_drive,github=connector_test_github")
-        connectors = [
-            {"type": "connector", "server_label": "drive", "id": "connector_test_drive"},
-            {"type": "connector", **CONNECTORS[1], "id": "connector_test_github"},
-        ]
     expected_tools = [
         {"type": name} for name in ("web_search", "fetch_url", "people_search", "finance_search", "sandbox")
     ] + [
@@ -1148,13 +1141,12 @@ async def test_re_running_the_same_model_does_not_leak_native_frames() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure_mode", ["http", "stream"])
-async def test_configured_connector_failure_propagates_without_dropping_tools(monkeypatch, failure_mode):
-    import openai
-
+async def test_connector_failure_propagates_verbatim_without_replay(monkeypatch, failure_mode):
+    """A connector error from the API is the API's answer: one request, the
+    documented tools array sent as configured, the message surfaced as-is."""
     monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
     import run_worker
 
-    monkeypatch.setenv("PERPLEXITY_CONNECTOR_IDS", "google_drive=connector_googledrive")
     factories, _ = run_worker.build_perplexity_factories("pplx-test", [])
     model = factories["preset:high"]()
     tools = copy.deepcopy(model.get_config()["params"]["tools"])
@@ -1171,15 +1163,71 @@ async def test_configured_connector_failure_propagates_without_dropping_tools(mo
         ))
 
     monkeypatch.setattr(model, "_transport", httpx.MockTransport(fail_request))
+    with pytest.raises((ApplicationError, RuntimeError)) as caught:
+        await collect(model)
+    assert message in str(caught.value)
+    if failure_mode == "http":
+        assert isinstance(caught.value, ApplicationError) and caught.value.non_retryable is True
+    assert len(requests) == 1
+    assert requests[0]["tools"] == tools
+    assert any(tool.get("type") == "connector" for tool in tools)
+    assert model.get_config()["params"]["tools"] == tools
+
+
+@pytest.mark.asyncio
+async def test_http_424_external_connector_error_is_non_retryable(monkeypatch) -> None:
+    """Live 2026-09-13: POST with a managed connector the Project has not
+    authorized returns HTTP 424 ``external_connector_error`` before inference.
+    The openai SDK has no 424 subclass (bare ``APIStatusError``), and the same
+    tools array cannot succeed on retry, so Temporal must not retry it."""
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
+    import run_worker
+
+    factories, _ = run_worker.build_perplexity_factories("pplx-test", [])
+    model = factories["preset:high"]()
+    message = 'Managed connector "connector_googledrive" is not connected.'
+    error = {"message": message, "type": "external_connector_error", "code": 424}
+    requests = []
+
+    def fail_request(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(424, json={"error": error})
+
+    monkeypatch.setattr(model, "_transport", httpx.MockTransport(fail_request))
     with pytest.raises(ApplicationError) as caught:
         await collect(model)
-    assert "connector_googledrive" in str(caught.value)
     assert caught.value.non_retryable is True
-    assert len(requests) == 2
-    assert not any(tool.get("id") == "connector_googledrive" for tool in requests[1]["tools"])
-    assert requests[0]["tools"] == tools
-    assert any(tool.get("id") == "connector_googledrive" for tool in tools)
-    assert model.get_config()["params"]["tools"] == tools
+    assert message in str(caught.value)
+    assert len(requests) == 1
+
+
+def test_is_permanent_matches_status_or_numeric_body_code() -> None:
+    request = httpx.Request("POST", f"{PERPLEXITY_API_BASE}/v1/responses")
+    body = {"type": "external_connector_error", "code": 424, "message": "x"}
+    assert perplexity_model._is_permanent(APIError("x", request, body=body)) is True
+    assert perplexity_model._is_permanent(APIError("x", request, body={"code": "424"})) is True
+    assert perplexity_model._is_permanent(APIError("x", request, body={"code": "server_error"})) is False
+    assert perplexity_model._is_permanent(APIError("x", request, body={"code": 500})) is False
+    assert perplexity_model._is_permanent(APIError("x", request, body=None)) is False
+
+
+def test_connector_items_are_enqueued_verbatim_without_extra_logging(caplog) -> None:
+    """Connector output items are native items like any other: the tap queues
+    them for the UI and adds no diagnostic of its own."""
+    queue: asyncio.Queue = asyncio.Queue()
+    items = (
+        {"type": "mcp_call", "connector_id": "connector_googledrive", "server_label": "google_drive",
+         "name": "search_files", "arguments": "{}", "error": "AUTH_REQUIRED"},
+        {"type": "mcp_list_tools", "connector_id": "connector_linear", "server_label": "linear", "tools": []},
+        {"type": "mcp_call", "connector_id": "connector_github", "server_label": "github",
+         "name": "get_file_contents", "arguments": "{}", "error": "TOOL_ERROR"},
+    )
+    with caplog.at_level("WARNING", logger="perplexity_model"):
+        for item in items:
+            payload = {"type": "response.output_item.done", "item": item}
+            perplexity_model._enqueue_native(queue, b"data: " + json.dumps(payload).encode())
+    assert queue.qsize() == 3
+    assert not caplog.records
 
 
 @pytest.mark.asyncio

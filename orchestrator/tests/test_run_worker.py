@@ -45,7 +45,6 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch):
         "DATACOMMONS_MCP_URL",
         "DC_API_KEY",
         "POPHIVE_MCP_URL",
-        "PERPLEXITY_CONNECTOR_IDS",
     ):
         monkeypatch.delenv(name, raising=False)
     yield
@@ -61,15 +60,6 @@ def _patch_catalog(monkeypatch: pytest.MonkeyPatch, ids: list[str]) -> None:
         return sorted(set(ids))
 
     monkeypatch.setattr(run_worker, "fetch_model_ids", fake_fetch)
-
-
-@pytest.fixture
-def explicit_connectors(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Exercise explicit operator configuration, not inferred authorization."""
-    monkeypatch.setenv(
-        "PERPLEXITY_CONNECTOR_IDS",
-        "google_drive=connector_googledrive,github=connector_github",
-    )
 
 
 # --- provider-declaring catalog --------------------------------------------------
@@ -225,75 +215,47 @@ def test_mcp_tools_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 # --- connectors -----------------------------------------------------------------
 
 
-def test_native_tools_preserve_explicit_connector_labels_and_descriptions(explicit_connectors) -> None:
-    connectors = [
-        tool for tool in run_worker.native_tools() if tool["type"] == "connector"
-    ]
-    assert [(c["id"], c["server_label"]) for c in connectors] == [
-        ("connector_googledrive", "google_drive"),
-        ("connector_github", "github"),
-    ]
-    # Descriptions come from config.CONNECTORS verbatim.
-    for connector in connectors:
-        assert connector["server_description"]
+def test_connector_tools_are_the_documented_request_shape() -> None:
+    """One {"type": "connector"} entry per config.CONNECTORS item, verbatim.
 
-
-def test_connector_tools_env_override_replaces_config(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        "PERPLEXITY_CONNECTOR_IDS",
-        "drive_alt=connector_drivealt, gh_alt=connector_ghalt",
-    )
+    https://docs.perplexity.ai/docs/agent-api/tools/connectors documents
+    ``type``/``id``/``server_label`` plus optional ``server_description``.
+    """
     connectors = run_worker.connector_tools()
-    assert connectors == [
-        {"type": "connector", "id": "connector_drivealt", "server_label": "drive_alt"},
-        {"type": "connector", "id": "connector_ghalt", "server_label": "gh_alt"},
+    assert connectors == [{"type": "connector", **connector} for connector in CONNECTORS]
+    assert [(c["id"], c["server_label"]) for c in connectors] == [
+        ("connector_github", "github"),
+        ("connector_linear", "linear"),
     ]
+    for connector in connectors:
+        assert set(connector) <= {"type", "id", "server_label", "server_description"}
+        assert connector["server_description"]
+    assert agent_api_tools.CONNECTORS == CONNECTORS
 
 
-@pytest.mark.parametrize("override", [None, "", "   "])
-def test_missing_connector_config_keeps_other_tools(monkeypatch, override, caplog) -> None:
-    if override is not None:
-        monkeypatch.setenv("PERPLEXITY_CONNECTOR_IDS", override)
+def test_all_factories_share_native_tools(monkeypatch, caplog) -> None:
     monkeypatch.setenv("DATACOMMONS_MCP_URL", "https://dc.example/mcp")
     monkeypatch.setenv("DC_API_KEY", "private-mcp-key")
     monkeypatch.setenv("POPHIVE_MCP_URL", "https://pophive.example/mcp")
-    factories, _ = run_worker.build_perplexity_factories("private-api-key", CATALOG_IDS)
+    with caplog.at_level("INFO", logger="run_worker"):
+        factories, _ = run_worker.build_perplexity_factories("private-api-key", CATALOG_IDS)
     tools = run_worker.native_tools()
     assert tools == [*run_worker.NATIVE_TOOLS, *run_worker.mcp_tools(), *run_worker.connector_tools()]
     assert [tool["type"] for tool in tools] == [
-        "web_search", "fetch_url", "people_search", "finance_search", "sandbox", "mcp", "mcp", "connector", "connector", "connector",
+        "web_search", "fetch_url", "people_search", "finance_search", "sandbox",
+        "mcp", "mcp", "connector", "connector",
     ]
     for factory in factories.values():
         assert factory().get_config()["params"]["tools"] == tools
-    message = caplog.text
-    assert "authorization status unverified" in message
-    assert "google_drive" in message and "github" in message
-    assert "https://console.perplexity.ai/group/connectors" in message
-    assert "private-api-key" not in message and "private-mcp-key" not in message
-
-
-@pytest.mark.parametrize("override", [
-    "malformed",
-    "google_drive=connector_googledrive,malformed",
-    "google_drive=",
-    "=connector_googledrive",
-    "bad label=connector_googledrive",
-    f"{'x' * 65}=connector_googledrive",
-    "github=connector_github,github=another-id",
-    "github=connector_github,",
-])
-def test_invalid_connector_selection_never_silently_drops_entries(monkeypatch, override) -> None:
-    monkeypatch.setenv("PERPLEXITY_CONNECTOR_IDS", override)
-    with pytest.raises(ValueError, match="No entries were skipped") as caught:
-        run_worker.build_perplexity_factories("not-a-real-key", CATALOG_IDS)
-    assert override not in str(caught.value)
-    assert "not-a-real-key" not in str(caught.value)
+    records = [r for r in caplog.records if "Registered Agent API connectors" in r.getMessage()]
+    assert len(records) == 1 and records[0].levelname == "INFO"
+    assert "['github', 'linear']" in records[0].getMessage()
+    assert not [r for r in caplog.records if r.levelno >= 30]
+    assert "private-api-key" not in caplog.text and "private-mcp-key" not in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_startup_accepts_missing_connector_config(monkeypatch, caplog) -> None:
+async def test_startup_registers_all_factories(monkeypatch) -> None:
     monkeypatch.setenv("PERPLEXITY_API_KEY", "not-a-real-key")
     monkeypatch.setenv("GOOGLE_API_KEY", "not-a-real-google-key")
     _patch_catalog(monkeypatch, CATALOG_IDS)
@@ -302,68 +264,19 @@ async def test_startup_accepts_missing_connector_config(monkeypatch, caplog) -> 
     assert list(factories) == [*PRESET_IDS, *SORTED_CATALOG, *GEMINI_MODEL_IDS]
     assert [entry.id for entry in catalog] == list(factories)
     assert default == DEFAULT_MODEL_ID
-    assert "authorization status unverified" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_startup_rejects_malformed_explicit_connectors_before_catalog_io(monkeypatch) -> None:
-    monkeypatch.setenv("PERPLEXITY_API_KEY", "not-a-real-key")
-    monkeypatch.setenv("GOOGLE_API_KEY", "not-a-real-google-key")
-    monkeypatch.setenv("PERPLEXITY_CONNECTOR_IDS", "google_drive=")
-
-    async def unexpected_fetch(api_key):
-        pytest.fail("Connector setup must be checked before catalog I/O")
-
-    monkeypatch.setattr(run_worker, "fetch_model_ids", unexpected_fetch)
-    with pytest.raises(SystemExit, match="Invalid PERPLEXITY_CONNECTOR_IDS"):
-        await run_worker.assemble_model_factories()
-
-
-def test_all_factories_share_explicit_tools_without_claiming_authorization(
-    monkeypatch, explicit_connectors, caplog,
-) -> None:
-    monkeypatch.setenv("DATACOMMONS_MCP_URL", "https://dc.example/mcp")
-    monkeypatch.setenv("DC_API_KEY", "private-mcp-key")
-    monkeypatch.setenv("POPHIVE_MCP_URL", "https://pophive.example/mcp")
-    tools = run_worker.native_tools()
-    factories, _ = run_worker.build_perplexity_factories("private-api-key", CATALOG_IDS)
-    # Factories capture startup configuration, not a per-inference fallback.
-    monkeypatch.delenv("PERPLEXITY_CONNECTOR_IDS")
-    for factory in factories.values():
-        assert factory().get_config()["params"]["tools"] == tools
-    assert [tool["type"] for tool in tools] == [
-        "web_search", "fetch_url", "people_search", "finance_search", "sandbox",
-        "mcp", "mcp", "connector", "connector",
-    ]
-    assert "authorization status unverified" in caplog.text
-    assert "google_drive" in caplog.text and "github" in caplog.text
-    assert "private-api-key" not in caplog.text and "private-mcp-key" not in caplog.text
-
-
-def test_explicit_selection_reports_omitted_labels(monkeypatch, caplog) -> None:
-    monkeypatch.setenv("PERPLEXITY_CONNECTOR_IDS", "github=opaque-portal-id")
-    factories, _ = run_worker.build_perplexity_factories("private-api-key", [])
-    connectors = [
-        tool for tool in factories["preset:high"]().get_config()["params"]["tools"]
-        if tool["type"] == "connector"
-    ]
-    assert connectors == [{"type": "connector", **CONNECTORS[1], "id": "opaque-portal-id"}]
-    assert "configuration missing" in caplog.text and "google_drive" in caplog.text
-    assert "opaque-portal-id" not in caplog.text
-    assert agent_api_tools.CONNECTORS == CONNECTORS
 
 
 @pytest.mark.parametrize(
     "model_id", ["preset:high", "anthropic/claude-opus-5"]
 )
-def test_model_params_tools_include_connectors(model_id: str, explicit_connectors) -> None:
+def test_model_params_tools_include_connectors(model_id: str) -> None:
     """Both preset and catalog params carry the connector entries."""
     tools = run_worker.native_tools()
     params = run_worker.model_params(model_id, tools)
     connector_ids = [
         tool["id"] for tool in params["tools"] if tool.get("type") == "connector"
     ]
-    assert connector_ids == ["connector_googledrive", "connector_github"]
+    assert connector_ids == ["connector_github", "connector_linear"]
 
 
 # --- catalog fetch --------------------------------------------------------------

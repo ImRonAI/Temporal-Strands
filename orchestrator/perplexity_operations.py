@@ -45,6 +45,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import re
 import urllib.parse
 import uuid
@@ -63,6 +64,8 @@ from temporalio.exceptions import ApplicationError
 # shared native array introduces no import cycle.
 import agent_api_tools
 import config
+
+logger = logging.getLogger(__name__)
 
 # Shared workflow/server contract: nested sub-agent run events ride this topic.
 AGENT_RUNS_TOPIC = "agent_runs"
@@ -136,6 +139,8 @@ _NON_RETRYABLE_SDK_ERRORS = (
 )
 
 # response.failed error codes containing these markers are permanent.
+# ``external_connector_error`` is the API rejecting the request's connector
+# list before inference (424); the same tools array cannot succeed on retry.
 _NON_RETRYABLE_FAILURE_MARKERS = (
     "auth",
     "permission",
@@ -143,14 +148,7 @@ _NON_RETRYABLE_FAILURE_MARKERS = (
     "validation",
     "unsupported",
     "not_found",
-)
-# Only recognizable access failures are extracted from free-text connector errors.
-_CONNECTOR_ACCESS_ERROR_RE = re.compile(
-    r"\b(?:AUTH[ _]REQUIRED|AUTHENTICATION[ _]REQUIRED|AUTHORIZATION[ _]REQUIRED|"
-    r"UNAUTHENTICATED|UNAUTHORIZED|PERMISSION[ _]DENIED|ACCESS[ _]DENIED|FORBIDDEN|"
-    r"CONNECTOR[ _]DISCONNECTED|CONNECTOR[ _]NOT[ _]CONNECTED|INVALID[ _]GRANT|"
-    r"TOKEN[ _]EXPIRED|TOKEN[ _]REVOKED|CREDENTIALS[ _]EXPIRED)\b",
-    re.IGNORECASE,
+    "external_connector_error",
 )
 
 # --- worker client wiring ----------------------------------------------------
@@ -201,10 +199,15 @@ def _raise_sdk_error(error: Exception) -> None:
             body = {**body, "message": detail}
     if not isinstance(body, Mapping):
         body = {"message": body or str(error)}
+    # Statuses the SDK has no subclass for (424 external_connector_error) fall
+    # through as bare APIStatusError; classify them by status like the rest.
+    non_retryable = isinstance(error, _NON_RETRYABLE_SDK_ERRORS) or (
+        getattr(error, "status_code", None) in config.PERMANENT_HTTP_STATUSES
+    )
     try:
         _raise_failed(
             {**body, "message": body.get("message") or str(error)},
-            non_retryable=isinstance(error, _NON_RETRYABLE_SDK_ERRORS),
+            non_retryable=non_retryable,
         )
     except ApplicationError as failure:
         raise failure from error
@@ -216,23 +219,9 @@ def _raise_failed(error: Any, *, non_retryable: bool = False) -> None:
         data = {"message": data if isinstance(data, str) else None}
     code = f"{data.get('code') or ''} {data.get('type') or ''}".lower()
     message = str(data.get("message") or "Perplexity response failed")
-    identity = ", ".join(
-        f"{key}={data[key]}"
-        for key in ("connector_id", "server_label")
-        if data.get(key)
+    non_retryable = non_retryable or any(
+        marker in code for marker in _NON_RETRYABLE_FAILURE_MARKERS
     )
-    connector_disconnected = (
-        bool(identity) or "connector" in message.lower()
-    ) and any(term in message.lower() for term in ("disconnected", "not connected"))
-    non_retryable = (
-        non_retryable
-        or any(marker in code for marker in _NON_RETRYABLE_FAILURE_MARKERS)
-        or bool(_CONNECTOR_ACCESS_ERROR_RE.search(code))
-        or bool(_CONNECTOR_ACCESS_ERROR_RE.search(message))
-        or connector_disconnected
-    )
-    if identity:
-        message = f"{message} ({identity})"
     raise _operation_error(message, non_retryable=non_retryable)
 
 
@@ -678,12 +667,6 @@ async def _run_create(
     last_sequence: Any = None
     terminal: Any = None
     failure: Any = None
-    connectors = {
-        tool["server_label"]: tool["id"]
-        for tool in request.get("tools", [])
-        if tool.get("type") == "connector"
-    }
-    logged_connector_diagnostics: set[tuple[str, str]] = set()
 
     # Pulse only if a heartbeat timeout is configured. With Temporal's default
     # (no heartbeat timeout) a silent stream is not killed for missing beats.
@@ -729,49 +712,6 @@ async def _run_create(
                         or getattr(event, "error", None)
                         or {}
                     )
-                # MCP failures are already visible to the model in-band. Log
-                # metadata only; neither these nor an empty catalog fail a run.
-                items = []
-                if event_type in (
-                    "response.output_item.added", "response.output_item.done"
-                ):
-                    items = [event_data.get("item")]
-                elif event_type == "response.completed":
-                    items = (event_data.get("response") or {}).get("output") or []
-                for item in items:
-                    if not isinstance(item, Mapping):
-                        continue
-                    label = item.get("server_label")
-                    if not isinstance(label, str) or label not in connectors:
-                        continue
-                    item_type = item.get("type")
-                    if item_type not in ("mcp_call", "mcp_list_tools"):
-                        continue
-                    item_error = item.get("error")
-                    diagnostic_code = None
-                    if item_error:
-                        match = _CONNECTOR_ACCESS_ERROR_RE.search(str(item_error))
-                        diagnostic_code = (
-                            match.group().upper().replace(" ", "_")
-                            if match else f"{item_type.upper()}_ERROR"
-                        )
-                    elif (
-                        item_type == "mcp_list_tools"
-                        and item.get("tools") == []
-                        and event_type != "response.output_item.added"
-                    ):
-                        diagnostic_code = "EMPTY_TOOL_CATALOG"
-                    if (
-                        diagnostic_code
-                        and (label, diagnostic_code) not in logged_connector_diagnostics
-                    ):
-                        logged_connector_diagnostics.add((label, diagnostic_code))
-                        activity.logger.warning(
-                            "Perplexity connector id=%s label=%s code=%s",
-                            re.sub(r"[^A-Za-z0-9_-]", "?", connectors[label][:128]),
-                            label[:64],
-                            diagnostic_code,
-                        )
     except perplexity.APIError as error:
         _raise_sdk_error(error)
     finally:

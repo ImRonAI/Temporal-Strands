@@ -51,6 +51,9 @@ DESKTOP_VNC_VIEW_COMMAND = os.environ.get(
 )
 DESKTOP_VNC_COMMAND_TIMEOUT = 15
 DESKTOP_HANDOFF_TIMEOUT = timedelta(seconds=45)
+# Startup probe: is the workflow that owns the desktop still running? Bounded so
+# a slow Temporal cannot stall worker startup; on doubt ownership is kept.
+DESKTOP_OWNER_PROBE_TIMEOUT = timedelta(seconds=10)
 # --- Perplexity Agent API (outer model provider) ---
 # Pinned explicitly rather than inherited from the environment: the Perplexity
 # SDK reads PERPLEXITY_BASE_URL on construction, and .env.local may point it at
@@ -93,20 +96,22 @@ BUILTIN_SKILLS = tuple(
         "office/xlsx",
     )
 )
+# HTTP client statuses the Agent API returns for a request no retry can fix:
+# bad request, auth, permission, not found, validation, and 424
+# external_connector_error ("Managed connector ... is not connected", observed
+# live 2026-09-13 for a connector the Project has not authorized). Both
+# Perplexity adapters classify these as non-retryable.
+PERMANENT_HTTP_STATUSES = frozenset({400, 401, 403, 404, 422, 424})
 # Configured Agent API connectors, attached to every request as
 # native {"type": "connector"} tools (agent_api_tools.connector_tools).
-# Authorization lives in the Perplexity dashboard; requests only reference the
-# connector id. Overridable via PERPLEXITY_CONNECTOR_IDS as comma-separated
-# label=id pairs (see agent_api_tools.CONNECTOR_IDS_ENV).
+# Authorization lives in the Perplexity Project; requests only reference the
+# connector id. A connector the gateway reports as not connected fails the
+# WHOLE request with HTTP 424 before inference (live 2026-09-15:
+# connector_googledrive, request id ac36f1f9-faa5-4dfb-afbc-e2c829d6f8af),
+# so only connectors verified live against the Project belong here.
+# connector_googledrive is removed until the Project's Drive grant is
+# reconnected in the console and a bare request succeeds.
 CONNECTORS: tuple[dict[str, str], ...] = (
-    {
-        "id": "connector_googledrive",
-        "server_label": "google_drive",
-        "server_description": (
-            "The user's Google Drive: search, read, and reference their "
-            "Docs, Sheets, Slides, and files."
-        ),
-    },
     {
         "id": "connector_github",
         "server_label": "github",

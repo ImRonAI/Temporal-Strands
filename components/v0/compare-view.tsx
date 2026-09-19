@@ -95,8 +95,8 @@ export function CompareView() {
             data-testid="compare-pane"
             className="app-glass flex min-h-0 min-w-0 snap-start snap-always flex-col overflow-hidden rounded-2xl border"
           >
-            <div className="app-glass-edge flex shrink-0 items-center justify-between gap-2 border-b bg-white/[0.02] px-4 py-2.5">
-              <span className="truncate font-mono text-xs text-muted-foreground">{pane.model}</span>
+            <div className="app-glass-edge flex shrink-0 items-center justify-between gap-2 border-b bg-black/25 px-4 py-2.5">
+              <span className="truncate font-mono text-xs tracking-[0.01em] text-muted-foreground">{pane.model}</span>
               {(statuses[pane.id] === "streaming" || statuses[pane.id] === "submitted") && <Spinner className="size-3.5 shrink-0" />}
               {panes.length > MIN_MODELS && (
                 <Button aria-label={`Remove model ${index + 1}`} onClick={() => removeModel(pane.id)} size="icon-sm" type="button" variant="ghost">

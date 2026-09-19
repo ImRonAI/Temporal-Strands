@@ -6,39 +6,31 @@ import {
   type DynamicToolUIPart,
   type UIMessage,
 } from "ai"
-import { type ReactNode, createElement, useEffect, useState } from "react"
+import { createElement, Fragment, useEffect, useState } from "react"
 import type { BundledLanguage } from "shiki"
 import {
   BotIcon,
   BrainIcon,
-  ChevronDownIcon,
   ClockIcon,
   CodeIcon,
   CreditCardIcon,
   DownloadIcon,
-  FileIcon,
   FileEditIcon,
+  FileIcon,
   FilePlusIcon,
   FileSearchIcon,
-  FileTextIcon,
-  FilesIcon,
   FolderSearchIcon,
-  GlobeIcon,
   ImageIcon,
   LinkIcon,
   ListIcon,
-  Loader2Icon,
   MapPinIcon,
-  MonitorIcon,
   PackageIcon,
   SearchIcon,
+  ServerIcon,
   TerminalSquareIcon,
   UsersIcon,
   WrenchIcon,
 } from "lucide-react"
-
-import { MessageResponse } from "@/components/ai-elements/message"
-import { cn } from "@/lib/utils"
 
 import {
   Agent,
@@ -48,6 +40,8 @@ import {
 } from "@/components/ai-elements/agent"
 import {
   Artifact,
+  ArtifactAction,
+  ArtifactActions,
   ArtifactContent,
   ArtifactDescription,
   ArtifactHeader,
@@ -66,46 +60,17 @@ import {
   CodeBlock,
   CodeBlockActions,
   CodeBlockCopyButton,
+  CodeBlockFilename,
   CodeBlockHeader,
   CodeBlockTitle,
 } from "@/components/ai-elements/code-block"
-import {
-  FileTree,
-  FileTreeFile,
-} from "@/components/ai-elements/file-tree"
+import { FileTree, FileTreeFile } from "@/components/ai-elements/file-tree"
 import {
   JSXPreview,
   JSXPreviewContent,
   JSXPreviewError,
 } from "@/components/ai-elements/jsx-preview"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@/components/ui/hover-card"
-import {
-  Terminal,
-  TerminalActions,
-  TerminalContent,
-  TerminalCopyButton,
-  TerminalHeader,
-  TerminalStatus,
-  TerminalTitle,
-} from "@/components/ai-elements/terminal"
-import {
-  WebPreview,
-  WebPreviewBody,
-  WebPreviewNavigation,
-  WebPreviewUrl,
-} from "@/components/ai-elements/web-preview"
+import { MessageResponse } from "@/components/ai-elements/message"
 import {
   Sandbox,
   SandboxContent,
@@ -123,6 +88,28 @@ import {
   TaskItemFile,
   TaskTrigger,
 } from "@/components/ai-elements/task"
+import {
+  Terminal,
+  TerminalActions,
+  TerminalContent,
+  TerminalCopyButton,
+  TerminalHeader,
+  TerminalStatus,
+  TerminalTitle,
+} from "@/components/ai-elements/terminal"
+import {
+  Tool,
+  ToolContent,
+  ToolHeader,
+  ToolInput,
+  ToolOutput,
+} from "@/components/ai-elements/tool"
+import {
+  WebPreview,
+  WebPreviewBody,
+  WebPreviewNavigation,
+  WebPreviewUrl,
+} from "@/components/ai-elements/web-preview"
 
 // Pure grouping/binding/projection helpers live in agent-run.ts so the
 // scoped Vitest suite covers them without a DOM test stack.
@@ -281,12 +268,6 @@ const GMP_MAP = {
     createElement("gmp-place-contextual", props),
 }
 
-// SandboxResultsOutputItem.status is its own real enum ("in_progress" |
-// "completed" | "failed" | "timed_out" — verified against the installed
-// perplexity SDK's output_item.py), distinct from ToolUIPart["state"]
-// (which SandboxHeader actually requires). Mapping rather than hardcoding
-// one state regardless of what really happened.
-
 // One reconciled data-agent-run part per nested preset run, emitted by
 // app/api/orchestrator/route.ts from the backend's agent_runs topic.
 type AgentRunPart = { type: "data-agent-run"; id?: string; data: AgentRunSnapshot }
@@ -301,15 +282,315 @@ function chainStatus(chain: AgentChain, run: AgentRunSnapshot | undefined): stri
   return "queued"
 }
 
+// ---------------------------------------------------------------------------
+// Documented compositions. Each helper below is one AI Elements example
+// (elements.ai-sdk.dev/components/<name>) applied to this app's data. None
+// re-implements a primitive's own row, badge, animation, or scroll behavior.
+// ---------------------------------------------------------------------------
+
+// Chain of Thought example: results are ChainOfThoughtSearchResults >
+// ChainOfThoughtSearchResult. `render` is the Badge's base-ui composition
+// prop, so a result with a URL is the anchor itself.
+function SearchResults({ items }: { items: Array<{ title: string; url?: string }> }) {
+  if (items.length === 0) return null
+  return (
+    <ChainOfThoughtSearchResults>
+      {items.map((item, i) => (
+        <ChainOfThoughtSearchResult
+          key={item.url ? `${item.url}-${i}` : `${item.title}-${i}`}
+          className="max-w-full truncate border-border bg-white/[0.035] text-muted-foreground shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.05)] [a]:hover:border-blurple-bright/40 [a]:hover:bg-blurple/15 [a]:hover:text-foreground"
+          render={
+            item.url ? (
+              <a href={item.url} rel="noreferrer" target="_blank" />
+            ) : undefined
+          }
+        >
+          {item.title}
+        </ChainOfThoughtSearchResult>
+      ))}
+    </ChainOfThoughtSearchResults>
+  )
+}
+
+// Tool example (output-error): a native Agent API item that reports `error`
+// is a failed tool call, so it renders with the documented output-error
+// header state and ToolOutput errorText.
+function NativeToolError({
+  toolName,
+  input,
+  error,
+}: {
+  toolName: string
+  input?: unknown
+  error: string
+}) {
+  return (
+    <Tool className="app-glass app-glass-edge overflow-hidden rounded-lg border-destructive/30" defaultOpen>
+      <ToolHeader
+        type="dynamic-tool"
+        toolName={toolName}
+        state="output-error"
+        className="bg-destructive/[0.06]"
+      />
+      <ToolContent className="border-t border-destructive/20 bg-black/20">
+        {input !== undefined && <ToolInput input={input} />}
+        <ToolOutput output={undefined} errorText={error} />
+      </ToolContent>
+    </Tool>
+  )
+}
+
+// Task example ("Found project files"): TaskTrigger title + TaskContent of
+// TaskItems, where a file mention is text followed by a TaskItemFile chip.
+function FileTask({
+  title,
+  files,
+  defaultOpen = true,
+}: {
+  title: string
+  files: Array<{ label?: string; path: string }>
+  defaultOpen?: boolean
+}) {
+  return (
+    <Task className="app-glass app-glass-edge rounded-lg border px-3 py-2.5" defaultOpen={defaultOpen}>
+      <TaskTrigger title={title} className="w-full text-left" />
+      <TaskContent>
+        {files.map((file, i) => (
+          <TaskItem key={`${file.path}-${i}`}>
+            <span className="inline-flex flex-wrap items-center gap-1.5">
+              {file.label}
+              <TaskItemFile className="max-w-full border-border bg-black/25 font-mono text-[12px] tracking-[0.01em] text-foreground/90 shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.05)]">
+                <FileIcon className="size-3.5 text-blurple-bright/80" />
+                <span className="truncate">{file.path}</span>
+              </TaskItemFile>
+            </span>
+          </TaskItem>
+        ))}
+      </TaskContent>
+    </Task>
+  )
+}
+
+// Chain of Thought example: an image step is ChainOfThoughtImage with a
+// caption, holding the image element itself. Remote URLs are plain <img>
+// because the AI Elements Image component takes a generated base64 payload.
+function ImageStep({
+  src,
+  alt,
+  caption,
+  href,
+}: {
+  src: string
+  alt: string
+  caption?: string
+  href?: string
+}) {
+  const image = (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt={alt} className="h-auto max-h-[22rem] max-w-full rounded-md" />
+  )
+  return (
+    <ChainOfThoughtImage caption={caption}>
+      {href ? (
+        <a href={href} rel="noreferrer" target="_blank">
+          {image}
+        </a>
+      ) : (
+        image
+      )}
+    </ChainOfThoughtImage>
+  )
+}
+
+// Values are shiki BundledLanguage ids — CodeBlock's language prop is typed
+// against that union, so this map narrows instead of widening to string.
+const CODE_EXTENSIONS: Record<string, BundledLanguage> = {
+  css: "css",
+  html: "html",
+  js: "javascript",
+  json: "json",
+  jsx: "jsx",
+  md: "markdown",
+  py: "python",
+  sh: "bash",
+  ts: "typescript",
+  tsx: "tsx",
+}
+
+function codeLanguageFor(path: string): BundledLanguage | undefined {
+  return CODE_EXTENSIONS[path.split(".").pop()?.toLowerCase() ?? ""]
+}
+
+// Office documents and HTML pages the browser can render inline.
+const PREVIEWABLE = /\.(html?|pdf)$/i
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|svg)$/i
+
+
 /**
- * One preset sub-agent run: the create tool call, its live agent_runs
- * snapshot, and the retrieve/list/download calls bound to it by response id.
- *
- * Composition is the native AI Elements chain the plan requires: the caller
- * renders this inside an outer ChainOfThoughtStep; here it is
- * Agent > AgentHeader + AgentContent, a Task for the run, and a nested
- * ChainOfThought inside TaskContent built from the same ChainOfThought*
- * subcomponents (and NativeToolStep renderers) the outer chain uses.
+ * A non-image file shared out of the sandbox — the Artifact example:
+ * ArtifactHeader (title + description, actions) over ArtifactContent. Source
+ * files stream into a CodeBlock (Code Block example: header with filename and
+ * copy button); html/pdf render live through WebPreview (Web Preview example:
+ * navigation with URL bar over the iframe body).
+ */
+function ShareFileArtifact({ name, url }: { name: string; url: string | null }) {
+  const codeLanguage = codeLanguageFor(name)
+  const [source, setSource] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!url || !codeLanguage) return
+    let cancelled = false
+    fetch(url)
+      .then((res) => (res.ok ? res.text() : null))
+      .then((text) => {
+        if (!cancelled && text !== null) setSource(text)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [url, codeLanguage])
+
+  const preview = url && PREVIEWABLE.test(name)
+
+  return (
+    <Artifact className="app-glass app-glass-edge">
+      <ArtifactHeader className="app-glass-edge bg-black/25">
+        <div>
+          <ArtifactTitle className="font-mono text-[13px] tracking-[0.01em]">{name}</ArtifactTitle>
+          <ArtifactDescription className="text-xs">
+            {url ? "Produced in the sandbox" : "Produced in the sandbox · no download URL"}
+          </ArtifactDescription>
+        </div>
+        {url && (
+          <ArtifactActions>
+            <ArtifactAction
+              icon={DownloadIcon}
+              label="Download"
+              tooltip="Download file"
+              onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+            />
+          </ArtifactActions>
+        )}
+      </ArtifactHeader>
+      <ArtifactContent className="space-y-3 p-0">
+        {codeLanguage && source !== null && (
+          <CodeBlock className="border-none" code={source} language={codeLanguage} showLineNumbers>
+            <CodeBlockHeader>
+              <CodeBlockTitle>
+                <FileIcon size={14} />
+                <CodeBlockFilename>{name}</CodeBlockFilename>
+              </CodeBlockTitle>
+              <CodeBlockActions>
+                <CodeBlockCopyButton />
+              </CodeBlockActions>
+            </CodeBlockHeader>
+          </CodeBlock>
+        )}
+        {preview && (
+          <WebPreview defaultUrl={url} className="h-80 border-none">
+            <WebPreviewNavigation>
+              <WebPreviewUrl />
+            </WebPreviewNavigation>
+            <WebPreviewBody src={url} />
+          </WebPreview>
+        )}
+      </ArtifactContent>
+    </Artifact>
+  )
+}
+
+// list_agent_response_files: one Artifact per file, header-only (title +
+// byte-count description), as the Artifact docs describe.
+function ListFilesArtifacts({ part }: { part: DynamicToolUIPart }) {
+  if (part.state !== "output-available") return null
+  const parsed = partOutputJson(part)
+  const files = parsed?.data as { filename?: string; bytes?: number }[] | undefined
+  if (!files?.length) return null
+
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {files.map((file, i) => (
+        <Artifact key={`${file.filename}-${i}`} className="app-glass app-glass-edge">
+          <ArtifactHeader className="app-glass-edge border-b-0 bg-black/25">
+            <div className="min-w-0">
+              <ArtifactTitle className="truncate font-mono text-[13px] tracking-[0.01em]">{file.filename ?? "file"}</ArtifactTitle>
+              <ArtifactDescription className="text-xs tabular-nums">
+                {typeof file.bytes === "number" ? `${file.bytes.toLocaleString()} bytes` : "size unknown"}
+              </ArtifactDescription>
+            </div>
+          </ArtifactHeader>
+        </Artifact>
+      ))}
+    </div>
+  )
+}
+
+// The run's live timeline: a nested ChainOfThought (Chain of Thought example)
+// built from the same ChainOfThoughtStep renderers the outer chain uses —
+// reasoning text, native tool calls/results, skill-loaded steps, sandbox /
+// MCP / search / fetch / finance outputs, and share-file artifacts, in the
+// API's sequence order.
+function RunChain({ run, running }: { run: AgentRunSnapshot; running: boolean }) {
+  const timeline = projectRunTimeline(run.events)
+  return (
+    <ChainOfThought defaultOpen className="border-l-2 border-l-blurple-bright/30 pl-3">
+      <ChainOfThoughtHeader className="text-[13px] font-medium tracking-[0.01em]">
+        {running ? "Sub-agent working…" : "Sub-agent activity"}
+      </ChainOfThoughtHeader>
+      <ChainOfThoughtContent>
+        {run.attempt > 1 && (
+          <ChainOfThoughtStep
+            icon={ClockIcon}
+            label={`Reconnected · attempt ${run.attempt}`}
+            status="complete"
+          />
+        )}
+        {timeline.map((entry) =>
+          entry.kind === "reasoning" ? (
+            <ChainOfThoughtStep
+              icon={BrainIcon}
+              key={entry.key}
+              label="Thinking"
+              status={running ? "active" : "complete"}
+            >
+              <MessageResponse isAnimating={running}>{entry.text}</MessageResponse>
+            </ChainOfThoughtStep>
+          ) : (
+            <NativeToolStep key={entry.key} native={entry.native as NativeTool} />
+          )
+        )}
+      </ChainOfThoughtContent>
+    </ChainOfThought>
+  )
+}
+
+// Tool example, one per lifecycle call (retrieve / list / download): the
+// header carries the SDK state, ToolInput the parameters, ToolOutput the
+// result or error.
+function LifecycleTool({ part }: { part: DynamicToolUIPart }) {
+  return (
+    <Tool className="app-glass app-glass-edge overflow-hidden rounded-lg" defaultOpen={false}>
+      <ToolHeader type="dynamic-tool" toolName={part.toolName} state={part.state} className="hover:bg-white/[0.02]" />
+      <ToolContent className="app-glass-edge border-t bg-black/20">
+        <ToolInput input={part.input} />
+        {(part.state === "output-available" || part.state === "output-error") && (
+          <ToolOutput
+            output={"output" in part ? part.output : undefined}
+            errorText={part.state === "output-error" ? part.errorText : undefined}
+          />
+        )}
+      </ToolContent>
+    </Tool>
+  )
+}
+
+
+/**
+ * One preset sub-agent run — the Agent example: Agent > AgentHeader (name +
+ * model badge) > AgentContent > AgentInstructions, followed here by the run's
+ * nested ChainOfThought, its streamed final MessageResponse, any delivered
+ * files, and a collapsed Task holding one Tool per lifecycle call.
  */
 function AgentChainCard({
   chain,
@@ -363,69 +644,41 @@ function AgentChainCard({
         d.meta !== null
     )
 
+  const lifecycle = [...chain.polls, ...chain.downloads]
   const runLabel = run?.preset ? `Sub-agent · ${run.preset}` : "Sub-agent"
 
   return (
-    <Agent className="app-glass app-glass-edge">
-      <AgentHeader model={modelLabel} name={`${runLabel} · ${status}`} />
-      {/* Bounded: the nested timeline/output scrolls inside the card; page
-          scrolling stays with the outer native Conversation. */}
-      <AgentContent className="max-h-[28rem] overflow-y-auto">
+    <Agent className="app-glass app-glass-edge overflow-hidden rounded-lg">
+      <AgentHeader model={modelLabel} name={`${runLabel} · ${status}`} className="app-glass-edge border-b bg-black/25" />
+      <AgentContent>
         <AgentInstructions>
           {input?.instructions ?? input?.input ?? input?.task ?? "…"}
         </AgentInstructions>
 
-        {run && <RunTask run={run} running={running} />}
+        {run && <RunChain run={run} running={running} />}
 
-        {/* The run's accumulated final output, streaming while live. It also
-            reaches the caller as this preset tool's toolResult; it is never
-            injected into the outer answer stream. */}
-        {finalText && <MessageResponse>{finalText}</MessageResponse>}
+        {finalText && <MessageResponse isAnimating={running}>{finalText}</MessageResponse>}
 
         {downloads.map(({ part, meta }) =>
           meta.url && meta.contentType?.startsWith("image/") ? (
-            <ChainOfThoughtImage key={part.toolCallId} caption={meta.filename}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={meta.url}
-                alt={meta.filename}
-                className="h-auto max-w-full"
-              />
-            </ChainOfThoughtImage>
+            <ImageStep key={part.toolCallId} src={meta.url} alt={meta.filename} caption={meta.filename} />
           ) : (
-            <ShareFileArtifact
-              key={part.toolCallId}
-              name={meta.filename}
-              url={meta.url}
-            />
+            <ShareFileArtifact key={part.toolCallId} name={meta.filename} url={meta.url} />
           )
         )}
 
-        {errorText && <p className="text-destructive text-xs">{errorText}</p>}
-        {chain.polls.some((p) => p.state === "output-error") && (
-          <p className="text-destructive text-xs">
-            {chain.polls.find((p) => p.state === "output-error")?.errorText}
-          </p>
+        {errorText && (
+          <NativeToolError toolName={chain.toolName} input={input} error={errorText} />
         )}
 
-        {(chain.polls.length > 0 || chain.downloads.length > 0) && (
-          <Task className="app-glass app-glass-edge" defaultOpen={false}>
-            <TaskTrigger
-              title={`${chain.polls.length + chain.downloads.length} lifecycle call(s)`}
-            >
-              <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
-                {stepIcon("download")}
-                <p className="text-sm">{`${chain.polls.length + chain.downloads.length} lifecycle call(s)`}</p>
-                <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
-              </div>
-            </TaskTrigger>
+        {lifecycle.length > 0 && (
+          <Task className="app-glass app-glass-edge rounded-lg border px-3 py-2.5" defaultOpen={false}>
+            <TaskTrigger title={`${lifecycle.length} lifecycle call(s)`} className="w-full text-left" />
             <TaskContent>
-              {[...chain.polls, ...chain.downloads].map((part) => (
-                <GenericTool
-                  key={part.toolCallId}
-                  part={part}
-                  className="bg-white/[0.03]"
-                />
+              {lifecycle.map((part) => (
+                <TaskItem key={part.toolCallId}>
+                  <LifecycleTool part={part} />
+                </TaskItem>
               ))}
             </TaskContent>
           </Task>
@@ -435,328 +688,36 @@ function AgentChainCard({
   )
 }
 
-// The run's live timeline: a Task whose TaskContent holds a nested
-// ChainOfThought built from the same native ChainOfThought* subcomponents and
-// NativeToolStep renderers the outer chain uses — reasoning text, native tool
-// calls/results, skill-loaded steps, sandbox/MCP/search/fetch/finance/people
-// outputs, and share-file artifacts, in the API's sequence order.
-function RunTask({ run, running }: { run: AgentRunSnapshot; running: boolean }) {
-  const timeline = projectRunTimeline(run.events)
-  return (
-    <Task className="app-glass app-glass-edge" defaultOpen>
-      <TaskTrigger
-        title={`Run ${run.responseId ?? run.activityId} · ${run.events.length} event(s)`}
-      >
-        <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
-          {stepIcon("agent", { active: running })}
-          <p className="text-sm">{`Run ${run.responseId ?? run.activityId} · ${run.events.length} event(s)`}</p>
-          <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
-        </div>
-      </TaskTrigger>
-      <TaskContent>
-        <ChainOfThought defaultOpen>
-          <ChainOfThoughtHeader>
-            {running ? "Working…" : "Sub-agent activity"}
-          </ChainOfThoughtHeader>
-          <ChainOfThoughtContent>
-            {run.attempt > 1 && (
-              <ChainOfThoughtStep
-                icon={ClockIcon}
-                label={`Reconnected · attempt ${run.attempt}`}
-                status="complete"
-              />
-            )}
-            {timeline.map((entry) => {
-              if (entry.kind === "reasoning") {
-                return (
-                  <ChainOfThoughtStep
-                    icon={BrainIcon}
-                    key={entry.key}
-                    label="Thinking"
-                    status={running ? "active" : "complete"}
-                  >
-                    <MessageResponse isAnimating={running}>{entry.text}</MessageResponse>
-                  </ChainOfThoughtStep>
-                )
-              }
-              return (
-                <NativeToolStep
-                  key={entry.key}
-                  native={entry.native as NativeTool}
-                />
-              )
-            })}
-          </ChainOfThoughtContent>
-        </ChainOfThought>
-      </TaskContent>
-    </Task>
-  )
-}
-
-// A run whose create tool part hasn't arrived or bound yet: same Agent >
-// AgentContent > Task composition, rendered from the snapshot alone so the
-// stream is visible from the very first frame.
+// A run whose create tool part hasn't arrived or bound yet: the same Agent
+// composition, rendered from the snapshot alone so the stream is visible from
+// the very first frame.
 function UnboundRunCard({ run }: { run: AgentRunSnapshot }) {
   const running = !isTerminalRunStatus(run.status)
   return (
-    <Agent className="app-glass app-glass-edge">
+    <Agent className="app-glass app-glass-edge overflow-hidden rounded-lg">
       <AgentHeader
         model={run.model ?? run.preset}
         name={`Sub-agent · ${run.preset} · ${run.status}`}
+        className="app-glass-edge border-b bg-black/25"
       />
-      <AgentContent className="max-h-[28rem] overflow-y-auto">
-        <RunTask run={run} running={running} />
-        {run.text && <MessageResponse>{run.text}</MessageResponse>}
-        {run.error && <p className="text-destructive text-xs">{run.error}</p>}
+      <AgentContent>
+        <RunChain run={run} running={running} />
+        {run.text && <MessageResponse isAnimating={running}>{run.text}</MessageResponse>}
+        {run.error && (
+          <NativeToolError toolName={run.activity} error={run.error} />
+        )}
       </AgentContent>
     </Agent>
   )
 }
 
 
-
-
-function ListFilesArtifacts({ part }: { part: DynamicToolUIPart }) {
-  if (part.state !== "output-available") return null
-  const parsed = partOutputJson(part)
-  const files = parsed?.data as { filename?: string; bytes?: number }[] | undefined
-  if (!files?.length) return null
-
-  return (
-    <div className="grid gap-2 sm:grid-cols-2">
-      {files.map((file, i) => (
-        <Artifact
-          key={`${file.filename}-${i}`}
-          className="app-glass app-glass-edge"
-        >
-          <ArtifactHeader>
-            <div className="flex items-center gap-2">
-              <FileIcon className="size-4 text-muted-foreground" />
-              <ArtifactTitle>{file.filename ?? "file"}</ArtifactTitle>
-            </div>
-          </ArtifactHeader>
-          <ArtifactContent>
-            <ArtifactDescription>
-              {typeof file.bytes === "number" ? `${file.bytes.toLocaleString()} bytes` : ""}
-            </ArtifactDescription>
-          </ArtifactContent>
-        </Artifact>
-      ))}
-    </div>
-  )
-}
-
-// Results from every search-shaped native tool render through the Chain of
-// Thought search-result subcomponents, which is what they are for.
-function ResultBadges({ items }: { items: Array<{ title: string; url?: string }> }) {
-  if (items.length === 0) return null
-  return (
-    <ChainOfThoughtSearchResults>
-      {items.map((item, i) => (
-        // `render` is Badge's own base-ui composition prop: the badge BECOMES
-        // the anchor instead of being wrapped in one. That also lets
-        // badgeVariants' `[a]:hover:bg-secondary/80` actually apply, which it
-        // never could while the anchor was the parent element.
-        <ChainOfThoughtSearchResult
-          key={item.url ? `${item.url}-${i}` : i}
-          render={
-            item.url ? (
-              <a href={item.url} rel="noreferrer" target="_blank" />
-            ) : undefined
-          }
-        >
-          {item.title}
-        </ChainOfThoughtSearchResult>
-      ))}
-    </ChainOfThoughtSearchResults>
-  )
-}
-
-// Dynamic iconography: every TaskTrigger and ChainOfThoughtStep gets the icon
-// of the step being done, not the default search glyph. `active` spins the
-// loader; `failed` keeps the step icon but marks the row destructive.
-export type StepIconKind =
-  | "active"
-  | "agent"
-  | "code"
-  | "download"
-  | "edit"
-  | "fetch"
-  | "file"
-  | "files"
-  | "finance"
-  | "folder"
-  | "globe"
-  | "image"
-  | "maps"
-  | "monitor"
-  | "patch"
-  | "people"
-  | "read"
-  | "retry"
-  | "search"
-  | "skill"
-  | "terminal"
-  | "think"
-  | "write"
-
-export function stepIcon(
-  kind: StepIconKind,
-  opts?: { active?: boolean; failed?: boolean }
-) {
-  const cls = cn("size-4", opts?.failed && "text-destructive")
-  if (opts?.active) {
-    return <Loader2Icon className={cn(cls, "animate-spin")} />
-  }
-  switch (kind) {
-    case "agent":
-      return <BotIcon className={cls} />
-    case "code":
-      return <CodeIcon className={cls} />
-    case "download":
-      return <DownloadIcon className={cls} />
-    case "edit":
-      return <FileEditIcon className={cls} />
-    case "fetch":
-      return <LinkIcon className={cls} />
-    case "file":
-      return <FileTextIcon className={cls} />
-    case "files":
-      return <FilesIcon className={cls} />
-    case "finance":
-      return <CreditCardIcon className={cls} />
-    case "folder":
-      return <FolderSearchIcon className={cls} />
-    case "globe":
-      return <GlobeIcon className={cls} />
-    case "image":
-      return <ImageIcon className={cls} />
-    case "maps":
-      return <MapPinIcon className={cls} />
-    case "monitor":
-      return <MonitorIcon className={cls} />
-    case "patch":
-      return <ListIcon className={cls} />
-    case "people":
-      return <UsersIcon className={cls} />
-    case "read":
-      return <FileSearchIcon className={cls} />
-    case "retry":
-      return <ClockIcon className={cls} />
-    case "search":
-      return <SearchIcon className={cls} />
-    case "skill":
-      return <PackageIcon className={cls} />
-    case "terminal":
-      return <TerminalSquareIcon className={cls} />
-    case "think":
-      return <BrainIcon className={cls} />
-    case "write":
-      return <FilePlusIcon className={cls} />
-  }
-}
-
-// TaskItem renders text exactly as given; the docs' Task pattern parses file
-// mentions into TaskItemFile chips with the file's icon. A fresh regex per
-// call keeps the match immutable (no shared lastIndex).
-function TaskItemBody({ text }: { text: string }) {
-  const matches = [...text.matchAll(/[\w.@/-]+\.[a-z0-9]{1,10}/gi)].filter(
-    (m) => m[0].includes("/") || m[0].split(".").length === 2
-  )
-  if (matches.length === 0) return <>{text}</>
-  const out: ReactNode[] = []
-  let cursor = 0
-  matches.forEach((m, i) => {
-    const token = m[0]
-    const index = m.index ?? 0
-    if (index > cursor) out.push(text.slice(cursor, index))
-    out.push(
-      <TaskItemFile key={`${token}-${i}`}>
-        <FileIcon className="size-3.5" />
-        <span>{token}</span>
-      </TaskItemFile>
-    )
-    cursor = index + token.length
-  })
-  if (cursor < text.length) out.push(text.slice(cursor))
-  return <>{out}</>
-}
-
-// A search call in flight — the queries or URLs the model asked for, before
-// any results come back. Task streams the high-level "what's being searched";
-// the trigger carries the step's own icon (docs: TaskTrigger children
-// override the built-in SearchIcon row).
-function CallTask({
-  title,
-  items = [],
-  children,
-  icon,
-  active = false,
-  failed = false,
-}: {
-  title: string
-  items?: string[]
-  children?: ReactNode
-  icon?: StepIconKind
-  active?: boolean
-  failed?: boolean
-}) {
-  const hasBody = items.length > 0 || children != null
-  return (
-    <Task className="app-glass app-glass-edge">
-      <TaskTrigger title={title}>
-        <div
-          className={cn(
-            "flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground",
-            failed && "text-destructive hover:text-destructive"
-          )}
-        >
-          {stepIcon(icon ?? "search", { active, failed })}
-          <p className="text-sm">{title}</p>
-          <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
-        </div>
-      </TaskTrigger>
-      {hasBody ? (
-        <TaskContent>
-          {items.map((item, i) => (
-            <TaskItem key={`${item}-${i}`}>
-              <TaskItemBody text={item} />
-            </TaskItem>
-          ))}
-          {children}
-        </TaskContent>
-      ) : null}
-    </Task>
-  )
-}
-
-// The verbatim tool payload behind a collapsed disclosure. Rendered under
-// every DataObservationPanel so the projection never becomes the only copy of
-// the data — metadata the panel does not chart (schema blocks, reproduce_with
-// snippets, resolved filters) stays one click away, in full.
-function RawPayload({ output }: { output: unknown }) {
-  if (output === undefined || output === null) return null
-  const text =
-    typeof output === "string" ? output : JSON.stringify(output, null, 2)
-  if (!text) return null
-  return (
-    <details className="ide-glass-inset rounded-lg border px-3 py-1.5">
-      <summary className="cursor-pointer select-none text-[11px] text-muted-foreground transition-colors hover:text-foreground">
-        Raw payload ({text.length.toLocaleString()} chars)
-      </summary>
-      <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all text-[10px] text-foreground/80">
-        {text}
-      </pre>
-    </details>
-  )
-}
-
 // A completed dynamic tool call that carried a DataCommons / PopHIVE
 // observation payload: the dynamic `mcp_client` tool (action call_tool with
 // connection_id + tool_name) and direct MCP tools registered under the remote
 // tool's own name (get_observations, get_data, …). parseDataObservation is
 // strict — anything unrecognized returns null and the call renders through
-// the normal GenericTool card, so no output is ever hidden.
+// the normal Tool, so no output is ever hidden.
 function observationFromDynamicTool(
   part: DynamicToolUIPart
 ): DataObservation | null {
@@ -779,11 +740,14 @@ function observationFromDynamicTool(
   return parseDataObservation(server, part.toolName, output)
 }
 
-function dynamicToolStatus(
+// ChainOfThoughtStep.status is `complete | active | pending` and nothing
+// else: a call still running while the turn streams is `active`; a call that
+// finished (in any state) is `complete` — failures surface through the
+// native Tool output-error state inside the step, never a bent status.
+function stepStatus(
   part: DynamicToolUIPart,
   isThinking: boolean
 ): "complete" | "active" | "pending" {
-  if (part.state === "output-error") return "pending"
   if (
     isThinking &&
     (part.state === "input-available" ||
@@ -793,39 +757,6 @@ function dynamicToolStatus(
     return "active"
   }
   return "complete"
-}
-
-// Search results — every search-shaped native renders as the Chain of Thought
-// search subcomponents nested inside a Task, and nothing else: no Tool cards,
-// no Sandbox, no step chrome around them.
-function SearchResultsTask({
-  title,
-  items,
-  children,
-  icon = "search",
-  active = false,
-}: {
-  title: string
-  items: Array<{ title: string; url?: string }>
-  children?: ReactNode
-  icon?: StepIconKind
-  active?: boolean
-}) {
-  return (
-    <Task className="app-glass app-glass-edge">
-      <TaskTrigger title={title}>
-        <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
-          {stepIcon(icon, { active })}
-          <p className="text-sm">{title}</p>
-          <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
-        </div>
-      </TaskTrigger>
-      <TaskContent>
-        <ResultBadges items={items} />
-        {children}
-      </TaskContent>
-    </Task>
-  )
 }
 
 // pplx CLI search invocations inside sandbox bash: `pplx search web "query"`,
@@ -869,299 +800,6 @@ function sandboxStateFromStatus(
   }
 }
 
-/**
- * A Sandbox whose open state follows the run, and stays clickable.
- *
- * The block re-renders while the sandbox streams and `failed` only flips once
- * a non-zero exit_code arrives, so `defaultOpen` is read before the answer is
- * known — Base UI then warns that an uncontrolled Collapsible's default
- * changed after init. Controlling `open` fixes that, but a bare `open` with no
- * handler freezes the disclosure. Local state seeded from `failed` and synced
- * when it changes gives both: correct default, still user-toggleable.
- */
-function SandboxPanel({
-  failed,
-  className,
-  children,
-}: {
-  failed: boolean
-  className?: string
-  children: ReactNode
-}) {
-  const [open, setOpen] = useState(!failed)
-  const [seenFailed, setSeenFailed] = useState(failed)
-  if (failed !== seenFailed) {
-    setSeenFailed(failed)
-    setOpen(!failed)
-  }
-  return (
-    <Sandbox className={className} onOpenChange={setOpen} open={open}>
-      {children}
-    </Sandbox>
-  )
-}
-
-// Values are shiki BundledLanguage ids — CodeBlock's language prop is typed
-// against that union, so this map narrows instead of widening to string.
-const CODE_EXTENSIONS: Record<string, BundledLanguage> = {
-  css: "css",
-  html: "html",
-  js: "javascript",
-  json: "json",
-  jsx: "jsx",
-  md: "markdown",
-  py: "python",
-  sh: "bash",
-  ts: "typescript",
-  tsx: "tsx",
-}
-
-// Office documents and HTML pages the browser can render inline.
-const PREVIEWABLE = /\.(html?|pdf)$/i
-
-/**
- * Non-image files shared out of the sandbox.
- *
- * Coding projects get the Artifact IDE: a FileTree naming the file, the
- * fetched source streaming into a CodeBlock, and — for html — a live
- * WebPreview of the page itself. Office docs (pdf/html) render through
- * WebPreview inside the Artifact. Anything else keeps the download card.
- */
-function ShareFileArtifact({ name, url }: { name: string; url: string | null }) {
-  const ext = name.split(".").pop()?.toLowerCase() ?? ""
-  const codeLanguage = CODE_EXTENSIONS[ext]
-  const [source, setSource] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!url || !codeLanguage) return
-    let cancelled = false
-    fetch(url)
-      .then((res) => (res.ok ? res.text() : null))
-      .then((text) => {
-        if (!cancelled && text !== null) setSource(text)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [url, codeLanguage])
-
-  const preview = url && PREVIEWABLE.test(name)
-
-  return (
-    <Artifact className="app-glass app-glass-edge">
-      <ArtifactHeader>
-        <div className="flex items-center gap-2">
-          <FileIcon className="size-4 text-muted-foreground" />
-          <ArtifactTitle>{name}</ArtifactTitle>
-        </div>
-      </ArtifactHeader>
-      <ArtifactContent className="space-y-3">
-        {codeLanguage && (
-          <>
-            <FileTree
-              className="app-glass app-glass-edge"
-              selectedPath={name}
-            >
-              <FileTreeFile name={name} path={name} />
-            </FileTree>
-            {source !== null && (
-              <CodeBlock code={source} language={codeLanguage} />
-            )}
-          </>
-        )}
-        {preview && (
-          // Documented composition (ai-sdk.dev/elements/components/web-preview):
-          // WebPreview defaultUrl + Navigation>Url + Body src.
-          <WebPreview defaultUrl={url} className="app-glass app-glass-edge h-80">
-            <WebPreviewNavigation>
-              <WebPreviewUrl />
-            </WebPreviewNavigation>
-            <WebPreviewBody src={url} />
-          </WebPreview>
-        )}
-        <ArtifactDescription>
-          {url ? (
-            <a href={url} className="underline" target="_blank" rel="noreferrer">
-              Download
-            </a>
-          ) : (
-            "Produced in the sandbox"
-          )}
-        </ArtifactDescription>
-      </ArtifactContent>
-    </Artifact>
-  )
-}
-
-function GroundingImages({
-  images,
-}: {
-  images: Array<{ title?: string; image_uri: string; source_uri?: string }>
-}) {
-  if (images.length === 0) return null
-  return (
-    <div className="grid w-full grid-cols-2 gap-2 min-[28rem]:grid-cols-3">
-      {images.map((image, i) => (
-        <SourcePhotoTile
-          key={`${image.image_uri}-${i}`}
-          src={image.image_uri}
-          title={image.title || "Search image"}
-          url={image.source_uri}
-        />
-      ))}
-    </div>
-  )
-}
-
-function SourcePhotoTile({
-  src,
-  title,
-  url,
-  website,
-  address,
-  rating,
-  reviews,
-  credit,
-}: {
-  src: string
-  title: string
-  url?: string
-  website?: string
-  address?: string
-  rating?: number
-  reviews?: number
-  credit?: string
-}) {
-  const [open, setOpen] = useState(false)
-  const meta = [
-    address,
-    typeof rating === "number"
-      ? `${rating.toFixed(1)}${typeof reviews === "number" ? ` · ${reviews.toLocaleString()} reviews` : ""}`
-      : undefined,
-    credit ? `Photo: ${credit}` : undefined,
-  ].filter(Boolean) as string[]
-
-  return (
-    <>
-      <HoverCard open={open ? false : undefined}>
-        <HoverCardTrigger
-          render={
-            <button
-              type="button"
-              className="group relative aspect-[4/3] w-full overflow-hidden rounded-xl bg-muted ring-1 ring-white/10"
-              onClick={() => setOpen(true)}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={src}
-                alt={title}
-                className="size-full object-cover transition duration-300 ease-out group-hover:scale-[1.08] group-hover:brightness-110"
-              />
-              <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent opacity-80 transition duration-300 group-hover:opacity-100" />
-              <span className="pointer-events-none absolute inset-x-0 bottom-0 p-2.5 text-left font-medium text-white text-xs leading-snug drop-shadow-sm">
-                {title}
-              </span>
-            </button>
-          }
-        />
-        <HoverCardContent className="w-80 overflow-hidden p-0" side="top">
-          <Card className="gap-0 py-0 ring-0" size="sm">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={src} alt={title} className="aspect-video w-full object-cover" />
-            <CardHeader className="px-3 pt-3">
-              <CardTitle className="text-sm">{title}</CardTitle>
-              {meta.length > 0 ? (
-                <CardDescription className="space-y-0.5">
-                  {meta.map((line) => (
-                    <span key={line} className="block">
-                      {line}
-                    </span>
-                  ))}
-                </CardDescription>
-              ) : null}
-            </CardHeader>
-            {url || website ? (
-              <CardContent className="space-y-1 px-3 pb-3">
-                {url ? (
-                  <a
-                    href={url}
-                    rel="noreferrer"
-                    target="_blank"
-                    className="block truncate text-xs underline"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    {url.replace(/^https?:\/\//, "").replace(/\/$/, "")}
-                  </a>
-                ) : null}
-                {website && website !== url ? (
-                  <a
-                    href={website}
-                    rel="noreferrer"
-                    target="_blank"
-                    className="block truncate text-xs underline"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    {website.replace(/^https?:\/\//, "").replace(/\/$/, "")}
-                  </a>
-                ) : null}
-              </CardContent>
-            ) : null}
-          </Card>
-        </HoverCardContent>
-      </HoverCard>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[92vh] w-[min(96vw,72rem)] max-w-none overflow-hidden p-0 sm:max-w-none">
-          <DialogHeader className="sr-only">
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>{address || title}</DialogDescription>
-          </DialogHeader>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={src}
-            alt={title}
-            className="max-h-[80vh] w-full bg-black object-contain"
-          />
-          <div className="flex flex-wrap items-end justify-between gap-2 px-4 py-3">
-            <div className="min-w-0">
-              <p className="font-medium text-sm">{title}</p>
-              {meta.map((line) => (
-                <p key={line} className="text-muted-foreground text-xs">
-                  {line}
-                </p>
-              ))}
-            </div>
-            <div className="flex shrink-0 flex-col items-end gap-1">
-              {url ? (
-                <a href={url} rel="noreferrer" target="_blank" className="text-xs underline">
-                  Open in Maps
-                </a>
-              ) : null}
-              {website && website !== url ? (
-                <a href={website} rel="noreferrer" target="_blank" className="text-xs underline">
-                  Website
-                </a>
-              ) : null}
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
-  )
-}
-
-function placeText(value: unknown): string | undefined {
-  if (typeof value === "string" && value.trim()) return value
-  if (
-    value &&
-    typeof value === "object" &&
-    "text" in value &&
-    typeof (value as { text: unknown }).text === "string"
-  ) {
-    return (value as { text: string }).text
-  }
-  return undefined
-}
 
 // Maps JS Place Photos for grounding placeIds. The model never sees this;
 // placeId is already on grounding_chunks[].maps.
@@ -1171,9 +809,6 @@ type MapsPlaceCtor = new (opts: { id: string }) => {
   displayName?: unknown
   formattedAddress?: string
   googleMapsURI?: string
-  websiteURI?: string
-  rating?: number
-  userRatingCount?: number
   photos?: Array<{
     getURI: (opts?: { maxHeight?: number; maxWidth?: number }) => string
     authorAttributions?: Array<{ displayName?: string }>
@@ -1196,6 +831,21 @@ async function mapsPlaceLibrary(): Promise<{ Place: MapsPlaceCtor } | null> {
   return null
 }
 
+function placeText(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value
+  if (
+    value &&
+    typeof value === "object" &&
+    "text" in value &&
+    typeof (value as { text: unknown }).text === "string"
+  ) {
+    return (value as { text: string }).text
+  }
+  return undefined
+}
+
+// One grounding place → one ChainOfThoughtImage once its Places photo
+// resolves. Nothing renders before that: no invented placeholder tile.
 function MapsPlaceImage({
   placeId,
   title,
@@ -1209,11 +859,7 @@ function MapsPlaceImage({
     src: string
     title: string
     url?: string
-    website?: string
-    address?: string
-    rating?: number
-    reviews?: number
-    credit?: string
+    caption: string
   } | null>(null)
   useEffect(() => {
     const id = placeId.replace(/^places\//, "")
@@ -1225,83 +871,70 @@ function MapsPlaceImage({
         if (!lib || cancelled) return
         const place = new lib.Place({ id })
         await place.fetchFields({
-          fields: [
-            "photos",
-            "displayName",
-            "formattedAddress",
-            "googleMapsURI",
-            "websiteURI",
-            "rating",
-            "userRatingCount",
-          ],
+          fields: ["photos", "displayName", "formattedAddress", "googleMapsURI"],
         })
         const shot = place.photos?.[0]
         if (!shot || cancelled) return
+        const name = placeText(place.displayName) || title || "Place"
+        const credit = shot.authorAttributions?.[0]?.displayName
         setPhoto({
           src: shot.getURI({ maxHeight: 1600 }),
-          title: placeText(place.displayName) || title || "Place",
+          title: name,
           url: place.googleMapsURI || url,
-          website: place.websiteURI,
-          address: place.formattedAddress,
-          rating: place.rating,
-          reviews: place.userRatingCount,
-          credit: shot.authorAttributions?.[0]?.displayName,
+          caption: [name, place.formattedAddress, credit ? `Photo: ${credit}` : undefined]
+            .filter(Boolean)
+            .join(" · "),
         })
       } catch {
-        // Maps JS missing or Places photo request failed; leave the badge.
+        // Maps JS missing or Places photo request failed; the badge stays.
       }
     })()
     return () => {
       cancelled = true
     }
   }, [placeId, title, url])
-  if (!photo) {
-    return (
-      <div className="aspect-[4/3] animate-pulse rounded-xl bg-white/5 ring-1 ring-white/10" />
-    )
-  }
-  return <SourcePhotoTile {...photo} />
+  if (!photo) return null
+  return <ImageStep src={photo.src} alt={photo.title} caption={photo.caption} href={photo.url} />
 }
 
-function MapsPlaceImages({
-  places,
-}: {
+function uniquePlaces(
   places: Array<{ title?: string; uri?: string; placeId?: string }>
-}) {
+): Array<{ title?: string; uri?: string; placeId: string }> {
   const seen = new Set<string>()
-  const unique = places.filter((place) => {
-    if (!place.placeId || seen.has(place.placeId)) return false
+  const unique: Array<{ title?: string; uri?: string; placeId: string }> = []
+  for (const place of places) {
+    if (!place.placeId || seen.has(place.placeId)) continue
     seen.add(place.placeId)
-    return true
-  })
-  if (unique.length === 0) return null
-  return (
-    <div className="grid w-full grid-cols-2 gap-2 min-[28rem]:grid-cols-3">
-      {unique.map((place) => (
-        <MapsPlaceImage
-          key={place.placeId}
-          placeId={place.placeId!}
-          title={place.title}
-          url={place.uri}
-        />
-      ))}
-    </div>
-  )
+    unique.push({ ...place, placeId: place.placeId })
+  }
+  return unique
 }
 
+
+/**
+ * One native Agent API item → one ChainOfThoughtStep, composed the way the
+ * Chain of Thought example composes its steps: icon + label + status on the
+ * step, and the documented child primitive inside it — search results as
+ * ChainOfThoughtSearchResults, images as ChainOfThoughtImage, code as
+ * Sandbox, shell output as Terminal, files as Task / Artifact, MCP calls as
+ * Tool, and reasoning as MessageResponse.
+ */
 function NativeToolStep({ native }: { native: NativeTool }) {
   switch (native.type) {
     case "google_maps": {
       const token = native.google_maps_widget_context_token
-      const items = (native.places ?? []).map((place) => ({
-        title: place.title || place.uri || "Place",
-        url: place.uri,
-      }))
+      const places = native.places ?? []
       return (
-        <SearchResultsTask icon="maps" title="Google Maps" items={items}>
+        <ChainOfThoughtStep icon={MapPinIcon} label="Google Maps" status="complete">
+          <SearchResults
+            items={places.map((place) => ({
+              title: place.title || place.uri || "Place",
+              url: place.uri,
+            }))}
+          />
           {token ? (
             <JSXPreview
-              className="min-h-80 overflow-hidden p-4"
+              className="min-h-80 overflow-hidden"
               components={GMP_MAP}
               jsx={`<gmp-place-contextual context-token=${JSON.stringify(token)}></gmp-place-contextual>`}
             >
@@ -1309,199 +942,187 @@ function NativeToolStep({ native }: { native: NativeTool }) {
               <JSXPreviewError />
             </JSXPreview>
           ) : null}
-          <MapsPlaceImages places={native.places ?? []} />
-        </SearchResultsTask>
+          {uniquePlaces(places).map((place) => (
+            <MapsPlaceImage
+              key={place.placeId}
+              placeId={place.placeId}
+              title={place.title}
+              url={place.uri}
+            />
+          ))}
+        </ChainOfThoughtStep>
       )
     }
 
     case "google_search": {
       const queries = native.queries ?? []
-      const results = (native.results ?? []).map((result) => ({
-        title: result.title || result.uri || "",
-        url: result.uri,
-      }))
       return (
-        <SearchResultsTask
-          icon="search"
-          title={
-            queries.length === 1
-              ? `Google Search · ${queries[0]}`
-              : "Google Search"
-          }
-          items={results}
+        <ChainOfThoughtStep
+          icon={SearchIcon}
+          label={queries.length === 1 ? `Google Search · ${queries[0]}` : "Google Search"}
+          description={queries.length > 1 ? queries.join(" · ") : undefined}
+          status="complete"
         >
-          <GroundingImages images={native.images ?? []} />
-        </SearchResultsTask>
+          <SearchResults
+            items={(native.results ?? []).map((result) => ({
+              title: result.title || result.uri || "",
+              url: result.uri,
+            }))}
+          />
+          {(native.images ?? []).map((image, i) => (
+            <ImageStep
+              key={`${image.image_uri}-${i}`}
+              src={image.image_uri}
+              alt={image.title || "Search image"}
+              caption={image.title}
+              href={image.source_uri}
+            />
+          ))}
+        </ChainOfThoughtStep>
       )
     }
 
-    // Searches (web / url / people / finance) render ONLY as the Chain of
-    // Thought search subcomponents nested inside a Task: the Task title
-    // streams the high-level "what's being searched", the results render as
-    // ChainOfThoughtSearchResults. No Tool cards, no Sandbox, no step chrome.
+    // A search in flight: the step is active and lists what is being looked
+    // up as search-result badges (Chain of Thought example, "Searching for
+    // recent work..." step).
     case "response.reasoning.search_queries":
       return (
-        <CallTask
-          active
-          icon="search"
-          title={`Searching the web · ${native.queries.length} quer${native.queries.length === 1 ? "y" : "ies"}`}
-          items={native.queries}
-        />
+        <ChainOfThoughtStep
+          icon={SearchIcon}
+          label={`Searching the web · ${native.queries.length} quer${native.queries.length === 1 ? "y" : "ies"}`}
+          status="active"
+        >
+          <SearchResults items={native.queries.map((q) => ({ title: q }))} />
+        </ChainOfThoughtStep>
       )
 
     case "response.reasoning.fetch_url_queries":
       return (
-        <CallTask
-          active
-          icon="fetch"
-          title={`Fetching pages · ${native.urls.length} URL${native.urls.length === 1 ? "" : "s"}`}
-          items={native.urls}
-        />
+        <ChainOfThoughtStep
+          icon={LinkIcon}
+          label={`Fetching pages · ${native.urls.length} URL${native.urls.length === 1 ? "" : "s"}`}
+          status="active"
+        >
+          <SearchResults items={native.urls.map((u) => ({ title: u, url: u }))} />
+        </ChainOfThoughtStep>
       )
 
-    // finance_search streams its own reasoning events before the terminal
-    // finance_results item, with tickers/categories on the call and the same
-    // results array on the response.
     case "response.reasoning.finance_search_queries":
       return (
-        <CallTask
-          active
-          icon="finance"
-          title={`Looking up markets · ${(native.categories ?? ["quote"]).join(", ")}`}
-          items={native.tickers ?? []}
-        />
+        <ChainOfThoughtStep
+          icon={CreditCardIcon}
+          label={`Looking up markets · ${(native.categories ?? ["quote"]).join(", ")}`}
+          status="active"
+        >
+          <SearchResults items={(native.tickers ?? []).map((t) => ({ title: t }))} />
+        </ChainOfThoughtStep>
       )
 
     case "response.reasoning.finance_search_results":
+    case "finance_results":
       return (
-        <SearchResultsTask
-          icon="finance"
-          title="Market data"
-          items={native.results.flatMap((r) =>
-            (r.sources ?? []).map((url) => ({ title: r.category, url }))
-          )}
+        <ChainOfThoughtStep
+          icon={CreditCardIcon}
+          label={
+            "tickers" in native && native.tickers?.length
+              ? `Market data · ${native.tickers.join(", ")}`
+              : "Market data"
+          }
+          status="complete"
         >
+          <SearchResults
+            items={native.results.flatMap((r) =>
+              (r.sources ?? []).map((url) => ({ title: r.category, url }))
+            )}
+          />
           {native.results.map((r, i) => (
-            <MessageResponse key={i}>{r.content}</MessageResponse>
+            <MessageResponse key={`${r.category}-${i}`}>{r.content}</MessageResponse>
           ))}
-        </SearchResultsTask>
+        </ChainOfThoughtStep>
       )
 
     case "response.reasoning.search_results":
     case "search_results":
       return (
-        <SearchResultsTask
-          icon="search"
-          title="Web results"
-          items={native.results.map((r) => ({ title: r.title || r.url, url: r.url }))}
-        />
+        <ChainOfThoughtStep icon={SearchIcon} label="Web results" status="complete">
+          <SearchResults
+            items={native.results.map((r) => ({ title: r.title || r.url, url: r.url }))}
+          />
+        </ChainOfThoughtStep>
       )
 
     case "people_search_results":
       return (
-        <SearchResultsTask
-          icon="people"
-          title="People"
-          items={native.results.map((r) => ({ title: r.title || r.url, url: r.url }))}
-        />
-      )
-
-    case "finance_results":
-      return (
-        <SearchResultsTask
-          icon="finance"
-          title={native.tickers?.length ? `Finance · ${native.tickers.join(", ")}` : "Finance"}
-          items={native.results.flatMap((r) =>
-            (r.sources ?? []).map((url) => ({ title: r.category, url }))
-          )}
-        >
-          {native.results.map((r, i) => (
-            <MessageResponse key={i}>{r.content}</MessageResponse>
-          ))}
-        </SearchResultsTask>
+        <ChainOfThoughtStep icon={UsersIcon} label="People" status="complete">
+          <SearchResults
+            items={native.results.map((r) => ({ title: r.title || r.url, url: r.url }))}
+          />
+        </ChainOfThoughtStep>
       )
 
     case "response.reasoning.fetch_url_results":
     case "fetch_url_results":
       return (
-        <SearchResultsTask
-          icon="fetch"
-          title="Fetched pages"
-          items={native.contents.map((c) => ({ title: c.title || c.url, url: c.url }))}
-        />
+        <ChainOfThoughtStep icon={LinkIcon} label="Fetched pages" status="complete">
+          <SearchResults
+            items={native.contents.map((c) => ({ title: c.title || c.url, url: c.url }))}
+          />
+        </ChainOfThoughtStep>
       )
 
+
+    // MCP connector discovery: the tools the server exposes, as badges.
     case "mcp_list_tools": {
-      const failed = Boolean(native.error) || Boolean(native.connector_id && native.tools.length === 0)
-      const unavailable = Boolean(native.connector_id) && failed
-      const authRequired = native.error === "AUTH_REQUIRED"
+      if (native.error) {
+        return (
+          <ChainOfThoughtStep icon={ServerIcon} label={native.server_label} status="complete">
+            <NativeToolError toolName="mcp_list_tools" error={native.error} />
+          </ChainOfThoughtStep>
+        )
+      }
       return (
-        <CallTask
-          failed={failed}
-          icon="folder"
-          title={unavailable
-            ? `${native.server_label} · Connector ${authRequired ? "authorization required" : "unavailable"}`
-            : native.server_label}
+        <ChainOfThoughtStep
+          icon={ServerIcon}
+          label={`${native.server_label} · ${native.tools.length} tool${native.tools.length === 1 ? "" : "s"}`}
+          status="complete"
         >
-          {native.error ? (
-            <p className="text-destructive text-xs">{native.error}</p>
-          ) : (
-            <ResultBadges items={native.tools.map((t) => ({ title: t.name }))} />
-          )}
-          {unavailable && (
-            <TaskItem>
-              <p>Connector availability notice, not a performed tool action.</p>
-              <p>{authRequired
-                ? "Ask an API Group administrator to reconnect this connector."
-                : "This connector is unavailable for this request. An API Group administrator can check its setup."}</p>
-              <a href="https://console.perplexity.ai/group/connectors" className="underline" target="_blank" rel="noreferrer">
-                Connector setup
-              </a>
-            </TaskItem>
-          )}
-        </CallTask>
+          <SearchResults items={native.tools.map((t) => ({ title: t.name }))} />
+        </ChainOfThoughtStep>
       )
     }
 
+    // An MCP tool call is a tool call: Tool > ToolHeader > ToolInput +
+    // ToolOutput (Tool example). DataCommons / PopHIVE observations render
+    // the data panel above it; the verbatim payload stays in the collapsed
+    // Tool so the projection is never the only copy of the data.
     case "mcp_call": {
-      // DataCommons / PopHIVE observation payloads render as the blue-glass
-      // data panel; anything unrecognized (other servers, malformed or
-      // truncated JSON, unexpected shapes) falls back to the raw output so
-      // nothing is ever hidden.
-      const observation = native.error
-        ? null
-        : parseDataObservation(native.server_label, native.name, native.output)
+      const label = `${native.server_label} · ${native.name}`
+      const input = parseJson(native.arguments) ?? native.arguments
+      if (native.error) {
+        return (
+          <ChainOfThoughtStep icon={ServerIcon} label={label} status="complete">
+            <NativeToolError toolName={native.name} input={input} error={native.error} />
+          </ChainOfThoughtStep>
+        )
+      }
+      const observation = parseDataObservation(native.server_label, native.name, native.output)
       return (
-        <CallTask
-          failed={Boolean(native.error)}
-          icon="terminal"
-          title={`${native.server_label} · ${native.name}`}
-        >
-          {native.error ? (
-            <>
-              <p className="text-destructive text-xs">{native.error}</p>
-              {native.connector_id && native.error === "AUTH_REQUIRED" && (
-                <TaskItem>
-                  Connector authorization required. Ask an API Group administrator to{" "}
-                  <a href="https://console.perplexity.ai/group/connectors" className="underline" target="_blank" rel="noreferrer">
-                    reconnect this connector
-                  </a>.
-                </TaskItem>
-              )}
-            </>
-          ) : observation ? (
-            <>
-              <DataObservationPanel observation={observation} />
-              <RawPayload output={native.output} />
-            </>
-          ) : (
-            <TaskItem>
-              <TaskItemBody text={native.output ?? native.arguments} />
-            </TaskItem>
-          )}
-        </CallTask>
+        <ChainOfThoughtStep icon={ServerIcon} label={label} status="complete">
+          {observation && <DataObservationPanel observation={observation} />}
+          <Tool className="app-glass app-glass-edge overflow-hidden rounded-lg" defaultOpen={!observation}>
+            <ToolHeader type="dynamic-tool" toolName={native.name} state="output-available" className="hover:bg-white/[0.02]" />
+            <ToolContent className="app-glass-edge border-t bg-black/20">
+              <ToolInput input={input} />
+              <ToolOutput
+                output={parseJson(native.output) ?? native.output ?? undefined}
+                errorText={undefined}
+              />
+            </ToolContent>
+          </Tool>
+        </ChainOfThoughtStep>
       )
     }
+
 
     case "sandbox_results": {
       const output = native.results
@@ -1512,76 +1133,63 @@ function NativeToolStep({ native }: { native: NativeTool }) {
         native.status === "failed" ||
         native.status === "timed_out" ||
         native.results.some((r) => r.exit_code !== 0)
+      const running = native.status === "in_progress"
+      const status = running ? "active" : "complete"
 
-      // The sandbox ships the pplx CLI, so the model searches through bash.
-      // A `pplx search` IS a web search: it leads with Task and renders
-      // ChainOfThoughtSearchResults, never the Terminal.
       if (native.language === "bash") {
+        // The sandbox ships the pplx CLI, so the model searches through
+        // bash. A `pplx search` IS a web search: it renders as the Chain of
+        // Thought search step, never as a Terminal.
         const search = native.code.match(PPLX_SEARCH)
         if (search) {
           const [, kind, query] = search
           const links = extractLinks(native.results.map((r) => r.stdout).join("\n"))
           return (
-            <Task className="app-glass app-glass-edge">
-              <TaskTrigger title={`Searching the ${kind || "web"} · ${query}`}>
-                <div className="flex w-full cursor-pointer items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground">
-                  {stepIcon("search", { active: native.status === "in_progress" })}
-                  <p className="text-sm">{`Searching the ${kind || "web"} · ${query}`}</p>
-                  <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
-                </div>
-              </TaskTrigger>
-              <TaskContent>
-                {links.length > 0 ? (
-                  <ResultBadges items={links} />
-                ) : (
-                  <TaskItem>{query}</TaskItem>
-                )}
-              </TaskContent>
-            </Task>
+            <ChainOfThoughtStep
+              icon={SearchIcon}
+              label={`Searching the ${kind || "web"} · ${query}`}
+              status={status}
+            >
+              <SearchResults items={links.length > 0 ? links : [{ title: query }]} />
+            </ChainOfThoughtStep>
           )
         }
-        // ANSI framing per the upstream terminal example: cyan $ prompt,
-        // red error tail on a failed exit.
+        // Terminal example: ANSI-framed output (cyan $ prompt, red ✗ on a
+        // failed exit), header with title / status / copy, content body.
         const exitCode = native.results.find((r) => r.exit_code !== 0)?.exit_code
         const ansi =
           `\u001B[36m$\u001B[0m ${native.code}\n${output}` +
           (failed ? `\n\u001B[31m✗\u001B[0m exit ${exitCode ?? 1}` : "")
         return (
-          <CallTask
-            active={native.status === "in_progress"}
-            failed={failed}
-            icon="terminal"
-            title="Running commands"
-          >
-            <Terminal
-              className="h-64 rounded-none border-0"
-              output={ansi}
-              isStreaming={native.status === "in_progress"}
-            >
-              <TerminalContent className="max-h-full" />
+          <ChainOfThoughtStep icon={TerminalSquareIcon} label="Running commands" status={status}>
+            <Terminal autoScroll isStreaming={running} output={ansi}>
+              <TerminalHeader>
+                <TerminalTitle>bash</TerminalTitle>
+                <div className="flex items-center gap-1">
+                  <TerminalStatus />
+                  <TerminalActions>
+                    <TerminalCopyButton />
+                  </TerminalActions>
+                </div>
+              </TerminalHeader>
+              <TerminalContent />
             </Terminal>
-          </CallTask>
+          </ChainOfThoughtStep>
         )
       }
 
-      // Python code execution is the one thing Sandbox is for.
+      // Sandbox example: header carries the tool state, tabs switch between
+      // the code and its output, each a CodeBlock with a hover copy button.
       return (
-        <CallTask
-          active={native.status === "in_progress"}
-          failed={failed}
-          icon="code"
-          title="Ran code"
-        >
-          <SandboxPanel
-            failed={failed}
-            className="border-white/10 bg-white/[0.03]"
-          >
+        <ChainOfThoughtStep icon={CodeIcon} label="Ran code" status={status}>
+          <Sandbox className="app-glass app-glass-edge rounded-lg">
             <SandboxHeader
-              title="Sandbox · python"
               state={sandboxStateFromStatus(native.status, failed)}
+              title={`sandbox.${native.language === "python" ? "py" : native.language}`}
+              className="app-glass-edge border-b bg-black/25"
             />
             <SandboxContent>
-              <SandboxTabs defaultValue="code">
+              <SandboxTabs defaultValue={failed ? "output" : "code"}>
                 <SandboxTabsBar>
                   <SandboxTabsList>
                     <SandboxTabsTrigger value="code">Code</SandboxTabsTrigger>
@@ -1589,146 +1197,179 @@ function NativeToolStep({ native }: { native: NativeTool }) {
                   </SandboxTabsList>
                 </SandboxTabsBar>
                 <SandboxTabContent value="code">
-                  <CodeBlock code={native.code} language="python" />
+                  <CodeBlock className="border-0" code={native.code} language="python">
+                    <CodeBlockCopyButton
+                      className="absolute top-2 right-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+                      size="sm"
+                    />
+                  </CodeBlock>
                 </SandboxTabContent>
                 <SandboxTabContent value="output">
-                  <CodeBlock code={output || "(no output)"} language="log" />
+                  <CodeBlock className="border-0" code={output} language="log">
+                    <CodeBlockCopyButton
+                      className="absolute top-2 right-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+                      size="sm"
+                    />
+                  </CodeBlock>
                 </SandboxTabContent>
               </SandboxTabs>
             </SandboxContent>
-          </SandboxPanel>
-        </CallTask>
+          </Sandbox>
+        </ChainOfThoughtStep>
       )
     }
 
-    // Files the sandbox produced. Images render immediately through
-    // ChainOfThoughtImage; code files get the Artifact IDE (FileTree +
-    // CodeBlock + WebPreview for html); office docs and everything else are
-    // an Artifact card, with a WebPreview when the browser can render it.
+    // Files the sandbox produced. Images render through ChainOfThoughtImage;
+    // everything else is an Artifact (with CodeBlock / WebPreview inside when
+    // the browser can show it).
     case "share_file": {
       const name = native.filename ?? "file"
-      const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(name)
-      if (!native.error && isImage && native.url) {
+      if (native.error) {
         return (
-          <CallTask icon="image" title={name}>
-            <ChainOfThoughtImage caption={name}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={native.url} alt={name} className="h-auto max-w-full" />
-            </ChainOfThoughtImage>
-          </CallTask>
+          <ChainOfThoughtStep icon={FileIcon} label={name} status="complete">
+            <NativeToolError toolName="share_file" input={{ filename: name }} error={native.error} />
+          </ChainOfThoughtStep>
+        )
+      }
+      if (IMAGE_FILE.test(name) && native.url) {
+        return (
+          <ChainOfThoughtStep icon={ImageIcon} label={name} status="complete">
+            <ImageStep src={native.url} alt={name} caption={name} />
+          </ChainOfThoughtStep>
         )
       }
       return (
-        <CallTask failed={Boolean(native.error)} icon="file" title={name}>
-          {native.error ? (
-            <p className="text-destructive text-xs">{native.error}</p>
-          ) : (
-            <ShareFileArtifact name={name} url={native.url ?? null} />
-          )}
-        </CallTask>
+        <ChainOfThoughtStep icon={FileIcon} label={name} status="complete">
+          <ShareFileArtifact name={name} url={native.url ?? null} />
+        </ChainOfThoughtStep>
       )
     }
 
+
+    // Sandbox file operations — the Task example: a titled Task whose items
+    // are file chips.
     case "sandbox_glob":
     case "sandbox_grep": {
-      const kind = native.type === "sandbox_glob" ? "Finding files" : "Searching files"
+      const verb = native.type === "sandbox_glob" ? "Finding files" : "Searching files"
       const files = native.files ?? []
+      const count = native.count ?? files.length
+      const label = `${verb} · ${count} match${count === 1 ? "" : "es"}`
       return (
-        <CallTask
-          failed={Boolean(native.error)}
-          icon="folder"
-          title={`${kind} · ${native.count ?? files.length} match${(native.count ?? files.length) === 1 ? "" : "es"}`}
-        >
+        <ChainOfThoughtStep icon={FolderSearchIcon} label={label} status="complete">
           {native.error ? (
-            <p className="text-destructive text-xs">{native.error}</p>
+            <NativeToolError toolName={native.type} error={native.error} />
           ) : files.length > 0 ? (
-            <ResultBadges items={files.map((f) => ({ title: f }))} />
+            <FileTask
+              title={native.truncated ? `${label} (truncated)` : label}
+              files={files.map((path) => ({ path }))}
+              defaultOpen={false}
+            />
           ) : null}
-        </CallTask>
+        </ChainOfThoughtStep>
       )
     }
 
     case "sandbox_read_file":
       return (
-        <CallTask failed={Boolean(native.error)} icon="read" title={`Read ${native.file_path}`}>
+        <ChainOfThoughtStep icon={FileSearchIcon} label={`Read ${native.file_path}`} status="complete">
           {native.error ? (
-            <p className="text-destructive text-xs">{native.error}</p>
+            <NativeToolError
+              toolName="sandbox_read_file"
+              input={{ file_path: native.file_path }}
+              error={native.error}
+            />
           ) : (
-            <TaskItem>
-              <TaskItemBody text={native.file_path} />
-            </TaskItem>
+            <FileTask
+              title={`Read ${native.file_path}`}
+              files={[
+                {
+                  label:
+                    typeof native.total_lines === "number"
+                      ? `Read ${native.total_lines} lines from`
+                      : "Read",
+                  path: native.file_path,
+                },
+              ]}
+              defaultOpen={false}
+            />
           )}
-        </CallTask>
+        </ChainOfThoughtStep>
       )
 
     case "sandbox_write_file":
       return (
-        <CallTask failed={Boolean(native.error)} icon="write" title={`Wrote ${native.file_path}`}>
+        <ChainOfThoughtStep icon={FilePlusIcon} label={`Wrote ${native.file_path}`} status="complete">
           {native.error ? (
-            <p className="text-destructive text-xs">{native.error}</p>
+            <NativeToolError
+              toolName="sandbox_write_file"
+              input={{ file_path: native.file_path }}
+              error={native.error}
+            />
           ) : (
-            <TaskItem>
-              <TaskItemBody text={native.file_path} />
-            </TaskItem>
+            <FileTask
+              title={`Wrote ${native.file_path}`}
+              files={[
+                {
+                  label:
+                    typeof native.size_bytes === "number"
+                      ? `Wrote ${native.size_bytes.toLocaleString()} bytes to`
+                      : "Wrote",
+                  path: native.file_path,
+                },
+              ]}
+              defaultOpen={false}
+            />
           )}
-        </CallTask>
+        </ChainOfThoughtStep>
       )
 
-    case "sandbox_edit_file":
+    case "sandbox_edit_file": {
+      const path = native.file_path ?? "file"
       return (
-        <CallTask
-          failed={Boolean(native.error)}
-          icon="edit"
-          title={`Edited ${native.file_path ?? "file"}`}
+        <ChainOfThoughtStep
+          icon={FileEditIcon}
+          label={`Edited ${path}`}
+          description={native.message ?? undefined}
+          status="complete"
         >
           {native.error ? (
-            <p className="text-destructive text-xs">{native.error}</p>
+            <NativeToolError
+              toolName="sandbox_edit_file"
+              input={{ file_path: native.file_path }}
+              error={native.error}
+            />
           ) : (
-            <TaskItem>
-              <TaskItemBody
-                text={native.message ?? native.file_path ?? "file"}
-              />
-            </TaskItem>
+            <FileTask
+              title={`Edited ${path}`}
+              files={[{ label: "Edited", path }]}
+              defaultOpen={false}
+            />
           )}
-        </CallTask>
+        </ChainOfThoughtStep>
       )
+    }
 
     case "sandbox_apply_patch": {
       const touched = [
-        ...(native.added ?? []),
-        ...(native.modified ?? []),
-        ...(native.deleted ?? []),
+        ...(native.added ?? []).map((path) => ({ label: "Added", path })),
+        ...(native.modified ?? []).map((path) => ({ label: "Modified", path })),
+        ...(native.deleted ?? []).map((path) => ({ label: "Deleted", path })),
       ]
+      const label = `Applied patch · ${touched.length} file${touched.length === 1 ? "" : "s"}`
       return (
-        <CallTask
-          failed={Boolean(native.error)}
-          icon="patch"
-          title={`Applied patch · ${touched.length} file${touched.length === 1 ? "" : "s"}`}
-        >
+        <ChainOfThoughtStep icon={ListIcon} label={label} status="complete">
           {native.error ? (
-            <p className="text-destructive text-xs">{native.error}</p>
+            <NativeToolError toolName="sandbox_apply_patch" error={native.error} />
           ) : touched.length > 0 ? (
-            <>
-              <ResultBadges items={touched.map((f) => ({ title: f }))} />
-              <TaskItem>
-                <span className="inline-flex flex-wrap items-center gap-1">
-                  {touched.map((f) => (
-                    <TaskItemFile key={f}>
-                      <FileIcon className="size-3.5" />
-                      <span>{f}</span>
-                    </TaskItemFile>
-                  ))}
-                </span>
-              </TaskItem>
-            </>
+            <FileTask title={label} files={touched} />
           ) : null}
-        </CallTask>
+        </ChainOfThoughtStep>
       )
     }
 
     case "response.skill.loaded":
     case "skill_loaded":
-      return <CallTask icon="skill" title={`Loaded ${native.name}`} />
+      return <ChainOfThoughtStep icon={PackageIcon} label={`Loaded ${native.name}`} status="complete" />
 
     case "response.reasoning.started":
     case "response.reasoning.stopped": {
@@ -1743,38 +1384,122 @@ function NativeToolStep({ native }: { native: NativeTool }) {
   }
 }
 
+
 const TERMINAL_TOOL_NAMES = new Set([
   "shell", "bash", "terminal", "execute", "execute_command", "execute_code", "exec_command", "run_command",
 ])
 
-const TOOL_PREVIEW_COMPONENTS = {
-  Artifact, ArtifactHeader, ArtifactTitle, ArtifactDescription, ArtifactContent,
-  TaskItem,
+// Code Block example: header with file icon + filename + copy button.
+function FileCodeBlock({ path, content }: { path: string; content: string }) {
+  return (
+    <CodeBlock
+      className="border-none"
+      code={content}
+      language={codeLanguageFor(path) ?? "log"}
+      showLineNumbers
+    >
+      <CodeBlockHeader>
+        <CodeBlockTitle>
+          <FileIcon size={14} />
+          <CodeBlockFilename>{path}</CodeBlockFilename>
+        </CodeBlockTitle>
+        <CodeBlockActions>
+          <CodeBlockCopyButton />
+        </CodeBlockActions>
+      </CodeBlockHeader>
+    </CodeBlock>
+  )
 }
 
-// Only this app-authored source reaches the JSX parser. Tool text, including
-// strings that look like JSX, stays inert in bindings and native text/code children.
-// https://elements.ai-sdk.dev/components/jsx-preview
-const TOOL_RESULT_JSX = `
-  <Artifact className="border-white/10 bg-transparent shadow-none">
-    <ArtifactHeader className="flex-wrap gap-3 border-white/10 bg-blue-400/[0.04]">
-      <div className="min-w-0 flex-1 space-y-1">
-        <ArtifactDescription className="text-[10px] font-medium uppercase tracking-[0.16em] text-blue-200">Tool result</ArtifactDescription>
-        <ArtifactTitle className="break-words">{toolName}</ArtifactTitle>
-      </div>
-      <span className={statusClass} role="status">{statusLabel}</span>
-    </ArtifactHeader>
-    <ArtifactContent className="min-w-0 space-y-4 p-3 sm:p-4">
-      {error && <TaskItem role="alert" className="whitespace-pre-wrap break-words border-l-2 border-destructive/60 pl-3 text-destructive">{error}</TaskItem>}
-      {resultText && <TaskItem className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{resultText}</TaskItem>}
-      {resultCode}
-      {emptyText && <TaskItem className="text-sm text-muted-foreground">{emptyText}</TaskItem>}
-    </ArtifactContent>
-  </Artifact>
-`
+// Terminal example applied to a shell tool's result: stdout/stderr verbatim,
+// a red ✗ line on a non-zero exit.
+function ShellOutput({
+  toolName,
+  text,
+  exitCode,
+  isStreaming,
+}: {
+  toolName: string
+  text: string
+  exitCode: number | undefined
+  isStreaming: boolean
+}) {
+  const ansi = [
+    text,
+    exitCode !== undefined && exitCode !== 0 ? `\u001B[31m✗\u001B[0m exit ${exitCode}` : "",
+  ].filter(Boolean).join("\n")
+  return (
+    <Terminal autoScroll isStreaming={isStreaming} output={ansi}>
+      <TerminalHeader>
+        <TerminalTitle>{toolName}</TerminalTitle>
+        <div className="flex items-center gap-1">
+          <TerminalStatus />
+          <TerminalActions>
+            <TerminalCopyButton />
+          </TerminalActions>
+        </div>
+      </TerminalHeader>
+      <TerminalContent />
+    </Terminal>
+  )
+}
 
-function GenericTool({ part, className }: { part: DynamicToolUIPart; className?: string }) {
+// Artifact example applied to file_read results: a verified `find` listing
+// is a FileTree; file contents are one CodeBlock per file.
+function FoundFilesArtifact({ paths }: { paths: string[] }) {
   const [selectedFile, setSelectedFile] = useState<string>()
+  return (
+    <Artifact className="app-glass-edge bg-black/20 shadow-none">
+      <ArtifactHeader className="app-glass-edge bg-black/25">
+        <div>
+          <ArtifactTitle>Files found</ArtifactTitle>
+          <ArtifactDescription className="text-xs tabular-nums">{paths.length} file{paths.length === 1 ? "" : "s"}</ArtifactDescription>
+        </div>
+      </ArtifactHeader>
+      <ArtifactContent className="p-0">
+        {paths.length ? (
+          <FileTree className="border-none" onSelect={setSelectedFile} selectedPath={selectedFile}>
+            {paths.map((filePath, index) => (
+              <FileTreeFile key={`${filePath}-${index}`} name={filePath} path={filePath} />
+            ))}
+          </FileTree>
+        ) : (
+          <ArtifactDescription className="p-4">No matching files.</ArtifactDescription>
+        )}
+      </ArtifactContent>
+    </Artifact>
+  )
+}
+
+function FileContentArtifact({ files }: { files: Array<{ path: string; content: string }> }) {
+  return (
+    <Artifact className="app-glass-edge bg-black/20 shadow-none">
+      <ArtifactHeader className="app-glass-edge bg-black/25">
+        <div className="min-w-0">
+          <ArtifactTitle>File content</ArtifactTitle>
+          <ArtifactDescription className="truncate font-mono text-xs tracking-[0.01em]">{files.map((file) => file.path).join(", ")}</ArtifactDescription>
+        </div>
+      </ArtifactHeader>
+      <ArtifactContent className="space-y-3 p-0">
+        {files.map((file, index) => (
+          <FileCodeBlock key={`${file.path}-${index}`} path={file.path} content={file.content} />
+        ))}
+      </ArtifactContent>
+    </Artifact>
+  )
+}
+
+
+/**
+ * A dynamic (Strands) tool call — the Tool example, verbatim: Tool >
+ * ToolHeader(type, toolName, state) > ToolContent > ToolInput + ToolOutput.
+ * Three documented result shapes get their documented primitive as the
+ * ToolOutput body: shell stdio → Terminal, file contents → Artifact with a
+ * CodeBlock per file, a verified find listing → Artifact with a FileTree.
+ * Everything else is ToolOutput's own default (text, or a JSON CodeBlock),
+ * so no output is ever hidden or paraphrased.
+ */
+function DynamicTool({ part }: { part: DynamicToolUIPart }) {
   const input = partInput(part)
   const view = toolPresentation(part)
   const output = parseJson(view.output)
@@ -1786,72 +1511,25 @@ function GenericTool({ part, className }: { part: DynamicToolUIPart; className?:
   const error = view.error || (exitCode !== undefined && exitCode !== 0 ? `Command exited with code ${exitCode}.` : undefined)
   const preliminary = part.state === "output-available" && part.preliminary === true
   const isStreaming = !error && (part.state === "input-streaming" || preliminary)
-  const state = error && view.state === "output-available" ? "output-error" : view.state
-  const statusLabel = error ? (state === "output-denied" ? "Denied" : "Failed")
-    : preliminary ? "Receiving result"
-    : state === "output-available" ? "Completed"
-    : state === "input-streaming" ? "Receiving input"
-    : state === "approval-requested" ? "Approval required"
-    : state === "approval-responded" ? "Approval recorded"
-    : "Awaiting result"
-  const statusClass = cn("shrink-0 rounded-md border px-2 py-1 text-[11px] font-medium",
-    error ? "border-destructive/30 bg-destructive/10 text-destructive"
-      : view.terminal && !preliminary ? "border-blue-300/20 bg-blue-400/10 text-blue-200"
-      : "border-violet-300/20 bg-violet-400/10 text-violet-200")
-  const surfaceClass = cn("app-glass app-glass-edge min-w-0 rounded-lg", className)
-  const rawOutput = "output" in part ? part.output : undefined
-  const rawCode = rawOutput === undefined ? "" : typeof rawOutput === "string" ? rawOutput : JSON.stringify(rawOutput, null, 2)
-  const rawLanguage = typeof rawOutput === "string" && !parseJson(rawOutput) ? "log" : "json"
-  const inputCode = input === undefined ? "" : JSON.stringify(input, null, 2)
-  const emptyText = error ? "" : view.terminal && !preliminary
-    ? "Tool finished without output." : "No final result received."
-  const details = (inputCode || rawCode) && (
-    <Task defaultOpen={false} className="border-t border-white/10 p-3">
-      <TaskTrigger title="Input and raw result" className="w-full text-left" />
-      <TaskContent>
-        {[{ title: "Input", code: inputCode, language: "json" }, { title: "Raw result", code: rawCode, language: rawLanguage }].map(({ title, code, language }) => code && (
-          <CodeBlock key={title} code={code} language={language === "log" ? "log" : "json"} className="max-h-64 overflow-auto border-white/10 bg-black/15">
-            <CodeBlockHeader className="sticky top-0 z-10">
-              <CodeBlockTitle>{title}</CodeBlockTitle>
-              <CodeBlockActions><CodeBlockCopyButton aria-label={`Copy ${title.toLowerCase()}`} /></CodeBlockActions>
-            </CodeBlockHeader>
-          </CodeBlock>
-        ))}
-      </TaskContent>
-    </Task>
-  )
+  const state: DynamicToolUIPart["state"] = error && view.state === "output-available" ? "output-error" : view.state
+  const terminal = view.terminal && !preliminary
 
-  if (isShell) {
-    // Structured stdio is a known execution shape; everything else stays verbatim.
+  let body: DynamicToolUIPart["output"] = undefined
+
+  if (isShell && view.output !== undefined) {
     const hasStdio = typeof record?.stdout === "string" || typeof record?.stderr === "string"
-    const terminalText = hasStdio
-      ? [record?.stdout, record?.stderr].filter(value => typeof value === "string" && value.length > 0).join("\n")
-      : view.text || (view.output === undefined ? "" : JSON.stringify(view.output, null, 2))
-    const terminalOutput = [terminalText, error && error !== terminalText ? error : "", exitCode !== undefined ? `Exit code: ${exitCode}` : ""].filter(Boolean).join("\n")
-    return (
-      <Terminal className={cn(surfaceClass, "bg-zinc-950/80")} output={terminalOutput} isStreaming={isStreaming} autoScroll data-tool-presentation="terminal" data-tool-state={state}>
-        <TerminalHeader className="flex-wrap gap-2 border-white/10">
-          <TerminalTitle className="min-w-0 break-all text-zinc-200">{part.toolName}</TerminalTitle>
-          <TerminalActions>
-            <span className={statusClass} role="status">{statusLabel}</span>
-            <TerminalStatus><span className="sr-only">Streaming</span></TerminalStatus>
-            <TerminalCopyButton aria-label="Copy terminal output" disabled={!terminalOutput} />
-          </TerminalActions>
-        </TerminalHeader>
-        <TerminalContent className="max-h-80 text-xs" />
-        {!terminalOutput && <p className="px-4 pb-3 text-xs text-zinc-400">{emptyText}</p>}
-        {details}
-      </Terminal>
-    )
-  }
-
-  if (part.toolName === "file_read" && !error) {
+    const text = hasStdio
+      ? [record?.stdout, record?.stderr].filter((value) => typeof value === "string" && value.length > 0).join("\n")
+      : view.text || JSON.stringify(view.output, null, 2)
+    body = <ShellOutput toolName={part.toolName} text={text} exitCode={exitCode} isStreaming={isStreaming} />
+  } else if (part.toolName === "file_read" && !error && view.output !== undefined) {
     const path = typeof input?.path === "string" ? input.path : typeof input?.file_path === "string" ? input.file_path : ""
     const mode = input?.mode
-    const fileTexts = blocks.length ? blocks.map(block => parseJson(block)?.text).filter((text): text is string => typeof text === "string")
+    const fileTexts = blocks.length
+      ? blocks.map((block) => parseJson(block)?.text).filter((text): text is string => typeof text === "string")
       : typeof record?.content === "string" ? [record.content] : typeof view.output === "string" ? [view.output] : []
     // Stock file_read view mode labels each content block; stats/search are not source files.
-    const files = fileTexts.flatMap(text => {
+    const files = fileTexts.flatMap((text) => {
       const labeled = /^Content of ([^\n]+):\n([\s\S]*)$/.exec(text)
       if ((mode === "view" || mode === undefined) && labeled) return [{ path: labeled[1], content: labeled[2] }]
       if (path && (mode === undefined || mode === "lines" || mode === "chunk")) return [{ path, content: text }]
@@ -1861,63 +1539,40 @@ function GenericTool({ part, className }: { part: DynamicToolUIPart; className?:
     const found = mode === "find" ? /^Found (\d+) files:\n([\s\S]*)$/.exec(view.text) : null
     const paths = found ? found[2].split("\n").filter(Boolean) : []
     if (found && Number(found[1]) === paths.length) {
-      return (
-        <Artifact className={surfaceClass} data-tool-presentation="files" data-tool-state={state}>
-          <ArtifactHeader className="flex-wrap gap-2 border-white/10 bg-blue-400/[0.04]">
-            <ArtifactTitle>Files found</ArtifactTitle><span className={statusClass} role="status">{statusLabel}</span>
-          </ArtifactHeader>
-          <ArtifactContent className="min-w-0">
-            {paths.length ? <FileTree className="max-h-80 overflow-auto border-white/10 bg-transparent" selectedPath={selectedFile} onSelect={setSelectedFile} aria-label="Found files">
-              {paths.map((filePath, index) => <FileTreeFile key={`${filePath}-${index}`} name={filePath} path={filePath} />)}
-            </FileTree> : <ArtifactDescription>No matching files.</ArtifactDescription>}
-          </ArtifactContent>
-          {details}
-        </Artifact>
-      )
-    }
-    if (files.length) {
-      return (
-        <Artifact className={surfaceClass} data-tool-presentation="file" data-tool-state={state}>
-          <ArtifactHeader className="flex-wrap gap-2 border-white/10 bg-blue-400/[0.04]">
-            <ArtifactTitle>File content</ArtifactTitle><span className={statusClass} role="status">{statusLabel}</span>
-          </ArtifactHeader>
-          <ArtifactContent className="min-w-0 space-y-3 p-3">
-            {files.map((file, index) => <CodeBlock key={`${file.path}-${index}`} code={file.content} language={CODE_EXTENSIONS[file.path.split(".").pop()?.toLowerCase() ?? ""] ?? "log"} showLineNumbers className="max-h-80 overflow-auto border-white/10 bg-black/15">
-              <CodeBlockHeader className="sticky top-0 z-10 gap-2">
-                <CodeBlockTitle className="min-w-0 break-all font-mono text-xs">{file.path}</CodeBlockTitle>
-                <CodeBlockActions><CodeBlockCopyButton aria-label={`Copy ${file.path}`} /></CodeBlockActions>
-              </CodeBlockHeader>
-            </CodeBlock>)}
-          </ArtifactContent>
-          {details}
-        </Artifact>
-      )
+      body = <FoundFilesArtifact paths={paths} />
+    } else if (files.length) {
+      body = <FileContentArtifact files={files} />
     }
   }
 
-  const resultText = view.text && view.text !== error && !parseJson(view.text) ? view.text : ""
-  const resultJson = !resultText && view.output !== undefined && !error ? JSON.stringify(record ?? view.output, null, 2) : ""
-  // The installed parser's registry requires components with optional props.
-  // Bind native elements with required props rather than casting away their types.
-  const resultCode = resultJson ? (
-    <CodeBlock code={resultJson} language="json" className="max-h-80 overflow-auto border-white/10 bg-black/15">
-      <CodeBlockHeader className="sticky top-0 z-10">
-        <CodeBlockTitle>Result</CodeBlockTitle>
-        <CodeBlockActions><CodeBlockCopyButton aria-label="Copy result" /></CodeBlockActions>
-      </CodeBlockHeader>
-    </CodeBlock>
-  ) : null
+  if (body === undefined && !error && terminal) {
+    // ToolOutput's own rendering: a string or an object becomes a CodeBlock;
+    // markdown text goes through MessageResponse as in the Tool example.
+    const text = view.text && !parseJson(view.text) ? view.text : ""
+    body = text
+      ? <MessageResponse>{text}</MessageResponse>
+      : view.output === undefined
+        ? "Tool finished without output."
+        : (record ?? view.output)
+  }
+
   return (
-    <div className={surfaceClass} data-tool-presentation="jsx" data-tool-state={state}>
-      <JSXPreview jsx={TOOL_RESULT_JSX} components={TOOL_PREVIEW_COMPONENTS} isStreaming={isStreaming}
-        bindings={{ toolName: part.toolName, statusLabel, statusClass, error, resultText, resultCode,
-          emptyText: resultText || resultJson ? "" : emptyText }}>
-        <JSXPreviewContent />
-        <JSXPreviewError className="m-3" />
-      </JSXPreview>
-      {details}
-      {part.toolName === "list_agent_response_files" && !error && <div className="p-3"><ListFilesArtifacts part={part} /></div>}
-    </div>
+    <Tool
+      className={error ? "app-glass overflow-hidden rounded-lg border-destructive/30" : "app-glass app-glass-edge overflow-hidden rounded-lg"}
+      defaultOpen={terminal || Boolean(error)}
+    >
+      <ToolHeader
+        type="dynamic-tool"
+        toolName={part.toolName}
+        state={state}
+        className={error ? "bg-destructive/[0.06]" : "hover:bg-white/[0.02]"}
+      />
+      <ToolContent className={error ? "border-t border-destructive/20 bg-black/20" : "app-glass-edge border-t bg-black/20"}>
+        <ToolInput input={input ?? part.input} />
+        <ToolOutput output={body} errorText={error} />
+        {part.toolName === "list_agent_response_files" && !error && <ListFilesArtifacts part={part} />}
+      </ToolContent>
+    </Tool>
   )
 }
 
@@ -1930,15 +1585,10 @@ export function AgentActivity({
   isThinking: boolean
   sessionId?: string
 }) {
+  const [isOpen, setIsOpen] = useState(true)
   const reasoningParts = parts.filter(isReasoningUIPart)
-  // The think tool never renders as a generic tool card: the reasoning
-  // stage's notes stream as reasoning parts (thought blocks above), so a
-  // ToolOutput of its final message would repeat what already streamed.
-  // Its part still matters twice below: a failed call renders its error (a
-  // real, live case: KeyError 'model_id'), and its presence alone keeps the
-  // Chain of Thought block mounted. isDynamicToolUIPart is the SDK's own
-  // guard; the arrow keeps the narrowed DynamicToolUIPart type through the
-  // additional toolName test.
+  // Think tokens arrive as native reasoning parts. Its tool part is only
+  // needed for pending status, failures, or a conclusion absent from the stream.
   const dynamicTools = parts.filter(isDynamicToolUIPart)
   const thinkParts = dynamicTools.filter((p) => p.toolName === "think")
   const toolParts = dynamicTools.filter((p) => p.toolName !== "think")
@@ -1985,13 +1635,10 @@ export function AgentActivity({
   ) {
     if (!isThinking) return null
     return (
-      <ChainOfThought
-        defaultOpen
-        className="app-glass rounded-xl border p-4"
-      >
-        <ChainOfThoughtHeader>Thinking…</ChainOfThoughtHeader>
+      <ChainOfThought open={isThinking || isOpen} onOpenChange={setIsOpen} className="app-glass rounded-xl border px-4 py-3.5">
+        <ChainOfThoughtHeader disabled={isThinking} className="text-[13px] font-medium tracking-[0.01em]">Thinking…</ChainOfThoughtHeader>
         <ChainOfThoughtContent>
-          <ChainOfThoughtStep icon={Loader2Icon} label="Working" status="active" />
+          <ChainOfThoughtStep icon={BrainIcon} label="Working" status="active" />
         </ChainOfThoughtContent>
       </ChainOfThought>
     )
@@ -2008,16 +1655,8 @@ export function AgentActivity({
   const segments = buildActivitySegments(parts, isThinking)
 
   return (
-    <ChainOfThought
-      // The component's own uncontrolled mode (useControllableState with
-      // defaultOpen, chain-of-thought.tsx:50-54): open by default so finished
-      // reasoning stays visible, user toggles freely after that. An earlier
-      // controlled `open={userOpen ?? isThinking}` auto-collapsed the block
-      // at turn end and hid the entire chain of thought behind a 70px stub.
-      defaultOpen
-      className="app-glass rounded-xl border p-4"
-    >
-      <ChainOfThoughtHeader>{isThinking ? "Thinking…" : "Chain of Thought"}</ChainOfThoughtHeader>
+    <ChainOfThought open={isThinking || isOpen} onOpenChange={setIsOpen} className="app-glass rounded-xl border px-4 py-3.5">
+      <ChainOfThoughtHeader disabled={isThinking} className="text-[13px] font-medium tracking-[0.01em]">{isThinking ? "Thinking…" : "Chain of Thought"}</ChainOfThoughtHeader>
       <ChainOfThoughtContent>
         {segments.map((segment) => {
           if (segment.kind === "computer-use") {
@@ -2036,9 +1675,15 @@ export function AgentActivity({
 
           if (part.type === "data-skill-run") {
             const run = part.data as SkillRunSnapshot
-            if (dynamicTools.some(tool => tool.toolName === "use_skill" && tool.toolCallId === run.toolUseId)) return null
-            return <SkillAgent key={`skill-${run.toolUseId}`} run={skillRuns.get(run.toolUseId)} isThinking={isThinking}
-              renderNative={event => <NativeToolStep native={event as NativeTool} />} />
+            if (dynamicTools.some((tool) => tool.toolName === "use_skill" && tool.toolCallId === run.toolUseId)) return null
+            return (
+              <SkillAgent
+                key={`skill-${run.toolUseId}`}
+                run={skillRuns.get(run.toolUseId)}
+                isThinking={isThinking}
+                renderNative={(event) => <NativeToolStep native={event as NativeTool} />}
+              />
+            )
           }
 
           // GWEN-6: route.ts emits one reconciled data-retry part (stable id
@@ -2057,12 +1702,7 @@ export function AgentActivity({
 
           if (part.type === "data-native-tool") {
             const native = (part as NativeToolPart).data
-            return (
-              <NativeToolStep
-                key={(part as NativeToolPart).id ?? `native-${i}`}
-                native={native}
-              />
-            )
+            return <NativeToolStep key={(part as NativeToolPart).id ?? `native-${i}`} native={native} />
           }
 
           if (part.type === "data-agent-run") {
@@ -2073,6 +1713,7 @@ export function AgentActivity({
                 icon={BotIcon}
                 key={`agent-run-${run.activityId}`}
                 label={run.activity}
+                status={isTerminalRunStatus(run.status) ? "complete" : "active"}
               >
                 <UnboundRunCard run={run} />
               </ChainOfThoughtStep>
@@ -2081,91 +1722,21 @@ export function AgentActivity({
 
           if (isReasoningUIPart(part)) {
             if (!part.text) return null
-            const streaming = part.state === "streaming"
+            const streaming = part.state === "streaming" && isThinking
             return (
               <ChainOfThoughtStep
                 icon={BrainIcon}
                 key={`reasoning-${i}`}
                 label="Thinking"
-                status={streaming && isThinking ? "active" : "complete"}
+                status={streaming ? "active" : "complete"}
               >
-                <MessageResponse isAnimating={streaming && isThinking}>
-                  {part.text}
-                </MessageResponse>
+                <MessageResponse isAnimating={streaming}>{part.text}</MessageResponse>
               </ChainOfThoughtStep>
             )
           }
 
           if (isDynamicToolUIPart(part)) {
-            if (part.toolName === "use_skill") {
-              return <SkillAgent key={part.toolCallId} part={part} run={skillRuns.get(part.toolCallId)} isThinking={isThinking}
-                renderNative={event => <NativeToolStep native={event as NativeTool} />} />
-            }
-            if (part.toolName === "think") {
-              const result = toolPresentation(part)
-              if (result.error || (result.terminal && result.text && !thinkSummaryWasStreamed(result.text, parts))) {
-                return (
-                  <ChainOfThoughtStep
-                    icon={BrainIcon}
-                    key={part.toolCallId}
-                    label={result.error ? (result.state === "output-denied" ? "Thinking denied" : "Thinking failed") : "Thinking result"}
-                    status="complete"
-                    role={result.error ? "alert" : undefined}
-                    className={result.error ? "text-destructive" : undefined}
-                  >
-                    <MessageResponse>{result.error || result.text}</MessageResponse>
-                  </ChainOfThoughtStep>
-                )
-              }
-              return null
-            }
-
-            const chain = chainByCreateId.get(part.toolCallId)
-            if (chain) {
-              const run = runByChainKey.get(chain.key)
-              return (
-                <ChainOfThoughtStep
-                  icon={BotIcon}
-                  key={chain.key}
-                  label={chain.toolName}
-                  status={dynamicToolStatus(part, isThinking)}
-                >
-                  <AgentChainCard chain={chain} run={run} />
-                </ChainOfThoughtStep>
-              )
-            }
-            if (absorbedIds.has(part.toolCallId)) return null
-
-            // DataCommons / PopHIVE observations arriving through the dynamic
-            // mcp_client tool or a direct MCP tool render as the data panel;
-            // everything else keeps the generic Tool card.
-            const dynamicObservation = observationFromDynamicTool(part)
-            if (dynamicObservation) {
-              return (
-                <ChainOfThoughtStep
-                  icon={TerminalSquareIcon}
-                  key={part.toolCallId}
-                  label={`${dynamicObservation.server} · ${dynamicObservation.tool}`}
-                  status={dynamicToolStatus(part, isThinking)}
-                >
-                  <DataObservationPanel observation={dynamicObservation} />
-                  <RawPayload
-                    output={"output" in part ? part.output : undefined}
-                  />
-                </ChainOfThoughtStep>
-              )
-            }
-
-            return (
-              <ChainOfThoughtStep
-                icon={WrenchIcon}
-                key={part.toolCallId}
-                label={part.toolName}
-                status={dynamicToolStatus(part, isThinking)}
-              >
-                <GenericTool part={part} />
-              </ChainOfThoughtStep>
-            )
+            return <Fragment key={part.toolCallId}>{renderDynamicTool(part)}</Fragment>
           }
 
           return null
@@ -2173,4 +1744,66 @@ export function AgentActivity({
       </ChainOfThoughtContent>
     </ChainOfThought>
   )
+
+
+  // Render directly so native components retain their identity and open state
+  // across streamed updates. A component defined here remounts on every token.
+  function renderDynamicTool(part: DynamicToolUIPart) {
+    if (part.toolName === "use_skill") {
+      return (
+        <SkillAgent
+          part={part}
+          run={skillRuns.get(part.toolCallId)}
+          isThinking={isThinking}
+          renderNative={(event) => <NativeToolStep native={event as NativeTool} />}
+        />
+      )
+    }
+
+    if (part.toolName === "think") {
+      const result = toolPresentation(part)
+      const showConclusion = result.terminal && result.text && !thinkSummaryWasStreamed(result.text, parts)
+      if (result.terminal && !result.error && !showConclusion) return null
+      if (!result.terminal && isThinking && reasoningText) return null
+      return (
+        <ChainOfThoughtStep
+          icon={BrainIcon}
+          label={result.error
+            ? result.state === "output-denied" ? "Thinking denied" : "Thinking failed"
+            : showConclusion ? "Thinking result" : "Thinking"}
+          status={result.terminal ? "complete" : isThinking ? "active" : "pending"}
+          role={result.error ? "alert" : undefined}
+          className={result.error ? "text-destructive" : undefined}
+        >
+          {(result.error || showConclusion) && <MessageResponse>{result.error || result.text}</MessageResponse>}
+          {!result.terminal && !isThinking && <p>Stream ended before Think returned a result.</p>}
+        </ChainOfThoughtStep>
+      )
+    }
+
+    const chain = chainByCreateId.get(part.toolCallId)
+    if (chain) {
+      return (
+        <ChainOfThoughtStep icon={BotIcon} label={chain.toolName} status={stepStatus(part, isThinking)}>
+          <AgentChainCard chain={chain} run={runByChainKey.get(chain.key)} />
+        </ChainOfThoughtStep>
+      )
+    }
+    if (absorbedIds.has(part.toolCallId)) return null
+
+    // DataCommons / PopHIVE observations arriving through the dynamic
+    // mcp_client tool or a direct MCP tool render the data panel above the
+    // native Tool card; everything else is the Tool card alone.
+    const observation = observationFromDynamicTool(part)
+    return (
+      <ChainOfThoughtStep
+        icon={observation ? ServerIcon : WrenchIcon}
+        label={observation ? `${observation.server} · ${observation.tool}` : part.toolName}
+        status={stepStatus(part, isThinking)}
+      >
+        {observation && <DataObservationPanel observation={observation} />}
+        <DynamicTool part={part} />
+      </ChainOfThoughtStep>
+    )
+  }
 }

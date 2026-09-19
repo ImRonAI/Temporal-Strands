@@ -17,12 +17,12 @@ export function SiteHeader() {
       initial={{ opacity: 0, y: -12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-      className="app-glass-edge sticky top-0 z-30 flex items-center justify-between gap-2 border-b bg-background/50 px-4 py-4 backdrop-blur-xl sm:gap-4 sm:px-8"
+      className="app-glass-edge sticky top-0 z-30 flex items-center justify-between gap-2 border-b bg-background/70 px-4 py-3.5 backdrop-blur-xl sm:gap-4 sm:px-8"
     >
       <div className="flex items-center gap-2.5">
         <span
           aria-hidden="true"
-          className="app-glass-edge grid size-7 place-items-center rounded-md border bg-white/[0.04] backdrop-blur-sm transition-shadow duration-500 hover:shadow-[0_0_16px_-2px_oklch(0.62_0.17_250/0.6)]"
+          className="app-glass-edge grid size-7 place-items-center rounded-md border bg-white/[0.03] shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.08)] backdrop-blur-sm transition-shadow duration-500 hover:shadow-[0_0_16px_-2px_oklch(0.709_0.158_284/0.55)]"
         >
           <svg
             className="size-4 text-foreground"
@@ -38,7 +38,7 @@ export function SiteHeader() {
             />
           </svg>
         </span>
-        <span className="hidden font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground sm:inline">
+        <span className="hidden text-[13px] font-medium tracking-[0.02em] text-muted-foreground sm:inline">
           v0 / studio
         </span>
       </div>
@@ -82,7 +82,7 @@ export function SiteHeader() {
         </Button>
         <Button
           size="sm"
-          className="shrink-0 rounded-full bg-foreground px-3 text-background transition-transform duration-300 hover:scale-[1.03] hover:bg-foreground/90 active:scale-95 sm:px-4"
+          className="shrink-0 rounded-full bg-primary px-3 text-primary-foreground shadow-[inset_0_1px_0_0_oklch(0.95_0.05_285/0.22),0_8px_24px_-10px_oklch(0.499_0.214_278/0.8)] transition-transform duration-300 hover:scale-[1.03] hover:bg-primary/90 active:scale-95 sm:px-4"
         >
           Start building
         </Button>

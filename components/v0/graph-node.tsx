@@ -279,7 +279,7 @@ export function FormationNode({ data }: { data: FormationNodeData }) {
     <Node
       aria-expanded={inspecting}
       aria-label={nodeAriaLabel(data)}
-      className="app-glass cursor-pointer border transition-shadow duration-300 focus-visible:ring-2 focus-visible:ring-ring/60 hover:shadow-[0_0_28px_-6px_oklch(0.62_0.17_250/0.55)]"
+      className="app-glass cursor-pointer border transition-shadow duration-300 focus-visible:ring-2 focus-visible:ring-ring/60 hover:shadow-[0_0_28px_-6px_oklch(0.499_0.214_278/0.65)]"
       data-inspecting={inspecting || undefined}
       handles={data.handles}
       onBlur={(event) => {

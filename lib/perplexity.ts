@@ -1,5 +1,5 @@
 // Session default: the Perplexity Agent API "high" dynamic preset, registered
-// by the orchestrator worker as model id "preset:high". The /api/models route
+// by the orchestrator worker as DEFAULT_MODEL below. The /api/models route
 // proxies this helper so the picker never hardcodes a list of its own.
 export const DEFAULT_MODEL = "preset:high"
 

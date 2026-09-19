@@ -1,6 +1,6 @@
 "use client"
 
-import { isDynamicToolUIPart, isReasoningUIPart, isTextUIPart, type UIMessage } from "ai"
+import { isDynamicToolUIPart, isReasoningUIPart, isTextUIPart, type DynamicToolUIPart, type UIMessage } from "ai"
 import { BrainIcon, MessageSquareIcon, MousePointer2Icon } from "lucide-react"
 import Image from "next/image"
 
@@ -10,8 +10,7 @@ import {
 } from "@/components/ai-elements/chain-of-thought"
 import { MessageResponse } from "@/components/ai-elements/message"
 import { Task, TaskContent, TaskItem, TaskTrigger } from "@/components/ai-elements/task"
-import { getStatusBadge } from "@/components/ai-elements/tool"
-import { CodeBlock, CodeBlockHeader, CodeBlockTitle, CodeBlockActions, CodeBlockCopyButton } from "@/components/ai-elements/code-block"
+import { ToolInput, ToolOutput, getStatusBadge } from "@/components/ai-elements/tool"
 import { COMPUTER_USE_TOOL_NAMES, computerUseFields, stripComputerUseScreenshot, toolPresentation, thinkSummaryWasStreamed } from "./computer-use"
 
 type Part = UIMessage["parts"][number]
@@ -68,11 +67,11 @@ export function ComputerUseActivity({ parts, isThinking, sessionId }: {
   const tools = parts.filter(isDynamicToolUIPart).filter(part => part.toolName !== "think")
   const terminal = tools.filter(part => ["output-available", "output-error", "output-denied"].includes(part.state)).length
   return (
-    <Task defaultOpen className="app-glass app-glass-edge" data-testid="computer-use-activity">
-      <TaskTrigger title={`Computer use · ${terminal}/${tools.length} actions finished`} />
+    <Task defaultOpen className="app-glass app-glass-edge rounded-lg border px-3 py-2.5" data-testid="computer-use-activity">
+      <TaskTrigger title={`Computer use · ${terminal}/${tools.length} actions finished`} className="w-full text-left" />
       <TaskContent>
-        <ChainOfThought defaultOpen>
-          <ChainOfThoughtHeader>Browser activity</ChainOfThoughtHeader>
+        <ChainOfThought defaultOpen className="border-l-2 border-l-blurple-bright/30 pl-3">
+          <ChainOfThoughtHeader className="text-[13px] font-medium tracking-[0.01em]">Browser activity</ChainOfThoughtHeader>
           <ChainOfThoughtContent>
             {parts.map((part, index) => {
               if (isTextUIPart(part) || isReasoningUIPart(part)) {
@@ -116,12 +115,13 @@ export function ComputerUseActivity({ parts, isThinking, sessionId }: {
                     <Task defaultOpen={false}>
                       <TaskTrigger title="Action details" />
                       <TaskContent keepMounted>
-                        <CodeBlock code={JSON.stringify(stripComputerUseScreenshot(part.input ?? {}), null, 2)} language="json">
-                          <CodeBlockHeader><CodeBlockTitle>Parameters</CodeBlockTitle><CodeBlockActions><CodeBlockCopyButton aria-label="Copy action parameters" /></CodeBlockActions></CodeBlockHeader>
-                        </CodeBlock>
-                        {result.output !== undefined ? <CodeBlock code={typeof result.output === "string" ? String(stripComputerUseScreenshot(result.output)) : JSON.stringify(stripComputerUseScreenshot(result.output), null, 2)} language="json">
-                          <CodeBlockHeader><CodeBlockTitle>Result</CodeBlockTitle><CodeBlockActions><CodeBlockCopyButton aria-label="Copy action result" /></CodeBlockActions></CodeBlockHeader>
-                        </CodeBlock> : null}
+                        {/* Native Tool primitives render the real arguments/result;
+                            only legacy inline pixels are stripped before display. */}
+                        <ToolInput input={stripComputerUseScreenshot(part.input ?? {})} />
+                        {result.output !== undefined ? (
+                          <ToolOutput output={stripComputerUseScreenshot(result.output) as DynamicToolUIPart["output"]}
+                            errorText={undefined} />
+                        ) : null}
                       </TaskContent>
                     </Task>
                     {observation && sessionId ? (

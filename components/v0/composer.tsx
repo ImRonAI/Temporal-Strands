@@ -76,7 +76,7 @@ function ComposerSubmit({ text, status, onStop }: Pick<ComposerProps, "text" | "
       disabled={status === "submitted" || (!text.trim() && attachments.files.length === 0 && status !== "streaming")}
       status={status}
       onStop={onStop}
-      className="rounded-full transition-all duration-300 enabled:hover:shadow-[0_0_20px_-2px_oklch(0.62_0.17_250/0.7)] active:scale-90"
+      className="rounded-full shadow-[inset_0_1px_0_0_oklch(0.95_0.05_285/0.2)] transition-all duration-300 enabled:hover:shadow-[0_0_20px_-2px_oklch(0.499_0.214_278/0.8)] active:scale-90"
     />
   )
 }
@@ -129,14 +129,14 @@ export function Composer({
       accept={ACCEPTED_FILE_TYPES}
       globalDrop={globalDrop}
       multiple
-      className="group/composer app-glass-edge overflow-hidden rounded-3xl border bg-card/70 shadow-[0_8px_40px_-12px_oklch(0.4_0.16_250/0.5)] backdrop-blur-xl transition-[border-color,box-shadow] duration-500 focus-within:border-blurple/50 focus-within:shadow-[0_12px_56px_-12px_oklch(0.55_0.17_250/0.65)]"
+      className="group/composer app-glass-edge overflow-hidden rounded-3xl border bg-card/85 shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.07),0_16px_48px_-16px_oklch(0.05_0.01_285/0.9)] backdrop-blur-xl transition-[border-color,box-shadow] duration-500 focus-within:border-blurple-bright/40 focus-within:shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.07),0_16px_56px_-14px_oklch(0.499_0.214_278/0.45)]"
     >
-      {/* Focus hairline: a single thread of blue light along the top edge.
+      {/* Focus hairline: a single thread of indigo light along the top edge.
           Lives inside InputGroup (which is `relative`); the named group on the
           form above lets it respond to focus anywhere in the composer. */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-10 top-0 z-10 h-px bg-gradient-to-r from-transparent via-blurple-bright/70 to-transparent opacity-0 transition-opacity duration-700 group-focus-within/composer:opacity-100"
+        className="hairline-indigo pointer-events-none absolute inset-x-10 top-0 z-10 h-px opacity-0 transition-opacity duration-700 group-focus-within/composer:opacity-100"
       />
       <PromptInputHeader className="border-0">
         <AttachmentsDisplay />
@@ -146,10 +146,10 @@ export function Composer({
           value={text}
           onChange={(e) => onTextChange(e.target.value)}
           placeholder={placeholder ?? "Describe what you want to ship…"}
-          className="min-h-[64px] text-base leading-relaxed placeholder:text-muted-foreground/70"
+          className="min-h-[64px] px-4 pt-3.5 text-base leading-relaxed text-foreground placeholder:text-muted-foreground md:text-base"
         />
       </PromptInputBody>
-      <PromptInputFooter className="border-0 px-2 pb-2">
+      <PromptInputFooter className="border-0 px-2.5 pb-2.5">
         <PromptInputTools className="min-w-0 flex-wrap">
           <PromptInputActionMenu>
             <PromptInputActionMenuTrigger>

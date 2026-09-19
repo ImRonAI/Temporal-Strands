@@ -8,49 +8,54 @@ function render(toolName: string, output: unknown, input: unknown = {}) {
   return renderToStaticMarkup(<AgentActivity parts={[part]} isThinking={false} />)
 }
 
-describe("native tool result presentations", () => {
-  it("uses Terminal for execution output including stderr and nonzero exit status", () => {
+// Every dynamic tool call renders the documented Tool composition
+// (elements.ai-sdk.dev/components/tool): ToolHeader carries the tool name and
+// the native status badge, ToolContent holds ToolInput ("Parameters") and
+// ToolOutput ("Result" / "Error"). Result shapes with their own documented
+// primitive nest it as the ToolOutput body.
+describe("dynamic tool presentations", () => {
+  it("renders shell output in a native Terminal inside the Tool, with the error state on a nonzero exit", () => {
     const html = render("shell", { status: "success", content: [{ json: { stdout: "checking project", stderr: "validation failed", exit_code: 2 } }] }, { command: "check" })
-    expect(html).toContain('data-tool-presentation="terminal"')
-    expect(html).toContain('data-tool-state="output-error"')
+    expect(html).toContain("Parameters")
+    expect(html).toContain("Error")
+    expect(html).toContain("Command exited with code 2.")
     expect(html).toContain("checking project")
     expect(html).toContain("validation failed")
-    expect(html).toContain("Copy terminal output")
+    expect(html).toContain("bg-zinc-950") // Terminal root
     expect(html).not.toContain("Completed")
   })
-  it("uses Artifact and CodeBlock for native file content", () => {
+  it("renders native file content as an Artifact with a CodeBlock per file", () => {
     const html = render("file_read", { status: "success", content: [{ text: 'Content of src/a.ts:\nexport const a = "native";' }] }, { path: "src/a.ts", mode: "view" })
-    expect(html).toContain('data-tool-presentation="file"')
+    expect(html).toContain("File content")
     expect(html).toContain("src/a.ts")
-    expect(html).toContain("Copy src/a.ts")
+    expect(html).toContain('data-language="typescript"')
     expect(html).toContain("export const a")
+    expect(html).toContain("Completed")
   })
-  it("uses FileTree for a verified native find result", () => {
+  it("renders a verified native find result as an Artifact with a FileTree", () => {
     const html = render("file_read", { status: "success", content: [{ text: "Found 2 files:\nsrc/a.ts\nsrc/b.ts" }] }, { mode: "find" })
-    expect(html).toContain('data-tool-presentation="files"')
+    expect(html).toContain("Files found")
     expect(html).toContain('role="tree"')
     expect(html).toContain("src/a.ts")
     expect(html).toContain("src/b.ts")
   })
-  it("uses native JSXPreview fallback without executing JSX-shaped tool output", () => {
+  it("shows JSX-shaped text output as text through ToolOutput, never executed", () => {
     const html = render("unknown_tool", '<button id="untrusted-executable">Do not execute this</button>')
-    expect(html).toContain('data-tool-presentation="jsx"')
+    expect(html).toContain("Result")
     expect(html).toContain("Do not execute this")
     expect(html).not.toContain('<button id="untrusted-executable"')
-    expect(html).toContain("Input and raw result")
   })
-  it("shows native JSXPreview structured result instead of dropping unknown fields", () => {
+  it("shows a structured result as ToolOutput JSON instead of dropping unknown fields", () => {
     const html = render("catalog_lookup", { id: "verified-id", unexpected_metadata: { amount: 17 } })
-    expect(html).toContain('data-tool-presentation="jsx"')
+    expect(html).toContain("Result")
     expect(html).toContain("verified-id")
     expect(html).toContain("unexpected_metadata")
-    expect(html).toContain("Copy result")
+    expect(html).toContain('data-language="json"')
   })
-  it("keeps returned error visible in the fallback", () => {
+  it("surfaces a returned error through the Tool output-error state", () => {
     const html = render("catalog_lookup", { status: "success", content: [{ text: JSON.stringify({ status: "error", content: [{ text: "Catalog unavailable" }] }) }] })
-    expect(html).toContain('data-tool-state="output-error"')
+    expect(html).toContain("Error")
     expect(html).toContain("Catalog unavailable")
-    expect(html).toContain('role="alert"')
     expect(html).not.toContain("Completed")
   })
 })

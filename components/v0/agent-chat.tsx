@@ -88,7 +88,7 @@ function Reveal({
  *  with a whisper of rotation. One-time, mount-only. */
 function Headline({ reduce }: { reduce: boolean }) {
   return (
-    <h1 className="text-balance text-center font-editorial text-5xl leading-[0.95] tracking-tight text-foreground sm:text-7xl">
+    <h1 className="text-balance text-center font-editorial text-[2.75rem] leading-[1.05] text-foreground sm:text-[4.5rem]">
       {HEADLINE.map(({ word, accent }, i) => (
         <span
           key={word}
@@ -98,7 +98,7 @@ function Headline({ reduce }: { reduce: boolean }) {
             className={cn(
               "inline-block",
               accent &&
-                "italic text-blurple-bright [text-shadow:0_0_40px_oklch(0.7_0.2_285/0.35)]"
+                "italic text-blurple-bright [text-shadow:0_0_48px_oklch(0.499_0.214_278/0.45)]"
             )}
             initial={reduce ? false : { y: "115%", rotate: 3 }}
             animate={{ y: "0%", rotate: 0 }}
@@ -395,7 +395,7 @@ export function AgentChat({
                 showProjectIde && ideFullscreen
                   ? "hidden"
                   : splitPreview
-                    ? "order-1 flex h-full min-h-0 w-1/3 min-w-0 shrink-0 flex-col border-r border-white/10"
+                    ? "order-1 flex h-full min-h-0 w-1/3 min-w-0 shrink-0 flex-col border-r border-border"
                     : "mx-auto min-h-0 w-full max-w-3xl flex-1 px-4 pb-6"
               )}
             >
@@ -416,7 +416,7 @@ export function AgentChat({
                           (w-full inside a fit-content parent) shrank to the
                           React Flow intrinsic minimum (~142px). Assistant
                           messages stretch instead; user bubbles keep w-fit. */}
-                      <MessageContent className="group-[.is-assistant]:w-full">
+                      <MessageContent className="group-[.is-assistant]:w-full group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:border group-[.is-user]:border-border group-[.is-user]:bg-secondary/90 group-[.is-user]:text-prose group-[.is-user]:shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.06)]">
                         {message.role === "assistant" && (
                           <AgentActivity
                             parts={message.parts}
@@ -446,6 +446,7 @@ export function AgentChat({
                               // that must be live.
                               <MessageResponse
                                 key={`${message.id}-${i}`}
+                                className="text-prose [&_a]:text-blurple-bright [&_a]:underline-offset-4 [&_a]:decoration-blurple-bright/40 [&_code]:text-[0.875em] [&_h1]:font-editorial [&_h1]:text-3xl [&_h1]:tracking-normal [&_h2]:font-editorial [&_h2]:text-2xl [&_h2]:tracking-normal [&_blockquote]:border-blurple-bright/40"
                                 isAnimating={
                                   status === "streaming" &&
                                   messageIndex === messages.length - 1
@@ -510,7 +511,7 @@ export function AgentChat({
                 >
                   <Alert
                     variant="destructive"
-                    className="border-destructive/25 bg-card/80 backdrop-blur-xl"
+                    className="app-glass-edge border-destructive/30 bg-card/90 shadow-[0_12px_40px_-16px_oklch(0.05_0.01_285/0.9)] backdrop-blur-xl"
                     data-testid="chat-error"
                   >
                     <AlertTitle>Request failed</AlertTitle>
@@ -529,7 +530,7 @@ export function AgentChat({
                   exit={{ opacity: 0, y: 8, scale: 0.99 }}
                   transition={{ duration: 0.35, ease: EASE }}
                 >
-                  <Alert className="border-blurple/25 bg-card/80 shadow-[0_8px_32px_-12px_oklch(0.55_0.22_277/0.5)] backdrop-blur-xl">
+                  <Alert className="border-blurple-bright/30 bg-card/90 shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.08),0_12px_40px_-14px_oklch(0.499_0.214_278/0.5)] backdrop-blur-xl">
                     <AlertTitle>Approval needed</AlertTitle>
                     <AlertDescription>
                       <div className="flex w-full flex-col gap-3">
@@ -670,7 +671,7 @@ export function AgentChat({
             }
           >
             <Reveal reduce={reduce} delay={0.05}>
-              <span className="mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground backdrop-blur-sm">
+              <span className="mb-8 inline-flex items-center gap-2 rounded-full border border-border bg-white/[0.025] px-3 py-1 text-xs font-medium tracking-[0.04em] text-muted-foreground shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.06)] backdrop-blur-sm">
                 <span className="size-1.5 animate-pulse-soft rounded-full bg-blurple-bright" />
                 Now in beta
               </span>
@@ -679,7 +680,7 @@ export function AgentChat({
             <Headline reduce={reduce} />
 
             <Reveal reduce={reduce} delay={0.55}>
-              <p className="mt-6 max-w-md text-pretty text-center text-base leading-relaxed text-muted-foreground">
+              <p className="mt-6 max-w-md text-pretty text-center text-prose text-muted-foreground">
                 Describe an interface in plain language. v0 turns it into clean,
                 production-ready React — components, styling, and all.
               </p>
@@ -724,7 +725,7 @@ export function AgentChat({
                       <Suggestion
                         suggestion={suggestion}
                         onClick={runSuggestion}
-                        className="border-white/10 bg-white/[0.03] text-muted-foreground backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-blurple/40 hover:bg-blurple/10 hover:text-foreground hover:shadow-[0_4px_20px_-6px_oklch(0.62_0.205_277/0.45)]"
+                        className="border-border bg-card/60 text-sm text-muted-foreground shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.05)] backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-blurple-bright/40 hover:bg-blurple/15 hover:text-foreground hover:shadow-[0_6px_24px_-8px_oklch(0.499_0.214_278/0.6)]"
                       />
                     </motion.span>
                   ))}
@@ -733,7 +734,7 @@ export function AgentChat({
             </Reveal>
 
             <Reveal reduce={reduce} delay={1.05}>
-              <p className="mt-16 max-w-sm text-center font-mono text-[11px] leading-relaxed tracking-wide text-muted-foreground/60">
+              <p className="mt-16 max-w-sm text-center text-xs leading-relaxed tracking-[0.02em] text-muted-foreground/65">
                 Trusted by design engineers shipping at the edge of the web.
               </p>
             </Reveal>

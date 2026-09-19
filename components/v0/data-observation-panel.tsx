@@ -222,7 +222,7 @@ export function DataObservationPanel({ observation, className }: DataObservation
     >
       {/* Header */}
       <div className="ide-glass-edge flex items-center gap-2.5 border-b bg-white/[0.03] px-4 py-3">
-        <span className="flex size-7 items-center justify-center rounded-lg bg-blurple/30 shadow-[0_0_16px_-2px_oklch(0.62_0.17_250/0.6),inset_0_1px_0_0_oklch(0.85_0.1_235/0.3)]">
+        <span className="flex size-7 items-center justify-center rounded-lg bg-blurple/30 shadow-[0_0_16px_-2px_oklch(0.499_0.214_278/0.7),inset_0_1px_0_0_oklch(0.9_0.05_285/0.25)]">
           <BarChart3Icon aria-hidden className="size-4 text-blurple-bright" />
         </span>
         <div className="min-w-0 flex-1">

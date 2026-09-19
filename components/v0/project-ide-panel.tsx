@@ -153,7 +153,7 @@ function ViewButton({
       className={cn(
         "group flex w-full cursor-pointer flex-col items-center gap-1.5 rounded-xl px-2 py-3 text-[10px] font-medium tracking-wide transition-all duration-200",
         active
-          ? "bg-blurple/25 text-blurple-bright shadow-[0_0_20px_-2px_oklch(0.62_0.17_250/0.5),inset_0_1px_0_0_oklch(0.86_0.08_235/0.25)]"
+          ? "bg-blurple/25 text-blurple-bright shadow-[0_0_20px_-2px_oklch(0.499_0.214_278/0.6),inset_0_1px_0_0_oklch(0.9_0.05_285/0.2)]"
           : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
       )}
       onClick={() => onSelect(view.id)}
@@ -163,7 +163,7 @@ function ViewButton({
         className={cn(
           "flex size-8 items-center justify-center rounded-lg transition-all duration-200",
           active
-            ? "bg-blurple/30 shadow-[inset_0_1px_0_0_oklch(0.86_0.08_235/0.3)]"
+            ? "bg-blurple/30 shadow-[inset_0_1px_0_0_oklch(0.9_0.05_285/0.25)]"
             : "bg-white/[0.04] group-hover:bg-white/[0.08]"
         )}
       >
@@ -535,7 +535,7 @@ export function ProjectIdePanel({
     >
       <ArtifactHeader className="ide-glass-edge border-b bg-white/[0.03] px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="flex size-7 items-center justify-center rounded-lg bg-blurple/30 shadow-[0_0_16px_-2px_oklch(0.62_0.17_250/0.6),inset_0_1px_0_0_oklch(0.86_0.08_235/0.3)]">
+          <span className="flex size-7 items-center justify-center rounded-lg bg-blurple/30 shadow-[0_0_16px_-2px_oklch(0.499_0.214_278/0.7),inset_0_1px_0_0_oklch(0.9_0.05_285/0.25)]">
             <FolderIcon className="size-4 text-blurple-bright" />
           </span>
           <ArtifactTitle className="truncate font-medium tracking-tight">
@@ -559,7 +559,7 @@ export function ProjectIdePanel({
                   className={cn(
                     "flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition-all duration-200",
                     active
-                      ? "bg-blurple/40 text-white shadow-[0_0_16px_-2px_oklch(0.62_0.17_250/0.7),inset_0_1px_0_0_oklch(0.9_0.06_240/0.4)]"
+                      ? "bg-blurple/40 text-white shadow-[0_0_16px_-2px_oklch(0.499_0.214_278/0.8),inset_0_1px_0_0_oklch(0.92_0.04_285/0.3)]"
                       : "text-muted-foreground hover:text-foreground"
                   )}
                   data-testid={`ide-view-${v.id}`}

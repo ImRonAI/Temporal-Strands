@@ -5,5 +5,14 @@ import nextTypeScript from "eslint-config-next/typescript"
 export default defineConfig([
   ...nextVitals,
   ...nextTypeScript,
-  globalIgnores([".next/**", ".next-desktop-acceptance/**", "orchestrator/.venv/**", "next-env.d.ts"]),
+  globalIgnores([
+    ".next/**",
+    ".next-desktop-acceptance/**",
+    ".next-obsidian-inspect/**",
+    "**/.worktrees/**",
+    "**/.kilo/worktrees/**",
+    "orchestrator/.venv/**",
+    "orchestrator/strands-tools/**",
+    "next-env.d.ts",
+  ]),
 ])

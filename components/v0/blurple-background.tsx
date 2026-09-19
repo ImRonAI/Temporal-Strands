@@ -36,10 +36,10 @@ export function BlurpleBackground({ settled = false }: { settled?: boolean }) {
       </div>
 
       {/* fine editorial grid */}
-      <div className="absolute inset-0 opacity-[0.05] [background-image:linear-gradient(to_right,white_1px,transparent_1px),linear-gradient(to_bottom,white_1px,transparent_1px)] [background-size:64px_64px] [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]" />
+      <div className="absolute inset-0 opacity-[0.035] [background-image:linear-gradient(to_right,white_1px,transparent_1px),linear-gradient(to_bottom,white_1px,transparent_1px)] [background-size:72px_72px] [mask-image:radial-gradient(ellipse_at_center,black,transparent_70%)]" />
 
       {/* vignette to ground the type */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_52%,oklch(0.13_0.02_250/0.78))]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_48%,oklch(0.1_0.008_285/0.85))]" />
     </div>
   )
 }

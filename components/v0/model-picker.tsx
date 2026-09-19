@@ -122,13 +122,13 @@ export function ModelPicker({
     >
       <PopoverTrigger
         className={cn(
-          "flex items-center gap-1.5 rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm text-muted-foreground transition-colors outline-none select-none hover:bg-accent hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-expanded:bg-accent aria-expanded:text-foreground",
+          "flex items-center gap-1.5 rounded-lg border border-input bg-white/[0.02] px-2.5 py-1.5 text-sm text-muted-foreground shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.05)] transition-colors outline-none select-none hover:border-border hover:bg-accent hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-expanded:border-blurple-bright/40 aria-expanded:bg-accent aria-expanded:text-foreground",
           triggerClassName
         )}
       >
         <span className="max-w-40 truncate">{triggerLabel}</span>
         {onReasoningEffortChange && reasoningEffort !== "default" ? (
-          <span className="text-xs">/ {effortLabel(reasoningEffort)}</span>
+          <span className="text-xs text-blurple-bright">/ {effortLabel(reasoningEffort)}</span>
         ) : null}
         <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
       </PopoverTrigger>
@@ -136,7 +136,7 @@ export function ModelPicker({
           composite, and the inner Command must not repaint it opaque. */}
       <PopoverContent
         align="start"
-        className="app-glass-edge border bg-popover/80 p-0 backdrop-blur-xl"
+        className="app-elevated border bg-popover/85 p-0 ring-0 backdrop-blur-xl"
       >
         {choosingEffort && onReasoningEffortChange ? (
           <PromptInputCommand className="bg-transparent" key={`effort-${value}`}>
@@ -168,7 +168,7 @@ export function ModelPicker({
               </PromptInputCommandGroup>
             </PromptInputCommandList>
             {!reasoningLevels(value).length ? (
-              <p className="px-3 pb-3 text-xs text-muted-foreground">Only the provider default is verified for this model.</p>
+              <p className="px-3 pb-3 text-xs leading-relaxed text-muted-foreground/85">Only the provider default is verified for this model.</p>
             ) : null}
           </PromptInputCommand>
         ) : (

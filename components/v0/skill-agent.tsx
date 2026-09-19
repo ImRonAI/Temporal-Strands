@@ -42,9 +42,9 @@ export function SkillAgent({ part, run, isThinking, renderNative }: {
   const errorText = part?.state === "output-error" ? part.errorText : failed ? resultText(output ?? run?.result) : undefined
 
   return (
-    <Agent className="app-glass app-glass-edge min-w-0" data-skill-agent={part?.toolCallId ?? run?.toolUseId}>
+    <Agent className="app-glass app-glass-edge min-w-0 overflow-hidden rounded-lg" data-skill-agent={part?.toolCallId ?? run?.toolUseId}>
       <AgentHeader name={`${name} · ${status}`} model={configuration?.model}
-        className="[&>div]:min-w-0 [&>div]:flex-wrap [&_span]:break-words" />
+        className="app-glass-edge border-b bg-black/25 [&>div]:min-w-0 [&>div]:flex-wrap [&_span]:break-words" />
       <AgentContent className="min-w-0">
         <details>
           <summary className="cursor-pointer text-sm font-medium">System prompt</summary>
@@ -83,8 +83,8 @@ export function SkillAgent({ part, run, isThinking, renderNative }: {
             </div>
           </TaskTrigger>
           <TaskContent>
-            <ChainOfThought defaultOpen>
-              <ChainOfThoughtHeader>{running ? "Agent working..." : "Agent activity"}</ChainOfThoughtHeader>
+            <ChainOfThought defaultOpen className="border-l-2 border-l-blurple-bright/30 pl-3">
+              <ChainOfThoughtHeader className="text-[13px] font-medium tracking-[0.01em]">{running ? "Agent working..." : "Agent activity"}</ChainOfThoughtHeader>
               <ChainOfThoughtContent className="max-h-[32rem] overflow-y-auto">
                 {run && run.attempt > 1 && <TaskItem>Attempt {run.attempt}</TaskItem>}
                 {!run?.timeline.length && <TaskItem>{running ? "Waiting for agent events..." : status}</TaskItem>}

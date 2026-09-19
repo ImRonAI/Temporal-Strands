@@ -106,20 +106,21 @@ describe("native Kilo regression-only contract hooks", () => {
     expect(output.output).toContain("required-boundary")
   })
 
-  it("blocks SDK signature and literal BrowserInput violations using installed Python packages", async () => {
+  // Each native check cold-imports installed Python SDKs in a subprocess with
+  // a 15s deadline. Keep separate cases and allow that deadline plus hook setup;
+  // the default 5s budget is not sufficient under full-suite contention.
+  it.each([
+    ["SDK signature", 'from temporalio.worker import Worker\nWorker(client, task_queue="q", task_queu="typo")'],
+    ["literal BrowserInput", "from strands_tools.browser.models import BrowserInput\nBrowserInput(action={'type':'navigate','session_name':'native-contract'})"],
+  ])("blocks %s violations using installed Python packages", async (_name, content) => {
     const { hooks, root } = await setup()
     symlinkSync(path.resolve("orchestrator/.venv"), path.join(root, "orchestrator/.venv"), "dir")
     // Interpreter selection is made when the plugin loads, as in a real project.
     const native = await DesktopGuard({ directory: root } as PluginInput)
     cleanup.push(async () => { await native.dispose?.() })
-    for (const content of [
-      'from temporalio.worker import Worker\nWorker(client, task_queue="q", task_queu="typo")',
-      "from strands_tools.browser.models import BrowserInput\nBrowserInput(action={'type':'navigate','session_name':'native-contract'})",
-    ]) {
-      await expect(native["tool.execute.before"]!(input, { args: { filePath: "orchestrator/custom_activity.py", content } })).rejects.toThrow("python-call-contract")
-    }
+    await expect(native["tool.execute.before"]!(input, { args: { filePath: "orchestrator/custom_activity.py", content } })).rejects.toThrow("python-call-contract")
     expect(hooks["experimental.text.complete"]).toBeUndefined()
-  })
+  }, 20_000)
 
   it("does not reject partial patch hunks, reports actual introduced errors afterward", async () => {
     const { hooks, root } = await setup()

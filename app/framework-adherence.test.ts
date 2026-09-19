@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
-import { extname, join, normalize, relative, sep } from "node:path"
+import { join, normalize, relative, sep } from "node:path"
 
 import { describe, expect, it } from "vitest"
 
@@ -158,7 +158,7 @@ describe("framework adherence", () => {
 
   it("check 1: no new ReadableStream / new TextEncoder / .getReader / new EventSource", () => {
     const violations = streamViolations(files)
-    // Known mid-plan violation: app/api/compare/route.ts (todo 17 deletes it).
+    // Guard the native transport path, including retirement of the unused compare route.
     expect(violations, formatViolations("streaming primitives", violations.map((v) => `${v.file}: ${v.line}`))).toEqual([])
   })
 

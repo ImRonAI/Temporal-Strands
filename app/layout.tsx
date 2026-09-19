@@ -35,8 +35,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   colorScheme: 'dark',
-  // Matches --background: oklch(0.16 0.02 250) — dark blue, not purple.
-  themeColor: '#161b26',
+  // Matches --background: oklch(0.142 0.009 285) — the obsidian canvas.
+  themeColor: '#09090d',
 }
 
 export default function RootLayout({

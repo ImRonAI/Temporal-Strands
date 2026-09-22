@@ -720,7 +720,7 @@ async def _run_create(
             try:
                 await pulse
             except asyncio.CancelledError:
-                pass
+                logger.debug("Agent response heartbeat task stopped")
         activity.heartbeat(
             {"response_id": response_id, "sequence_number": last_sequence}
         )

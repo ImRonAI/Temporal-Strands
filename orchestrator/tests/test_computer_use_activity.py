@@ -24,8 +24,10 @@ def desktop(monkeypatch, tmp_path):
     # Import substitutes are installed before the activity's lazy imports. Even
     # importing the real PyAutoGUI module could connect to the host display.
     gui = MagicMock(spec=["size", "click", "moveTo", "mouseDown", "mouseUp", "write",
-                          "dragTo", "press", "keyDown", "keyUp", "hotkey", "scroll", "hscroll"])
+                          "dragTo", "press", "keyDown", "keyUp", "hotkey", "scroll", "hscroll",
+                          "FAILSAFE"])
     gui.size.return_value = (1440, 900)
+    gui.FAILSAFE = True
     monkeypatch.setitem(sys.modules, "pyautogui", gui)
     # The container's PyPI distribution does not ship this host-fork module.
     monkeypatch.setitem(sys.modules, "strands_tools.cursor", None)
@@ -91,6 +93,14 @@ def test_click_uses_pyautogui_and_full_display_coordinates(desktop, action, butt
                       "url": "", "intent": "Open editor", "observation": desktop.observation}
 
 
+def test_corner_clicks_disable_the_human_abort_failsafe_on_the_fenced_display(desktop):
+    # XFCE's "Applications" menu sits at the top-left corner; PyAutoGUI's corner
+    # fail-safe would otherwise raise and push the desktop into recovery.
+    cua.execute_computer_use("click", {"x": 0, "y": 0})
+    assert desktop.gui.FAILSAFE is False
+    desktop.gui.click.assert_called_once_with(0, 0, button="left", clicks=1, interval=0.0)
+
+
 @pytest.mark.parametrize("action", ["move", "hover_at"])
 def test_move_uses_pyautogui(desktop, action):
     cua.execute_computer_use(action, {"x": 0, "y": 500})
@@ -106,7 +116,7 @@ def test_held_mouse_input_is_physical(desktop, action, method):
 
 @pytest.mark.parametrize("action", ["type", "type_text_at"])
 def test_type_focuses_and_replaces_with_linux_shortcut(desktop, action):
-    cua.execute_computer_use(action, {"x": 500, "y": 250, "text": "search", "press_enter": True})
+    cua.execute_computer_use(action, {"x": 500, "y": 250, "text": "search", "press_enter": True, "focus": True})
     assert desktop.gui.method_calls == [call.size(), call.click(720, 225),
                                        call.hotkey("ctrl", "a"), call.write("search", interval=0.0),
                                        call.press("enter")]
@@ -116,6 +126,17 @@ def test_type_without_coordinates_preserves_focused_desktop_application(desktop)
     cua.execute_computer_use("type", {"text": "note", "press_enter": False})
     assert desktop.gui.method_calls == [call.size(), call.write("note", interval=0.0)]
     desktop.browser.browser.assert_not_called()
+
+
+def test_type_ignores_model_placeholder_coordinates_unless_focus_explicit(desktop):
+    cua.execute_computer_use("type", {"text": "DESKTOP-INPUT-VERIFIED", "x": 0, "y": 0, "focus": False})
+    assert desktop.gui.method_calls == [call.size(), call.write("DESKTOP-INPUT-VERIFIED", interval=0.0)]
+
+
+def test_legacy_type_text_at_keeps_explicit_coordinate_focus(desktop):
+    cua.execute_computer_use("type_text_at", {"text": "replace", "x": 500, "y": 250})
+    desktop.gui.click.assert_called_once_with(720, 225)
+    desktop.gui.hotkey.assert_called_once_with("ctrl", "a")
 
 
 @pytest.mark.parametrize("args", [

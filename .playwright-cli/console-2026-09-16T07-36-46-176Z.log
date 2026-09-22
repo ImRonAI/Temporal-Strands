@@ -1,0 +1,84 @@
+[     104ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[     157ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[     323ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[     607ms] [LOG] [Fast Refresh] done in 385ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   11887ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   12120ms] [LOG] [Fast Refresh] done in 334ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   36320ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   36569ms] [LOG] [Fast Refresh] done in 350ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   49800ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   50036ms] [LOG] [Fast Refresh] done in 337ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   59121ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   59313ms] [LOG] [Fast Refresh] done in 293ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   81853ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   88162ms] [LOG] [Fast Refresh] done in 6398ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  120978ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  121048ms] [LOG] [Fast Refresh] done in 169ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  122245ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  122670ms] [LOG] [Fast Refresh] done in 530ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  183997ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  889009ms] TypeError: Cannot read properties of undefined (reading 'split')
+    at createRawTokens (http://localhost:3000/_next/static/chunks/components_ai-elements_11v3inu._.js:859:22)
+    at CodeBlockContent.useMemo[rawTokens] (http://localhost:3000/_next/static/chunks/components_ai-elements_11v3inu._.js:1016:52)
+    at mountMemo (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:5393:25)
+    at Object.useMemo (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:15213:24)
+    at exports.useMemo (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_18mebsk._.js:1742:36)
+    at CodeBlockContent (http://localhost:3000/_next/static/chunks/components_ai-elements_11v3inu._.js:1015:396)
+    at Object.react_stack_bottom_frame (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:15037:24)
+    at renderWithHooks (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:4620:24)
+    at updateFunctionComponent (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:6081:21)
+    at beginWork (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:6691:24)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:965:74)
+    at performUnitOfWork (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:9555:97)
+    at workLoopSync (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:9449:40)
+    at renderRootSync (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:9433:13)
+    at performWorkOnRoot (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:9098:47)
+    at performSyncWorkOnRoot (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:10263:9)
+    at flushSyncWorkAcrossRoots_impl (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:10179:316)
+    at processRootScheduleInMicrotask (http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:10200:106)
+    at http://localhost:3000/_next/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:10274:158
+[  898105ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/:0
+[  900469ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/1yi7_react-dom_1papa4l._.js:15305
+[  900513ms] Error: An unexpected Turbopack error occurred. Please see the output of `next dev` for more details.
+    at getServerError (http://localhost:3000/_next/static/chunks/12e1_next_dist_13frtok._.js:2075:62)
+    at http://localhost:3000/_next/static/chunks/12e1_next_dist_client_0rpfzia._.js:3677:27
+[  900532ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/12e1_next_dist_13frtok._.js:1226
+[  900847ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3000/favicon.ico:0
+[  902373ms] [WARNING] [Fast Refresh] performing full reload because your application had an unrecoverable error @ http://localhost:3000/_next/static/chunks/12e1_next_dist_13frtok._.js:1226
+[  902881ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/:0
+[  902908ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/1yi7_react-dom_1papa4l._.js:15305
+[  902915ms] Error: An unexpected Turbopack error occurred. Please see the output of `next dev` for more details.
+    at getServerError (http://localhost:3000/_next/static/chunks/12e1_next_dist_13frtok._.js:2075:62)
+    at http://localhost:3000/_next/static/chunks/12e1_next_dist_client_0rpfzia._.js:3677:27
+[  902967ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/12e1_next_dist_13frtok._.js:1226
+[  903202ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_13frtok._.js:1226
+[  903206ms] [LOG] [Fast Refresh] done in 104ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_13frtok._.js:1226
+[  965301ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/12e1_next_dist_13frtok._.js:1226
+[  971804ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  971896ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  972364ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  974332ms] [LOG] [Fast Refresh] done in 2069ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  992004ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  992591ms] [LOG] [Fast Refresh] done in 688ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1007077ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1007587ms] [LOG] [Fast Refresh] done in 611ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1030922ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1031558ms] [LOG] [Fast Refresh] done in 745ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1046259ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1047005ms] [LOG] [Fast Refresh] done in 848ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1059562ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1059740ms] [LOG] [Fast Refresh] done in 279ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1065807ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1071886ms] [LOG] [Fast Refresh] done in 6179ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1101273ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1101912ms] [LOG] [Fast Refresh] done in 746ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1113120ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1114499ms] [LOG] [Fast Refresh] done in 1482ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1121076ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1122093ms] [LOG] [Fast Refresh] done in 1118ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1151212ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1152982ms] [LOG] [Fast Refresh] done in 1871ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1166261ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1166348ms] [LOG] [Fast Refresh] done in 188ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1172813ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[ 1177799ms] [LOG] [Fast Refresh] done in 5091ms @ http://localhost:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489

@@ -230,3 +230,45 @@ Evidence is under the approved temp directory `.../T/kilo/`: `desktop-acceptance
 Check actual processes before continuing: isolated acceptance used Temporal 7235, API 8789, Next 3002 with `.next-desktop-acceptance`, fixture 8799. Primary 3000/8787 stack belongs to other work and was preserved. After session-bound removal, the final image `ab85eaf88849` was rebuilt and started as a tracked persistent process `bgp_08d874722001Z6vWrwEecGtdQe`; Docker reported running/healthy UID501 and logs confirmed `Desktop worker polling 'desktop-browser'`. Recheck runtime rather than relying on this snapshot. No cloud resources or commits were created. Think remains the separate agent's scope and was preserved.
 
 Remaining finish gate: restore verified image/runtime, resolve the real API Group connector authorization without removing capabilities, then repeat the complete literal UI sequence including fresh post-human pixels, same-ID/new-run steering, all action/Think updates, and the non-browser editor task. Feature remains incomplete until this passes.
+
+## September 11 real UI verification
+
+The earlier connector blocker is resolved: live configured catalogs include Google Drive and Linear, with GitHub retained. No tool override or screenshot substitute was used for these desktop runs. Think remains owned by separate work.
+
+Current literal UI task evidence uses `http://127.0.0.1:3002`, API 8789, Temporal 7235, `openai/gpt-6-astra` through Perplexity, and container `gwen-desktop` image `efa7e72cdd33`. It is the actual app code on isolated local service ports, not a mocked UI.
+
+- First browser visual task `chat-e73f18f8d8f27f22` correctly revealed and reported `VISION-958528`, rendered all five actions, granted human VNC input, accepted visible note `HUMAN-UPDATED`, revoked input, and resumed with correct original code and new note. Its final stream then hit a completion-drain timeout. That run was NOT clean acceptance.
+- Fixed `server.py` completion draining to reissue only a stuck native read when the native Run ID changes. Original total deadline stays ten seconds. No turn or physical action replay. Regression uses real WorkflowStreamClient/state transfer with simulated RPC routing.
+- The editor task found `type` could click model-supplied placeholder x/y=0 and trigger PyAutoGUI fail-safe. `computer_use_activity.py` now requires explicit `focus=True` for optional typing focus; plain `type` preserves the caret. Existing `type_text_at` still focuses explicit coordinates. Fail-safe remains enabled.
+- Current session `chat-f3c55a6a63a9378a` initially recorded an honest browser StartToClose timeout during severe runtime/QA load. Stale QA browsers owned by this session were closed, not user/other-agent browsers. The error remains visible in history; it was not hidden or marked success.
+- With the corrected binding, a subsequent real model-driven native Mousepad task read `EDITOR-491564`, clicked the editor, pressed the desktop hotkey, typed `DESKTOP-INPUT-VERIFIED`, and verified it via screenshot. All five actions completed and the UI reached Chat idle without a terminal stream error.
+- Real Take Control then granted x11vnc viewonly=0. Human VNC key events added `HUMAN-UPDATED` on a separate editor line. Relinquish verified viewonly=1, deny=0, X11 keys_down=0 and pointer_mask=0, while read-only noVNC reconnected.
+- Native PromptInput steering preserved workflow/session `chat-f3c55a6a63a9378a` and changed Run ID from `ef3807d1-29d9-4935-a63b-a6da8195ac34` to `08a3d2aa-e005-4587-a1a0-99798aaf36a6`. Fresh screenshot activity ID2 returned artifact `3e1f3885-2291-41de-8050-e16cd3a4e347`. The model correctly reported the editor code and both verification lines; UI reached Chat idle without a late error. Automatic successor `6124f91f-02d8-4077-b36e-1a129a95cb96` retained context. Rollover argument payload measured 707384 bytes, without image pixels.
+- A following task in the same UI/session used physical browser address-bar input, screenshot observation, and coordinate click to reveal `VISION-098628`; the visible canvas and final model answer match. All five actions finished and UI reached Chat idle without a late error. Browser and Mousepad remain open.
+- Final DOM inspection found 11 decoded screenshots, each naturalWidth1440; 11 successful action entries plus the earlier correctly retained init-session error; native iframe URL `http://localhost:6080/vnc.html?autoconnect=true&resize=scale&reconnect=true&view_only=true`. Final VNC viewonly=1, deny=0, pointer_mask=0. Mobile width390 had scrollWidth390 and enabled Take Control.
+
+Evidence screenshots (actual UI, no fixture-source inspection for answers):
+
+- Native editor success: `/Users/tims-stuff/.agent-browser/tmp/screenshots/screenshot-1789099164064.png`
+- Actual human edit: `/Users/tims-stuff/.agent-browser/tmp/screenshots/screenshot-1789099312209.png`
+- Final browser code/preview: `/Users/tims-stuff/.agent-browser/tmp/screenshots/screenshot-1789099573097.png`
+
+Latest validation: 235 scoped desktop tests passed, one real-browser opt-in skipped; 15 completion/rollover tests passed; 59 native UI tests passed; direct `node node_modules/typescript/bin/tsc --noEmit` passed; changed UI lint and `git diff --check` passed. Combined server/desktop run reported 280 passed, one skipped and two concurrent model-validation fixture failures (`test_turn_unknown_model_id_is_400_listing_available`, `test_turn_rejects_unverified_reasoning_effort`: MagicMock query not awaitable). Do not claim repository-wide green. Earlier package-manager tsc timed out under load, then direct compiler passed after own stale QA sessions were closed.
+
+This establishes real local UI browser vision, native non-browser typing, human takeover/revocation, same-session steering/context and clean completion on the corrected runs. It does not establish GCE deployment, clean cold-start reliability under saturated host load, full public multiuser isolation, or resolution of unrelated repository gates. Retain earlier failures as engineering evidence.
+
+## September 13 primary-stack run and fixes
+
+Runtime at inspection was fully down (no 3000/7233/8787/6080; stale Sept-10 isolated processes on 3002/8789/8799 were unresponsive and left alone). `gwen-desktop:native` had drifted from source (`computer_use_activity.py` `focus` change), and `runtime.json` was pinned in `recovery` by owner `chat-9764b2885ac5442e`, which Temporal no longer knew.
+
+Fixes in this increment (all with targeted tests first):
+
+- `orchestrator/desktop_worker.py::reclaim_orphaned_desktop`: after `initialize_desktop`, describe the persisted owner through the native Temporal client (bounded by `config.DESKTOP_OWNER_PROBE_TIMEOUT`). Closed/NOT_FOUND owners are cleared to `agent`; RUNNING/CONTINUED_AS_NEW, RPC failures, or another namespace keep `recovery`. Tests: `test_desktop_runtime.py` (+3, 68 pass).
+- `orchestrator/server.py` `/health` now carries `desktop` (poller probe on `desktop-browser`); it never gates `status`. Test updated in `test_server.py`.
+- `orchestrator/tests/test_server.py`: the two model-validation tests now use an awaitable `handle.query` (they were failing only because the WIP `turn_stream` queries the current model before validating a switch).
+- `components/v0/computer-use-activity.tsx`: action details compose native `ToolInput`/`ToolOutput` instead of hand-built `CodeBlock`s; `pnpm check:desktop` is clean.
+- Image rebuilt (`c0bf84be7351`, label matches source hash); `pnpm dev:all` brought the primary stack up with `/health` `desktop:true`.
+
+Live acceptance on the primary stack (`chat-36305ecd7e99feb5`, `openai/gpt-6-astra`): browser vision task revealed `VISION-681004` (matches physical display), Take Control → `HUMAN-UPDATED` via noVNC keys → Relinquish (`viewonly:1, pointer_mask:0x0`) → steering changed Run ID `a75e8f38…`→`ff067d33…` with unchanged Workflow ID, fresh screenshot, and the model retained both the original code and the new note. Computer-use editor task read `EDITOR-506656` and typed `DESKTOP-INPUT-VERIFIED` in Mousepad with six native actions; all ten timeline actions terminal, UI idle. Held mouse button (`pointer_mask:0x100`) was cleared by Relinquish. Container stop while owned reported `desktop:false`/503 and took the stack down (`--kill-others`); cold restart reclaimed the orphaned owner. Evidence: `docs/evidence/desktop-2026-09-13/`.
+
+Not exercised: stale second VNC client during human mode, GCE, multi-user.

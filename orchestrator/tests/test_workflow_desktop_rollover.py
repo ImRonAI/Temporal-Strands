@@ -17,18 +17,16 @@ from temporalio.client import WorkflowExecutionStatus, WorkflowUpdateFailedError
 from temporalio.common import RetryPolicy
 from temporalio.contrib.strands import StrandsPlugin, TemporalAgent
 from temporalio.contrib.strands.workflow import activity_as_tool
-from temporalio.contrib.workflow_streams import WorkflowStreamClient
+from temporalio.contrib.workflow_streams import PollInput, PollResult, WorkflowStreamClient
 from temporalio.testing import WorkflowEnvironment
-from temporalio.exceptions import ActivityError, TimeoutError as ActivityTimeoutError, TimeoutType
 from temporalio.worker import Replayer, UnsandboxedWorkflowRunner, Worker
 
 from config import (
     DESKTOP_BROWSER_TASK_QUEUE,
     DESKTOP_HANDOFF_TIMEOUT,
+    DESKTOP_JOB_HEARTBEAT_TIMEOUT,
     DESKTOP_MUTATION_RETRY_POLICY,
     DESKTOP_TASK_TIMEOUT,
-    DESKTOP_SCHEDULE_TO_START,
-    DESKTOP_ACTION_SCHEDULE_TO_CLOSE,
 )
 from computer_use_activity import COMPUTER_USE_ACTIVITIES
 from workflow import (
@@ -147,16 +145,11 @@ class QueuedDesktopActionWorkflow:
         ]]
         native = copy.copy(next(tool for tool in tools if tool.tool_name == tool_name))
         # Preserve production budgets; isolate the queue so no worker can execute.
-        native._options = {**native._options, "task_queue": f"absent-{workflow.info().workflow_id}"}
+        native._options = {**native._options, "task_queue": f"late-{workflow.info().workflow_id}"}
         args = {"browser_input": {"action": {"type": "list_sessions"}}} if tool_name == "browser" else {}
-        try:
-            async for _ in native.stream({"toolUseId": "queued", "name": tool_name, "input": args}, {}):
-                pass
-        except ActivityError as error:
-            assert isinstance(error.cause, ActivityTimeoutError)
-            assert error.cause.type == TimeoutType.SCHEDULE_TO_START
-            return "schedule-to-start timeout"
-        raise AssertionError("Queued desktop action unexpectedly executed")
+        async for _ in native.stream({"toolUseId": "queued", "name": tool_name, "input": args}, {}):
+            pass
+        return "executed"
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
@@ -244,6 +237,35 @@ async def test_claim_during_automatic_rollover_drain_preserves_ownership(session
     assert CAPTURES == []
 
 
+async def test_mid_turn_rollover_keeps_stream_pollers_attached(session, client):
+    """Pattern 9 + Workflow Streams: history pressure does not detach mid-turn.
+
+    The live UI died because CAN suggestion immediately called detach_pollers,
+    so /sessions/.../turns/stream hit StreamDraining three times and hung up
+    while the worker kept running. Polls must still be accepted until the
+    in-flight turn releases the lock.
+    """
+    MODEL_RELEASE.clear()
+    turn = await session.start_update(
+        ChatWorkflow.turn, TurnInput(prompt="keep streaming"),
+        wait_for_stage=WorkflowUpdateStage.ACCEPTED,
+    )
+    await asyncio.wait_for(MODEL_STARTED.wait(), 5)
+    await session.signal(DesktopTestWorkflow.request_rollover)
+    await state_when(session, lambda state: state["closing"])
+    assert await session.query(ChatWorkflow.turn_start_offset) is not None
+    poll = await session.start_update(
+        "__temporal_workflow_stream_poll",
+        PollInput(topics=["events"], from_offset=0),
+        wait_for_stage=WorkflowUpdateStage.ACCEPTED,
+        result_type=PollResult,
+    )
+    MODEL_RELEASE.set()
+    reply = await asyncio.wait_for(turn.result(), 5)
+    assert reply == "stub reply"
+    await asyncio.wait_for(poll.result(), 5)
+
+
 async def test_automatic_rollover_while_human_retains_fence_and_session(session):
     await session.execute_update(ChatWorkflow.claim_control)
     old_run = (await session.query("control_status"))["run_id"]
@@ -298,6 +320,10 @@ async def test_resume_changes_only_run_consumes_steering_once_and_streams_captur
                 return
 
     capture_events = asyncio.create_task(collect_capture())
+    # The subscriber's first poll must be admitted before the turn; otherwise
+    # continue-as-new truncates the delivered log (Workflow Streams recipe)
+    # and a late iterator never sees the resume capture frames.
+    await asyncio.sleep(0.3)
     try:
         await session.execute_update(ChatWorkflow.turn, TurnInput(prompt=steering))
         await asyncio.wait_for(capture_events, 5)
@@ -585,30 +611,39 @@ async def test_all_browser_computer_native_adapters_dispatch_action_budgets():
                 pass
         options = dispatch.call_args.kwargs
         assert options["task_queue"] == DESKTOP_BROWSER_TASK_QUEUE
-        assert options["start_to_close_timeout"] == timedelta(seconds=30)
-        assert options["schedule_to_start_timeout"] == DESKTOP_SCHEDULE_TO_START == timedelta(seconds=5)
-        assert options["schedule_to_close_timeout"] == DESKTOP_ACTION_SCHEDULE_TO_CLOSE == timedelta(seconds=40)
+        assert options.get("start_to_close_timeout") == DESKTOP_TASK_TIMEOUT
+        assert options.get("schedule_to_start_timeout") is None
+        assert options.get("schedule_to_close_timeout") is None
+        assert options["heartbeat_timeout"] == DESKTOP_JOB_HEARTBEAT_TIMEOUT
         assert options["retry_policy"].maximum_attempts == 1
         assert options["cancellation_type"] == workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED
 
 
 @pytest.mark.parametrize("tool_name", ["browser", "take_screenshot"])
-async def test_queued_native_action_times_out_before_execution(client, tool_name):
+async def test_queued_native_action_waits_for_temporal_worker(client, tool_name):
+    """Serialized desktop work queues; it must not die on schedule-to-start."""
+    workflow_id = f"queued-action-{uuid4()}"
     handle = await client.start_workflow(
-        QueuedDesktopActionWorkflow.run, tool_name, id=f"queued-action-{uuid4()}",
+        QueuedDesktopActionWorkflow.run, tool_name, id=workflow_id,
         task_queue="desktop-rollover-tests",
     )
-    assert await asyncio.wait_for(handle.result(), 12) == "schedule-to-start timeout"
+    await asyncio.sleep(6)
     history = await handle.fetch_history()
     scheduled = [event for event in history.events if event.HasField("activity_task_scheduled_event_attributes")]
-    timed_out = [event for event in history.events if event.HasField("activity_task_timed_out_event_attributes")]
-    assert len(scheduled) == len(timed_out) == 1
+    assert len(scheduled) == 1
+    assert not any(event.HasField("activity_task_timed_out_event_attributes") for event in history.events)
     assert not any(event.HasField("activity_task_started_event_attributes") for event in history.events)
     options = scheduled[0].activity_task_scheduled_event_attributes
     assert options.activity_type.name == tool_name
-    assert options.start_to_close_timeout.ToTimedelta() == timedelta(seconds=30)
-    assert options.schedule_to_start_timeout.ToTimedelta() == timedelta(seconds=5)
-    assert options.schedule_to_close_timeout.ToTimedelta() == timedelta(seconds=40)
+    assert options.start_to_close_timeout.ToTimedelta() == DESKTOP_TASK_TIMEOUT
+    assert not options.HasField("schedule_to_start_timeout") or options.schedule_to_start_timeout.ToTimedelta().total_seconds() == 0
+    assert not options.HasField("schedule_to_close_timeout") or options.schedule_to_close_timeout.ToTimedelta().total_seconds() == 0
+    assert options.heartbeat_timeout.ToTimedelta() == DESKTOP_JOB_HEARTBEAT_TIMEOUT
     assert options.retry_policy.maximum_attempts == 1
-    elapsed = (timed_out[0].event_time.ToDatetime() - scheduled[0].event_time.ToDatetime()).total_seconds()
-    assert 4.5 <= elapsed < 10
+
+    @activity.defn(name=tool_name)
+    async def stub(*_args, **_kwargs):
+        return {"status": "success", "content": []}
+
+    async with Worker(client, task_queue=f"late-{workflow_id}", activities=[stub]):
+        assert await asyncio.wait_for(handle.result(), 15) == "executed"

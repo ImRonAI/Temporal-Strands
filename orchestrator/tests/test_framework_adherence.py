@@ -110,17 +110,17 @@ def test_a_no_bare_strands_model_subclass() -> None:
 # may fail until that lane lands — expected, not a defect in the gate.
 
 
-def test_b_perplexity_model_subclasses_openai_responses_model() -> None:
+def test_b_perplexity_model_subclasses_openai_responses_model(monkeypatch) -> None:
     path = _module_stem_to_path("perplexity_model")
     spec = importlib.util.spec_from_file_location("perplexity_model", path)
     assert spec is not None and spec.loader is not None
-    sys.path.insert(0, str(ORCHESTRATOR_DIR))
-    try:
+    with monkeypatch.context() as context:
+        context.syspath_prepend(str(ORCHESTRATOR_DIR))
         module = importlib.util.module_from_spec(spec)
+        # Dataclasses resolve postponed annotations through sys.modules.
+        # Restore any previously imported provider after this isolated load.
+        context.setitem(sys.modules, spec.name, module)
         spec.loader.exec_module(module)
-    finally:
-        if str(ORCHESTRATOR_DIR) in sys.path:
-            sys.path.remove(str(ORCHESTRATOR_DIR))
 
     perplexity_model = getattr(module, "PerplexityModel", None)
     assert perplexity_model is not None, (

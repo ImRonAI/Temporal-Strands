@@ -60,6 +60,10 @@ DESKTOP_OWNER_PROBE_TIMEOUT = timedelta(seconds=10)
 # the stateless router endpoint, which rejects catalog model ids and
 # background/store/max_steps.
 PERPLEXITY_API_BASE = "https://api.perplexity.ai"
+# Provider capability exceptions, not a model-picker catalog. Fable 5.1 rejects
+# named/required tool choice even with adaptive thinking (verified via gateway).
+# https://platform.claude.com/docs/en/api/errors#forced-tool-use-not-supported
+PERPLEXITY_AUTO_TOOL_CHOICE_MODELS = frozenset({"anthropic/claude-fable-5-1"})
 # Perplexity-only ``response.output_item.done`` item types. These are the
 # server-side tool payloads in the Agent API's OutputItem union that the
 # OpenAI Responses stream loop has no branch for and silently skips
@@ -69,6 +73,8 @@ PERPLEXITY_API_BASE = "https://api.perplexity.ai"
 # absent: its text already streams as output_text deltas.
 NATIVE_OUTPUT_ITEM_TYPES = (
     "search_results",
+    "people_search_results",
+    "finance_results",
     "fetch_url_results",
     "sandbox_results",
     "sandbox_write_file",
@@ -102,6 +108,11 @@ BUILTIN_SKILLS = tuple(
 # live 2026-09-13 for a connector the Project has not authorized). Both
 # Perplexity adapters classify these as non-retryable.
 PERMANENT_HTTP_STATUSES = frozenset({400, 401, 403, 404, 422, 424})
+# SSE failures can arrive after HTTP 200, with symbolic codes instead of a
+# status. Observed live for Fable 5.1: code/type="invalid_request".
+PERMANENT_API_ERROR_TYPES = frozenset({
+    "invalid_request", "invalid_request_error", "external_connector_error",
+})
 # Configured Agent API connectors, attached to every request as
 # native {"type": "connector"} tools (agent_api_tools.connector_tools).
 # Authorization lives in the Perplexity Project; requests only reference the
@@ -144,27 +155,24 @@ GEMINI_MAX_OUTPUT_TOKENS = 65_536
 # Agent API / non-Gemini providers: 120k output tokens. Gemini is 65,536
 # (official model-page maximum output tokens).
 MAX_OUTPUT_TOKENS = 120_000
-# Temporal activity options. Timeouts: TypeScript ActivityOptions documents
-# scheduleToCloseTimeout default as unlimited; either StartToClose or
-# ScheduleToClose must be set. We do not cap ScheduleToClose. StartToClose
-# is left unset so a single model/tool attempt is not killed at 10 minutes.
+# Temporal activity options. The Python worker rejects an activity with neither
+# start_to_close_timeout nor schedule_to_close_timeout
+# (temporalio/worker/_workflow_instance.py _outbound_schedule_activity).
+# Schedule-to-close stays unset: the TypeScript ActivityOptions contract cited
+# below defaults that field to unlimited once start-to-close is set.
+# Start-to-close is the value in the installed Strands plugin guide:
+# temporalio/contrib/strands/README.md TemporalAgent(start_to_close_timeout=timedelta(seconds=60)).
 # RetryPolicy() is the official SDK default: 1s / 2.0 / 100×initial /
 # maximum_attempts=0 (unlimited).
 # https://docs.temporal.io/encyclopedia/retry-policies
 # https://python.temporal.io/temporalio.common.RetryPolicy.html
 # https://typescript.temporal.io/api/interfaces/workflow.ActivityOptions
-MODEL_START_TO_CLOSE: Optional[timedelta] = None
+MODEL_START_TO_CLOSE = timedelta(seconds=60)
 MODEL_SCHEDULE_TO_CLOSE: Optional[timedelta] = None
 MODEL_HEARTBEAT: Optional[timedelta] = None
 MODEL_RETRY_POLICY = RetryPolicy()
-# Temporal validates that every activity carries start_to_close_timeout OR
-# schedule_to_close_timeout (_workflow_instance._outbound_schedule_activity).
-# The envelopes above are deliberately unset ("we do not cap"), which that
-# validation rejects at schedule time. Callers wrap their activity options in
-# ``closable_activity_options`` so a generous schedule-to-close fallback is
-# applied only when both timeouts are None (graceful degradation, matching
-# workflow.py's ``_closable``).
-UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE = timedelta(days=1)
+# Same guide: TemporalMCPClient(start_to_close_timeout=timedelta(seconds=30)).
+MCP_START_TO_CLOSE = timedelta(seconds=30)
 
 # Outer TemporalAgent streaming batch interval (workflow.py's
 # ``streaming_batch_interval``). Temporal's own value for LLM streaming
@@ -178,18 +186,14 @@ SSE_SUBSCRIBE_RESTART_LIMIT = 3
 SSE_SUBSCRIBE_RESTART_DELAY = 0.25
 SSE_HEARTBEAT_SECONDS = 10
 SSE_COMPLETION_DRAIN_TIMEOUT = 10
+# Workflow Streams closing overlap (docs Pattern 1: sleep after the last
+# publish so in-flight polls deliver before continue-as-new). After the turn
+# update commits, the SSE bridge drains to get_offset(); truncating the log
+# in that same workflow task would drop the tail and blow up CAN. Shorter
+# than the docs' 30s default because a caught-up chat subscriber is one poll
+# behind, not a cold consumer.
+STREAM_CAN_DRAIN_OVERLAP = timedelta(seconds=1)
 
-
-def closable_activity_options(options: dict) -> dict:
-    """Ensure the SDK's required timeout is present, preserving config intent."""
-    if options.get("start_to_close_timeout") or options.get(
-        "schedule_to_close_timeout"
-    ):
-        return options
-    return {
-        **options,
-        "schedule_to_close_timeout": UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE,
-    }
 # Activity-side nested streams (think / graph / use_agent / use_skill) publish
 # every nested-agent chunk on the thinking topic. These are multi-minute runs
 # (graph: up to 35 min), not one ~30 s completion, and every flushed batch is a
@@ -232,7 +236,10 @@ USE_AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
 # --- Perplexity Agent API operation activities (perplexity_operations.py) ---
 # Background+streamed preset runs can research for a long time; the heartbeat
 # keeps Temporal aware the stream is alive between events.
-AGENT_OPERATION_START_TO_CLOSE: Optional[timedelta] = None
+# SDK requires start-to-close or schedule-to-close. This reuses the existing
+# whole-formation start-to-close (long streamed work). Schedule-to-close stays
+# unset so Temporal's unlimited default applies.
+AGENT_OPERATION_START_TO_CLOSE = GRAPH_START_TO_CLOSE
 AGENT_OPERATION_SCHEDULE_TO_CLOSE: Optional[timedelta] = None
 AGENT_OPERATION_HEARTBEAT: Optional[timedelta] = None
 AGENT_OPERATION_RETRY_POLICY = RetryPolicy()
@@ -260,10 +267,10 @@ AGENT_RUNS_STREAM_BATCH_INTERVAL = timedelta(seconds=2)
 AGENT_FILE_STORE_DIR = Path(
     os.environ.get("AGENT_FILE_STORE_DIR", ".agent-files")
 )
-# Computer Use actions drive Playwright; same envelope as the model activity
-# so a long navigate/screenshot loop is not killed mid-turn.
-COMPUTER_USE_START_TO_CLOSE = MODEL_START_TO_CLOSE
-COMPUTER_USE_SCHEDULE_TO_CLOSE = MODEL_SCHEDULE_TO_CLOSE
+# Computer Use / browser actions are Temporal activities on desktop-browser.
+# Start-to-close is assigned after DESKTOP_TASK_TIMEOUT. Schedule-to-start and
+# schedule-to-close stay unset so Temporal's unlimited default applies.
+COMPUTER_USE_SCHEDULE_TO_CLOSE = None
 COMPUTER_USE_HEARTBEAT = MODEL_HEARTBEAT
 # Browser actions can submit forms or otherwise cause non-idempotent effects.
 BROWSER_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
@@ -302,14 +309,21 @@ EMBEDDING_GENERATIONS = {
     }
 }
 
-# Desktop-only budgets. Existing browser/model activity policy is unchanged.
+# Desktop-only budgets. GUI attempts use Temporal heartbeats for liveness
+# (DESKTOP_JOB_HEARTBEAT_*), not a 30s start-to-close or a 5s schedule-to-start.
+# DESKTOP_TASK_TIMEOUT is the handoff/release schedule-to-close, the fixture
+# mutation ceiling, and the native tool start-to-close. Schedule-to-start and
+# schedule-to-close on those tools stay unset (Temporal default: unlimited).
 DESKTOP_TASK_TIMEOUT = timedelta(minutes=30)
+# Native desktop tools use this as start-to-close. Schedule-to-start and
+# schedule-to-close stay unset (Temporal default: unlimited) so a serialized
+# desktop worker can queue the next action. Liveness after the attempt starts
+# is DESKTOP_JOB_HEARTBEAT_TIMEOUT. Do not substitute a 1-day schedule-to-close.
+COMPUTER_USE_START_TO_CLOSE = DESKTOP_TASK_TIMEOUT
 DESKTOP_MAX_MUTATIONS = 100
 DESKTOP_OBSERVATION_TIMEOUT = timedelta(seconds=30)
 DESKTOP_OBSERVATION_RETRY_POLICY = RetryPolicy(maximum_attempts=3)
-DESKTOP_MUTATION_TIMEOUT = timedelta(seconds=30)
-DESKTOP_SCHEDULE_TO_START = timedelta(seconds=5)
-DESKTOP_ACTION_SCHEDULE_TO_CLOSE = timedelta(seconds=40)
+DESKTOP_MUTATION_TIMEOUT = DESKTOP_TASK_TIMEOUT
 DESKTOP_MUTATION_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
 DESKTOP_JOB_HEARTBEAT_INTERVAL = timedelta(seconds=10)
 DESKTOP_JOB_HEARTBEAT_TIMEOUT = timedelta(seconds=30)
@@ -342,3 +356,10 @@ WORKSPACE_EXCLUDED_NAMES = frozenset({
     ".gnupg", ".kilo", ".omo", ".worktrees", ".next",
     "fair-expanse-493212-h8-138622c839d2.json",
 })
+# Graph / skill / use_agent file work. Not the operator $HOME.
+AGENT_WORKSPACE_ROOT = Path(
+    os.environ.get(
+        "GWEN_AGENT_WORKSPACE_ROOT",
+        str(Path(os.environ.get("TMPDIR", "/tmp")) / "gwen-agent-workspaces"),
+    )
+)

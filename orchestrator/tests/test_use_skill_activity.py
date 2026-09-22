@@ -2,15 +2,42 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import os
+from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from types import SimpleNamespace
 
 import pytest
+from strands.models.model import Model
 from strands.types._events import ToolResultEvent, ToolStreamEvent
 
+from graph_tool import _tool_name
+from load_tool import STRANDS_TOOLS_DIR
 from use_skill_activity import _sanitize_stream_payload, use_skill_activity
+
+os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
+CALCULATOR = str(STRANDS_TOOLS_DIR / "calculator.py")
+
+
+class SilentModel(Model):
+    def update_config(self, **model_config: Any) -> None:  # pragma: no cover
+        pass
+
+    def get_config(self) -> Any:  # pragma: no cover
+        return {}
+
+    async def structured_output(
+        self, output_model: Any, prompt: Any, system_prompt: Any = None, **kwargs: Any
+    ) -> AsyncGenerator[dict[str, Any], None]:  # pragma: no cover
+        raise NotImplementedError
+        yield
+
+    async def stream(
+        self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
+    ) -> AsyncGenerator[dict[str, Any], None]:  # pragma: no cover
+        raise NotImplementedError
+        yield
 
 
 def test_sanitize_stream_payload_strips_agent() -> None:
@@ -99,13 +126,13 @@ async def test_use_skill_activity_publishes_thinking_frames() -> None:
             "use_skill_activity.activity.client",
             return_value=MagicMock(get_workflow_handle=lambda _id: handle),
         ),
-        patch("use_skill_activity._session_model", new=AsyncMock(return_value=object())),
-        patch("use_skill_activity.Agent"),
+        patch("use_skill_activity._session_model", new=AsyncMock(return_value=SilentModel())),
         patch(
             "use_skill_activity.WorkflowStreamClient.from_within_activity",
             return_value=fake_client,
         ),
         patch("use_skill_activity.create_use_skill_tool", return_value=mock_tool),
+        patch("subagent_support.session_loaded_tools", new=AsyncMock(return_value=[])),
     ):
         result = await use_skill_activity("demo-skill", "do something")
 
@@ -114,11 +141,15 @@ async def test_use_skill_activity_publishes_thinking_frames() -> None:
     assert published[0]["tool_use"]["name"] == "use_skill"
     assert published[0]["data"]["skill_name"] == "demo-skill"
     assert published[0]["data"]["type"] == "skill_start"
-    assert published[1]["data"]["configuration"] == {
-        "systemPrompt": "Exact runtime system prompt", "userPrompt": "do something",
-        "model": "gemini-3.7-flash", "skills": [],
-        "tools": [{"name": "file_read", "description": "Read a file", "inputSchema": {"json": {"type": "object"}}}],
-    }
+    cfg = published[1]["data"]["configuration"]
+    assert cfg["systemPrompt"] == "Exact runtime system prompt"
+    assert cfg["userPrompt"].endswith("do something")
+    assert "Session workspace" in cfg["userPrompt"]
+    assert cfg["model"] == "gemini-3.7-flash"
+    assert cfg["skills"] == []
+    assert cfg["tools"] == [
+        {"name": "file_read", "description": "Read a file", "inputSchema": {"json": {"type": "object"}}},
+    ]
     assert published[2]["data"]["event"] == {"data": "chunk"}
     assert published[3]["data"]["type"] == "skill_complete"
     assert "never-publish-this" not in str(published)
@@ -161,8 +192,7 @@ async def test_use_skill_activity_assigns_inline_skills() -> None:
             "use_skill_activity.activity.client",
             return_value=MagicMock(get_workflow_handle=lambda _id: AsyncMock()),
         ),
-        patch("use_skill_activity._session_model", new=AsyncMock(return_value=object())),
-        patch("use_skill_activity.Agent"),
+        patch("use_skill_activity._session_model", new=AsyncMock(return_value=SilentModel())),
         patch(
             "use_skill_activity.WorkflowStreamClient.from_within_activity",
             return_value=fake_client,
@@ -172,6 +202,7 @@ async def test_use_skill_activity_assigns_inline_skills() -> None:
             "skills_config.skills_prompt",
             return_value="<available_skills>scoped</available_skills>",
         ),
+        patch("subagent_support.session_loaded_tools", new=AsyncMock(return_value=[])),
     ):
         result = await use_skill_activity(
             "demo-skill", "do something", skills=["helper-a", "helper-b"]
@@ -179,9 +210,69 @@ async def test_use_skill_activity_assigns_inline_skills() -> None:
 
     assert result == terminal
     assert factory.call_args.kwargs["assigned_skills"] == ["helper-a", "helper-b"]
-    assert seen_requests == [
+    assert seen_requests[0].endswith(
         "do something\n\n<available_skills>scoped</available_skills>"
-    ]
+    )
+    assert "Session workspace" in seen_requests[0]
+
+
+@pytest.mark.asyncio
+async def test_use_skill_activity_assigns_parent_registry_names() -> None:
+    """``tools`` are parent-registry names after official load. A loaded
+    tool resolves to its recorded file; a package path is the official
+    warning, not an import."""
+    tool_use_id = "act-skill-4"
+    terminal = {"status": "success", "content": [{"text": "ok"}], "toolUseId": tool_use_id}
+
+    async def fake_stream(
+        tool_use: dict[str, Any], invocation_state: dict[str, Any]
+    ) -> AsyncIterator[Any]:
+        yield ToolResultEvent(terminal)
+
+    fake_client = MagicMock()
+    fake_client.topic.return_value = MagicMock()
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=None)
+
+    activity_info = MagicMock()
+    activity_info.workflow_id = "chat-test"
+    activity_info.activity_id = tool_use_id
+
+    mock_tool = MagicMock()
+    mock_tool.stream = fake_stream
+    factory = MagicMock(return_value=mock_tool)
+
+    with (
+        patch("use_skill_activity.activity.info", return_value=activity_info),
+        patch("use_skill_activity._session_model", new=AsyncMock(return_value=SilentModel())),
+        patch(
+            "use_skill_activity.WorkflowStreamClient.from_within_activity",
+            return_value=fake_client,
+        ),
+        patch("use_skill_activity.create_use_skill_tool", factory),
+        patch(
+            "subagent_support.session_loaded_tools",
+            new=AsyncMock(return_value=[{"path": CALCULATOR, "name": "calculator"}]),
+        ),
+    ):
+        result = await use_skill_activity(
+            "demo-skill", "do it", tools=["calculator", "strands_tools.shell"]
+        )
+
+    assert result == terminal
+    assigned = factory.call_args.kwargs["tools"]
+    assert {_tool_name(tool) for tool in assigned} == {"calculator"}
+
+
+def test_use_skill_spec_exposes_tools_and_skills() -> None:
+    from temporalio.contrib.strands.workflow import activity_as_tool
+
+    spec = activity_as_tool(use_skill_activity).tool_spec
+    props = spec["inputSchema"]["json"]["properties"]
+    assert set(props) == {"skill_name", "request", "skills", "tools"}
+    assert spec["inputSchema"]["json"]["required"] == ["skill_name", "request"]
+    for name, prop in props.items():
+        assert prop.get("description"), f"{name} lacks a description"
 
 
 @pytest.mark.asyncio
@@ -215,15 +306,16 @@ async def test_use_skill_activity_without_skills_keeps_request_verbatim() -> Non
             "use_skill_activity.activity.client",
             return_value=MagicMock(get_workflow_handle=lambda _id: AsyncMock()),
         ),
-        patch("use_skill_activity._session_model", new=AsyncMock(return_value=object())),
-        patch("use_skill_activity.Agent"),
+        patch("use_skill_activity._session_model", new=AsyncMock(return_value=SilentModel())),
         patch(
             "use_skill_activity.WorkflowStreamClient.from_within_activity",
             return_value=fake_client,
         ),
         patch("use_skill_activity.create_use_skill_tool", factory),
+        patch("subagent_support.session_loaded_tools", new=AsyncMock(return_value=[])),
     ):
         await use_skill_activity("demo-skill", "do something")
 
     assert factory.call_args.kwargs["assigned_skills"] is None
-    assert seen_requests == ["do something"]
+    assert seen_requests[0].endswith("do something")
+    assert "Session workspace" in seen_requests[0]

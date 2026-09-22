@@ -51,13 +51,88 @@ describe("native tool steps", () => {
       type: "sandbox_results",
       call_id: "c2",
       language: "bash",
-      code: 'pplx search web "temporal workflows"',
+      code: 'pplx search web "temporal workflows" -n 2',
       status: "completed",
-      results: [{ stdout: '{"url": "https://temporal.io", "title": "Temporal"}', stderr: "", exit_code: 0, duration_ms: 5 }],
+      // Documented `pplx search web` stdout: title after url, plus metadata.
+      results: [{
+        stdout: JSON.stringify({
+          total: 1,
+          hits: [{ url: "https://temporal.io", title: "Temporal", domain: "temporal.io", snippet: "Durable execution" }],
+        }),
+        stderr: "",
+        exit_code: 0,
+        duration_ms: 5,
+      }],
     })
     expect(html).toContain("Searching the web · temporal workflows")
     expect(html).toContain('href="https://temporal.io"')
+    expect(html).toContain("Temporal")
     expect(html).not.toContain("bg-zinc-950")
+  })
+
+  it("renders a pplx content snippets fetch from bash as a fetched-pages step, not a Terminal", () => {
+    const html = render({
+      type: "sandbox_results",
+      call_id: "c3",
+      language: "bash",
+      code: 'pplx content snippets "bloom filter" https://en.wikipedia.org/wiki/Bloom_filter',
+      status: "completed",
+      results: [{
+        stdout: JSON.stringify({
+          results: [{ url: "https://en.wikipedia.org/wiki/Bloom_filter", text: "A Bloom filter…", tokens_count: 12 }],
+        }),
+        stderr: "",
+        exit_code: 0,
+        duration_ms: 5,
+      }],
+    })
+    expect(html).toContain("Fetching pages · bloom filter")
+    expect(html).toContain('href="https://en.wikipedia.org/wiki/Bloom_filter"')
+    expect(html).not.toContain("bg-zinc-950")
+  })
+
+  it("renders a pplx_sdk people search from python as a people step, not a Sandbox", () => {
+    // Shape from a live Agent API sandbox run: the preinstalled pplx_sdk
+    // (search.people) prints a bare list of hits.
+    const html = render({
+      type: "sandbox_results",
+      call_id: "c5",
+      language: "python",
+      code: 'import pplx_sdk, json\nhits = pplx_sdk.search.people("head of engineering Temporal", limit=3)\nprint(json.dumps([dict(h) for h in hits]))',
+      status: "completed",
+      results: [{
+        stdout: JSON.stringify([{ url: "https://temporal.io/careers/1", title: "Head of Engineering, Compute - Temporal" }]),
+        stderr: "",
+        exit_code: 0,
+        duration_ms: 5,
+      }],
+    })
+    expect(html).toContain("Searching people · head of engineering Temporal")
+    expect(html).toContain('href="https://temporal.io/careers/1"')
+    expect(html).not.toContain("sandbox.py")
+  })
+
+  it("renders people search results as search-result badges", () => {
+    const html = render({
+      type: "people_search_results",
+      queries: ["head of platform engineering Notion"],
+      results: [{ id: 1, url: "https://example.com/profile", title: "Example profile", snippet: "", source: "web" }],
+    })
+    expect(html).toContain("People")
+    expect(html).toContain('href="https://example.com/profile"')
+    expect(html).toContain("Example profile")
+  })
+
+  it("renders finance results as a market-data step with source badges", () => {
+    const html = render({
+      // docs.perplexity.ai/docs/agent-api/tools/finance-search "Response Shape".
+      type: "finance_results",
+      categories: ["quote"],
+      tickers: ["NVDA"],
+      results: [{ category: "quote", tickers: ["NVDA"], content: "NVDA last price", sources: ["https://example.com/nvda"] }],
+    })
+    expect(html).toContain("Market data · NVDA")
+    expect(html).toContain('href="https://example.com/nvda"')
   })
 
   it("renders python sandbox execution as a Sandbox with code and output tabs", () => {

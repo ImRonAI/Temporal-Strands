@@ -472,7 +472,7 @@ def test_desktop_activity_budgets_do_not_inherit_unbounded_defaults():
     assert DESKTOP_MAX_MUTATIONS == 100
     assert DESKTOP_MUTATION_RETRY_POLICY.maximum_attempts == 1
     assert DESKTOP_OBSERVATION_RETRY_POLICY.maximum_attempts == 3
-    assert DESKTOP_MUTATION_TIMEOUT.total_seconds() == 30
+    assert DESKTOP_MUTATION_TIMEOUT == DESKTOP_TASK_TIMEOUT
     assert DESKTOP_OBSERVATION_TIMEOUT.total_seconds() == 30
     assert DESKTOP_TASK_TIMEOUT.total_seconds() == 1800
     assert DESKTOP_JOB_HEARTBEAT_INTERVAL < DESKTOP_JOB_HEARTBEAT_TIMEOUT < DESKTOP_TASK_TIMEOUT

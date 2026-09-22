@@ -199,7 +199,9 @@ def test_activity_as_tool_produces_structural_graph_spec() -> None:
     assert topology.get("$ref") == "#/$defs/GraphTopology"
     assert topology.get("type") != "object"
     defs = schema["$defs"]
-    assert {"GraphTopology", "GraphNode", "GraphEdge", "GraphTask"} <= set(defs)
+    assert {"GraphTopology", "GraphNode", "GraphEdge", "GraphModelSettings"} <= set(defs)
+    node_props = defs["GraphNode"]["properties"]
+    assert set(node_props) == {"id", "role", "system_prompt", "model_settings", "tools"}
     assert "nodes" in defs["GraphTopology"]["properties"]
 
     # task is a plain string parameter.
@@ -275,7 +277,7 @@ async def test_create_with_unknown_model_id_yields_error_at_create() -> None:
         "input": {
             "action": "create",
             "graph_id": "bad-model",
-            "topology": {"nodes": [{"id": "x", "system_prompt": "s", "model_id": "nope"}]},
+            "topology": {"nodes": [{"id": "x", "system_prompt": "s", "model_settings": {"model_id": "nope"}}]},
         },
     }
     events = []

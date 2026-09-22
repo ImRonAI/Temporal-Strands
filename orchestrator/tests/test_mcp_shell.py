@@ -20,10 +20,9 @@ from strands_tools.mcp_client import mcp_client
 
 from load_tool import (
     STRANDS_TOOLS_DIR,
-    _IMPLEMENTATIONS,
+    LoadedActivityTool,
+    register_community_tool,
     tool_file_path,
-    unload_community_tool,
-    wrap_loaded_io_tool,
 )
 from strands_tools.load_tool import load_tool as _official_load_tool  # noqa: F401
 from run_worker import MCP_CONFIG_PATH, _ROOT
@@ -43,11 +42,62 @@ def test_permanent_registry_includes_skills_and_graph() -> None:
     assert registry.registry["mcp_client"].tool_type == "temporal_activity"
 
 
+_PACKAGE_PATH_MARKERS = (
+    "strands_tools.",
+    "skills_loader.py",
+    "module path",
+    ".py file path",
+)
+
+
+def _schema_text(tool) -> str:
+    spec = tool.tool_spec
+    return json.dumps(spec, default=str)
+
+
+def test_registry_contract_is_activity_names_not_package_paths() -> None:
+    """Pattern 2: the model sees Temporal activity names, not import paths."""
+    from pathlib import Path
+
+    from workflow import AGENT_API_TOOLS, COMPUTER_USE_TOOLS, THINK_TOOL
+
+    identity = json.loads(Path(__file__).resolve().parents[1].joinpath("agent.json").read_text())
+    prompt = identity["prompt"]
+    for marker in ("strands_tools.", "skills_loader.py", "list_skills"):
+        assert marker not in prompt, marker
+
+    tools = {
+        tool.tool_name: tool
+        for tool in (
+            *PERMANENT_COMMUNITY_TOOLS,
+            THINK_TOOL,
+            *AGENT_API_TOOLS,
+            *COMPUTER_USE_TOOLS,
+        )
+    }
+    assert "load_tool" in tools
+    assert "graph" in tools
+    assert "use_agent" in tools
+    assert "use_skill" in tools
+    for name in ("load_tool", "graph", "use_agent", "use_skill"):
+        text = _schema_text(tools[name])
+        for marker in _PACKAGE_PATH_MARKERS:
+            assert marker not in text, f"{name} schema still contains {marker!r}"
+
+    load_props = tools["load_tool"].tool_spec["inputSchema"]["json"]["properties"]
+    assert "calculator" in load_props["path"]["description"]
+    assert "strands_tools.calculator" not in load_props["path"]["description"]
+
+    use_agent_tools = tools["use_agent"].tool_spec["inputSchema"]["json"]["properties"]["tools"]
+    assert "registry" in use_agent_tools["description"]
+
+
 def test_graph_tool_exposes_formation_schema() -> None:
     graph_tool = next(tool for tool in PERMANENT_COMMUNITY_TOOLS if tool.tool_name == "graph")
     spec = graph_tool.tool_spec["inputSchema"]["json"]["properties"]
-    for kind in ("agent", "skill_agent", "swarm", "graph", "workflow", "parallel"):
-        assert kind in graph_tool.tool_spec["description"] or kind in spec["topology"]["description"]
+    description = graph_tool.tool_spec["description"]
+    for marker in ("system_prompt", "model_settings", "multiagent_handoff"):
+        assert marker in description or marker in spec["topology"]["description"]
     assert "required for execute" in spec["task"]["description"]
     assert "nodes" in spec["topology"]["description"]
     assert "edges" in spec["topology"]["description"]
@@ -62,19 +112,18 @@ def test_mcp_json_servers_use_temporal_mcp_client() -> None:
 
 
 def test_strands_tools_dir_is_the_installed_package() -> None:
-    """The search root is the installed strands_tools package, not a farm."""
+    """A path is used as given; a strands_tools module name resolves via importlib."""
     import strands_tools
 
     assert STRANDS_TOOLS_DIR == Path(strands_tools.__file__).resolve().parent
     assert not (_ROOT / "tools").exists()
     assert (STRANDS_TOOLS_DIR / "file_read.py").is_file()
     assert (STRANDS_TOOLS_DIR / "shell.py").is_file()
-    assert tool_file_path("file_read.py") == str(STRANDS_TOOLS_DIR / "file_read.py")
-    assert tool_file_path("tools/file_read.py") == str(STRANDS_TOOLS_DIR / "file_read.py")
-    assert os.path.isfile(tool_file_path("file_read"))
-    assert tool_file_path("skills_loader.py") == str(_ROOT / "skills_loader.py")
-    assert tool_file_path("orchestrator/skills_loader.py") == str(_ROOT / "skills_loader.py")
-    assert os.path.isfile(tool_file_path("skills_loader"))
+    existing = str(STRANDS_TOOLS_DIR / "file_read.py")
+    assert tool_file_path(existing) == existing
+    assert tool_file_path("file_read") == existing
+    assert tool_file_path("file_read.py") == existing
+    assert tool_file_path("does/not/exist.py") == "does/not/exist.py"
 
 
 def test_mcp_json_catalog_keeps_shell_and_optional_servers() -> None:
@@ -177,20 +226,26 @@ def test_permanent_load_tool_is_the_public_activity_wrapper() -> None:
 
 
 def test_load_tool_registers_io_community_tool_as_activity() -> None:
+    """``register_community_tool`` = official load_tool on the live agent, then the
+    SDK ``replace`` with the activity-dispatching stub carrying the tool's own spec."""
     os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
     agent = _Agent()
     path = str(STRANDS_TOOLS_DIR / "file_read.py")
-    result = _official_load_tool(path=path, name="file_read", agent=agent)
+    raw_agent = _Agent()
+    assert _official_load_tool(path=path, name="file_read", agent=raw_agent)["status"] == "success"
+    raw_spec = raw_agent.tool_registry.registry["file_read"].tool_spec
+
+    result = register_community_tool(agent, "file_read", "file_read")
     assert result["status"] == "success"
-    # The official loader registers the raw I/O tool; the workflow hook then
-    # swaps it for the activity-backed one, as _HotLoadHook does after success.
-    assert agent.tool_registry.registry["file_read"].tool_type != "temporal_activity"
-    wrap_loaded_io_tool(agent, "file_read", path)
     registered = agent.tool_registry.registry["file_read"]
+    assert isinstance(registered, LoadedActivityTool)
     assert registered.tool_type == "temporal_activity"
     assert registered.tool_name == "file_read"
-    assert "file_read" in _IMPLEMENTATIONS
+    assert registered.tool_spec == raw_spec
 
-    unload_community_tool(agent, "file_read")
-    assert "file_read" not in agent.tool_registry.registry
-    assert "file_read" not in _IMPLEMENTATIONS
+    # Re-registering (continue-as-new rebuild) is idempotent.
+    assert register_community_tool(agent, path, "file_read")["status"] == "success"
+    assert isinstance(agent.tool_registry.registry["file_read"], LoadedActivityTool)
+
+    missing = register_community_tool(_Agent(), "does/not/exist.py", "x")
+    assert missing["status"] == "error"

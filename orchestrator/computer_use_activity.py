@@ -22,7 +22,7 @@ GEMINI_BROWSER_ACTIONS = {
     "mouse_down": "Hold the left mouse button at x/y (0-999).",
     "mouse_up": "Release the left mouse button at x/y (0-999).",
     "move": "Move the desktop cursor to x/y (0-999).",
-    "type": "Type text into the focused desktop application; optional x/y focuses and replaces a field.",
+    "type": "Type text into the focused desktop application. Set focus=true only to click x/y and replace that field; otherwise x/y are ignored.",
     "drag_and_drop": "Drag from start_x/start_y to end_x/end_y (0-999).",
     "wait": "Wait up to 5 seconds, then observe the desktop.",
     "press_key": "Press a desktop key (enter, tab, esc, etc).",
@@ -57,6 +57,11 @@ def execute_computer_use(action: str, args: dict[str, Any]) -> dict[str, Any]:
         # Imports stay inside the Linux activity, never on the credential host.
         import pyautogui
 
+        # The corner fail-safe is a human abort hook for a shared physical pointer.
+        # This pointer is on a fenced Xvfb with no human at it, and screen corners
+        # are legitimate targets (XFCE "Applications" menu at 0,0). Left on, one
+        # corner click raised FailSafeException and locked the desktop in recovery.
+        pyautogui.FAILSAFE = False
         width, height = pyautogui.size()
         x, y = denormalize(args.get("x"), width), denormalize(args.get("y"), height)
         key = str(args.get("key", "enter")).lower()
@@ -91,7 +96,7 @@ def execute_computer_use(action: str, args: dict[str, Any]) -> dict[str, Any]:
             text = str(args.get("text", ""))
             if len(text) > 10_000:
                 raise ValueError("Desktop typing is limited to 10000 characters per action")
-            if args.get("x") is not None and args.get("y") is not None:
+            if (args.get("focus") is True or action == "type_text_at") and args.get("x") is not None and args.get("y") is not None:
                 pyautogui.click(x, y)
                 pyautogui.hotkey("ctrl", "a")
             pyautogui.write(text, interval=0.0)
@@ -145,6 +150,7 @@ def _make_activity(name: str, description: str):
         seconds: int | None = None,
         intent: Annotated[str | None, "Brief explanation of this desktop action"] = None,
         safety_decision: dict[str, Any] | None = None,
+        focus: Annotated[bool | None, "For type only: explicitly click x/y and replace field contents. False preserves current focus/caret."] = None,
     ) -> dict[str, Any]:
         return execute_computer_use(name, {k: v for k, v in locals().items() if v is not None and k != "name"})
 

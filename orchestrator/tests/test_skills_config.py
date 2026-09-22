@@ -128,16 +128,18 @@ def test_skills_loader_exports_tools(monkeypatch, tmp_path) -> None:
     assert skills_loader.skill.tool_name == "skill"
 
 
-def test_augmented_prompt_is_reference_skills_prompt(
+def test_agent_skills_plugin_is_the_official_strands_plugin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reference wiring: base + "\\n\\n" + agentskills.generate_skills_prompt.
+    """Official ``strands.AgentSkills`` for scoped nested agents.
 
-    The prompt must carry the <available_skills> XML catalog (name,
-    description, SKILL.md location per skill) and the use_skill /
-    skill usage policy from SKILLS_SYSTEM_PROMPT — exactly what
-    aws-samples/sample-strands-agents-agentskills examples 2 and 3 build.
+    Skills are loaded on the worker as ``Skill`` instances so the plugin never
+    touches the filesystem inside workflow code. The plugin registers the
+    ``skills`` tool and injects only name/description/location per skill;
+    SKILL.md bodies stay out of the prompt until the model calls ``skills``.
     """
+    from strands import AgentSkills
+
     fixtures = (
         Path(__file__).resolve().parents[2]
         / ".."
@@ -146,26 +148,36 @@ def test_augmented_prompt_is_reference_skills_prompt(
         / "fixtures_skills"
     ).resolve()
     monkeypatch.setenv("SKILLS_DIR", str(fixtures))
-    text = skills_config.augmented_system_prompt("Base.")
-    assert text.startswith("Base.\n\n")
-    assert "<available_skills>" in text
-    assert "<skills_instructions>" in text
-    assert "use_skill" in text
-    assert "<name>wf-skill</name>" in text
+    skills_config.catalog_skills.cache_clear()
 
-    import agentskills
+    plugin = skills_config.agent_skills_plugin()
+    assert isinstance(plugin, AgentSkills)
+    assert [tool.tool_name for tool in plugin.tools] == ["skills"]
+    names = {skill.name for skill in plugin.get_available_skills()}
+    assert "wf-skill" in names
 
-    expected = agentskills.generate_skills_prompt(
-        list(skills_config.discovered_skills())
-    )
-    assert text == f"Base.\n\n{expected}"
+    xml = plugin._generate_skills_xml()
+    assert xml.startswith("<available_skills>")
+    assert "<name>wf-skill</name>" in xml
+    assert "<skills_instructions>" not in xml
+    wf_skill = next(s for s in plugin.get_available_skills() if s.name == "wf-skill")
+    assert wf_skill.instructions
+    assert wf_skill.instructions not in xml
 
 
-def test_augmented_prompt_without_catalog_is_base(
+def test_agent_skills_plugin_without_catalog_has_no_skills(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("SKILLS_DIR", str(tmp_path))
-    assert skills_config.augmented_system_prompt("Base.") == "Base."
+    skills_config.catalog_skills.cache_clear()
+    plugin = skills_config.agent_skills_plugin()
+    assert plugin.get_available_skills() == []
+    assert "No skills are currently available" in plugin._generate_skills_xml()
+
+
+def test_augmented_system_prompt_is_gone() -> None:
+    """The 527-skill catalog dump must never be baked into a system prompt again."""
+    assert not hasattr(skills_config, "augmented_system_prompt")
 
 
 def _write_skill(root: Path, name: str) -> None:
@@ -217,3 +229,21 @@ def test_scoped_skills_prompt_lists_only_assigned(
     text = skills_config.skills_prompt(["alpha"])
     assert "<name>alpha</name>" in text
     assert "<name>beta</name>" not in text
+
+
+def test_scoped_agent_skills_plugin_lists_only_assigned(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for name in ("alpha", "beta"):
+        _write_skill(tmp_path, name)
+    monkeypatch.setenv("SKILLS_DIR", str(tmp_path))
+    skills_config.catalog_skills.cache_clear()
+
+    plugin = skills_config.agent_skills_plugin(["alpha"])
+    assert [skill.name for skill in plugin.get_available_skills()] == ["alpha"]
+    xml = plugin._generate_skills_xml()
+    assert "<name>alpha</name>" in xml
+    assert "<name>beta</name>" not in xml
+
+    with pytest.raises(LookupError, match="nope"):
+        skills_config.agent_skills_plugin(["nope"])

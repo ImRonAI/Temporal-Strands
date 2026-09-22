@@ -1,0 +1,40 @@
+### Result
+{"completedTogglePassed":true,"live":[{"text":"A queue follows FIFO (first in, first out): enqueue adds an","expanded":"true","hasJson":false,"time":1789546904649},{"text":"A queue follows FIFO (first in, first out): enqueue adds an item","expanded":"true","hasJson":false,"time":1789546906574},{"text":"A queue follows FIFO (first in, first out): enqueue adds an item at the back, and dequeue removes one from the front. It’s commonly used for scheduling and breadth-first search (BFS).\nA stack follows LIFO (last in, first out): push adds an item to the top, and pop removes the top item. It’s commonly used for function calls, undo history, and depth-first search (DFS).","expanded":"true","hasJson":false,"time":1789546906634}]}
+### Ran Playwright code
+```js
+await (async (page) => {
+ const done = page.getByRole("button", {name:"Chain of Thought", exact:true});
+ await done.click();
+ if (await done.getAttribute("aria-expanded") !== "false") throw new Error("Completed chain did not collapse");
+ await done.click();
+ if (await done.getAttribute("aria-expanded") !== "true") throw new Error("Completed chain did not reopen");
+ await page.goto("http://localhost:3000");
+ await page.getByRole("button", {name:"High (preset)", exact:true}).click();
+ await page.getByRole("option", {name:"claude-fable-5-1", exact:true}).click();
+ await page.getByRole("option", {name:"High", exact:true}).click();
+ await page.getByRole("textbox", {name:"Describe what you want to ship…"}).fill("Use Think for two low-effort cycles to compare a queue and a stack in a few sentences, then answer briefly. No research or other tools are needed.");
+ await page.evaluate(() => {
+   window.__thinkEvidence = [];
+   new MutationObserver(() => {
+     const header = [...document.querySelectorAll("button")].find(b => b.textContent === "Thinking…");
+     if (!header) return;
+     const chain = header.parentElement.parentElement;
+     const text = [...chain.querySelectorAll("p")].map(p=>p.textContent).join("\n");
+     const records = window.__thinkEvidence;
+     if (text && records.at(-1)?.text !== text) records.push({text, expanded:header.getAttribute("aria-expanded"), hasJson:!!chain.querySelector("pre"), time:Date.now()});
+   }).observe(document.body,{childList:true,subtree:true,characterData:true});
+ });
+ await page.getByRole("button",{name:"Submit",exact:true}).click();
+ await page.waitForFunction(()=>window.__thinkEvidence.length>=2, null, {timeout:120000});
+ const header = page.getByRole("button", {name:"Thinking…",exact:true});
+ await header.evaluate(el=>el.click());
+ if (await header.getAttribute("aria-expanded") !== "true") throw new Error("Active chain collapsed");
+ await page.screenshot({path:"output/playwright/agent-response/think-streaming-final.png",fullPage:true});
+ return await page.evaluate(()=>({completedTogglePassed:true,live:window.__thinkEvidence}));
+})(page);
+```
+### Page
+- Page URL: http://localhost:3000/
+- Page Title: v0 — Ship something interesting
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T08-17-43-745Z.log#L24-L31

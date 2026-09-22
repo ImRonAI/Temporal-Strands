@@ -759,26 +759,28 @@ function stepStatus(
   return "complete"
 }
 
-// pplx CLI search invocations inside sandbox bash: `pplx search web "query"`,
-// also people/finance/url. These are web searches, not shell work.
-const PPLX_SEARCH = /pplx\s+search\s+(\w+)?\s*["']([^"']+)["']/
+// The sandbox calls Web Search, Fetch URL Content and People Search itself
+// (docs.perplexity.ai/docs/agent-api/tools/sandbox). From bash it uses the pplx
+// CLI (docs/cli/overview), which prints `search web` as {hits: [{url, title}]}
+// and `content snippets` as {results: [{url}]}. From python it uses the
+// preinstalled pplx_sdk (search.web / search.people / content.snippets), where
+// printing the hits gives a bare list of {url, title}. Live capture:
+// output/playwright/agent-response/pplx_scan2.txt.
+const PPLX_CLI = /\bpplx\s+(search\s+web|content\s+snippets)\s+["']([^"']+)["']/
+const PPLX_SDK = /\bpplx_sdk\.(search\.web|search\.people|content\.snippets)\(\s*(?:query=)?(?:["']([^"']+)["'])?/
 
-// urls-with-titles printed to stdout (JSON, jq output, dict reprs) — the
-// links a sandboxed search surfaced.
-const URL_WITH_TITLE =
-  /["']?url["']?\s*[:=]\s*["']([^"']+)["'][^}\n]*?["']?title["']?\s*[:=]\s*["']([^"']+)["']/g
-
-function extractLinks(stdout: string): Array<{ title: string; url: string }> {
-  const seen = new Set<string>()
-  const links: Array<{ title: string; url: string }> = []
-  URL_WITH_TITLE.lastIndex = 0
-  for (const m of stdout.matchAll(URL_WITH_TITLE)) {
-    const [, url, title] = m
-    if (seen.has(url)) continue
-    seen.add(url)
-    links.push({ title, url })
-  }
-  return links
+function pplxLinks(stdouts: string[]): Array<{ title: string; url: string }> {
+  return stdouts.flatMap((stdout) => {
+    try {
+      const json = JSON.parse(stdout)
+      const items: Array<{ url?: string; title?: string }> = Array.isArray(json)
+        ? json
+        : (json.hits ?? json.results ?? [])
+      return items.flatMap((r) => (r.url ? [{ title: r.title || r.url, url: r.url }] : []))
+    } catch {
+      return []
+    }
+  })
 }
 
 // `status` reports whether the CONTAINER ran, not whether the code worked: a
@@ -1136,24 +1138,28 @@ function NativeToolStep({ native }: { native: NativeTool }) {
       const running = native.status === "in_progress"
       const status = running ? "active" : "complete"
 
-      if (native.language === "bash") {
-        // The sandbox ships the pplx CLI, so the model searches through
-        // bash. A `pplx search` IS a web search: it renders as the Chain of
-        // Thought search step, never as a Terminal.
-        const search = native.code.match(PPLX_SEARCH)
-        if (search) {
-          const [, kind, query] = search
-          const links = extractLinks(native.results.map((r) => r.stdout).join("\n"))
-          return (
-            <ChainOfThoughtStep
-              icon={SearchIcon}
-              label={`Searching the ${kind || "web"} · ${query}`}
-              status={status}
-            >
+      // A search or fetch run from the sandbox is still a search or fetch:
+      // the operation, not the sandbox, picks the UI, so it gets the same
+      // Chain of Thought step as the native tools.
+      const pplx = native.code.match(native.language === "bash" ? PPLX_CLI : PPLX_SDK)
+      if (pplx) {
+        const [, op, query] = pplx
+        const [icon, verb] = op.includes("people")
+          ? ([UsersIcon, "Searching people"] as const)
+          : op.startsWith("search")
+            ? ([SearchIcon, "Searching the web"] as const)
+            : ([LinkIcon, "Fetching pages"] as const)
+        const links = pplxLinks(native.results.map((r) => r.stdout))
+        return (
+          <ChainOfThoughtStep icon={icon} label={query ? `${verb} · ${query}` : verb} status={status}>
+            {(links.length > 0 || query) && (
               <SearchResults items={links.length > 0 ? links : [{ title: query }]} />
-            </ChainOfThoughtStep>
-          )
-        }
+            )}
+          </ChainOfThoughtStep>
+        )
+      }
+
+      if (native.language === "bash") {
         // Terminal example: ANSI-framed output (cyan $ prompt, red ✗ on a
         // failed exit), header with title / status / copy, content body.
         const exitCode = native.results.find((r) => r.exit_code !== 0)?.exit_code

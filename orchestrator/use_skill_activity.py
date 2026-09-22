@@ -13,7 +13,6 @@ import traceback
 from collections.abc import Callable, Mapping
 from typing import Any, cast
 
-from strands import Agent
 from strands.types._events import ToolResultEvent, ToolStreamEvent
 from strands.types.tools import ToolUse
 from temporalio import activity
@@ -22,7 +21,16 @@ from temporalio.exceptions import ApplicationError
 
 from config import THINK_STREAM_BATCH_INTERVAL
 from skills_config import create_use_skill_tool
-from subagent_support import heartbeat, publishable, sanitize_stream_payload, session_model
+from graph_tool import _select_tools
+from subagent_support import (
+    heartbeat,
+    in_process_model,
+    parent_agent,
+    publishable,
+    sanitize_stream_payload,
+    session_model,
+    workspace_task_prefix,
+)
 import subagent_support
 
 
@@ -41,7 +49,10 @@ def _sanitize_stream_payload(raw: Any) -> dict[str, Any]:
 
 @activity.defn(name="use_skill")
 async def use_skill_activity(
-    skill_name: str, request: str, skills: list[str] | None = None
+    skill_name: str,
+    request: str,
+    skills: list[str] | None = None,
+    tools: list[str] | None = None,
 ) -> dict[str, Any]:
     """Execute a registered skill in an isolated sub-agent (Agent-as-Tool meta-tool).
 
@@ -54,8 +65,14 @@ async def use_skill_activity(
             exactly these names and loads their instructions into its own
             context (Pattern 2) — traditional skill use, never a nested
             sub-agent. Unknown names fail the call with the available list.
+        tools: Optional tools to assign to the sub-agent on top of its
+            sandbox tools (file_read, file_write): names that exist on the
+            parent TemporalAgent registry after official load. Omit to
+            inherit. Unknown names log the official warning and are skipped.
     """
     from workflow import THINKING_TOPIC
+
+    request = workspace_task_prefix(activity.info().workflow_id) + request
 
     tool_use: ToolUse = {
         "toolUseId": activity.info().activity_id,
@@ -64,9 +81,12 @@ async def use_skill_activity(
     }
 
     try:
-        model = await _session_model()
-        parent = Agent(model=model, tools=[], system_prompt="", callback_handler=None)
-        use_skill_tool = create_use_skill_tool(model, assigned_skills=skills)
+        model = in_process_model(await _session_model())
+        parent = await parent_agent(await _session_model())
+        assigned_tools = _select_tools(parent, tools) if tools else None
+        use_skill_tool = create_use_skill_tool(
+            model, assigned_skills=skills, tools=assigned_tools
+        )
         if skills:
             # The sub-agent's system prompt is the skill's own SKILL.md
             # (reference _create_skill_agent), so the assigned-skills catalog
@@ -92,7 +112,7 @@ async def use_skill_activity(
                 "tool_use": {"name": "use_skill", "toolUseId": tool_use["toolUseId"]},
                 "data": {"skill_name": skill_name, "type": "skill_start",
                          "attempt": activity.info().attempt, "request": request,
-                         "skills": skills or []},
+                         "skills": skills or [], "assigned_tools": tools or []},
             })
             async for event in use_skill_tool.stream(tool_use, invocation_state):
                 heartbeat()

@@ -134,28 +134,23 @@ def test_strands_tools_dir_is_the_installed_package_not_a_symlink_farm() -> None
 
 
 @pytest.mark.asyncio
-async def test_load_tool_activity_rejects_a_missing_file() -> None:
-    """A nonexistent path fails fast as an ApplicationError, never a hang."""
+async def test_load_tool_activity_returns_the_official_result_for_a_missing_file() -> None:
+    """The thin wrapper returns the official ``load_tool`` result unchanged."""
     env = ActivityEnvironment()
-    with pytest.raises(ApplicationError) as excinfo:
-        await env.run(load_tool_activity, "does/not/exist.py", "x")
-    message = str(excinfo.value)
-    assert "Failed to load tool" in message
-    assert "does/not/exist.py" in message
+    result = await env.run(load_tool_activity, "does/not/exist.py", "x")
+    assert result["status"] == "error"
+    text = result["content"][0]["text"]
+    assert "Failed to load tool" in text
+    assert "does/not/exist.py" in text
 
 
 def test_loaded_tool_activity_options_satisfy_temporal_timeout_rule() -> None:
-    """Temporal requires start_to_close or schedule_to_close on every activity.
+    """Temporal requires start_to_close or schedule_to_close on every activity."""
+    from config import MCP_START_TO_CLOSE
 
-    config.py leaves both MODEL_* timeouts None, so the wrapped loaded-tool
-    activity options must carry the shared schedule-to-close fallback
-    (config.closable_activity_options / workflow._closable convention).
-    """
     options = load_tool_module._ACTIVITY_OPTIONS
-    assert (
-        options.get("start_to_close_timeout") is not None
-        or options.get("schedule_to_close_timeout") is not None
-    )
+    assert options.get("start_to_close_timeout") == MCP_START_TO_CLOSE
+    assert "schedule_to_close_timeout" not in options
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
@@ -316,6 +311,11 @@ async def test_load_tool_hot_loads_calculator_by_bare_name(client: Client) -> No
     )
     # load_tool itself must have run off-workflow, as a Temporal activity.
     assert "load_tool" in scheduled_activity_types(await handle.fetch_history())
+    # The sub-agent activities rebuild the parent registry from this query,
+    # so what the orchestrator loaded onto itself is what nested agents get.
+    loaded = await handle.query(ChatWorkflow.loaded_tools)
+    assert [rec["name"] for rec in loaded] == ["calculator"]
+    assert loaded[0]["path"].endswith("calculator.py")
 
     SCRIPTS.append(tool_use_events("calc-1", "calculator", {"expression": "17 * 3"}))
     SCRIPTS.append(text_events("calculated"))

@@ -1,0 +1,104 @@
+Already up to date
+Done in 1.4s using pnpm v11.18.0
+
+ RUN  v4.1.10 /Users/tims-stuff/Desktop/v0-clone-blurple
+
+ ❯ app/framework-adherence.test.ts (4 tests | 2 failed) 176ms
+     × check 1: no new ReadableStream / new TextEncoder / .getReader / new EventSource 61ms
+     × check 2: no hardcoded model ids except lib/perplexity.ts DEFAULT_MODEL 84ms
+ ❯ scripts/desktop-guard-hooks.test.ts (16 tests | 2 failed) 32982ms
+     × catches duplicate violations, but tolerates line shifts of an existing one 7089ms
+     × blocks SDK signature and literal BrowserInput violations using installed Python packages 9205ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  app/framework-adherence.test.ts > framework adherence > check 1: no new ReadableStream / new TextEncoder / .getReader / new EventSource
+AssertionError: found 2 streaming primitives violation(s):
+  - app/api/compare/route.ts: const stream = new ReadableStream({
+  - app/api/compare/route.ts: const encoder = new TextEncoder(): expected [ { …(3) }, { …(3) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "file": "app/api/compare/route.ts",
++     "line": "const stream = new ReadableStream({",
++     "token": "new ReadableStream(",
++   },
++   {
++     "file": "app/api/compare/route.ts",
++     "line": "const encoder = new TextEncoder()",
++     "token": "new TextEncoder(",
++   },
++ ]
+
+ ❯ app/framework-adherence.test.ts:162:113
+    160|     const violations = streamViolations(files)
+    161|     // Known mid-plan violation: app/api/compare/route.ts (todo 17 del…
+    162|     expect(violations, formatViolations("streaming primitives", violat…
+       |                                                                                                                 ^
+    163|   })
+    164|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  app/framework-adherence.test.ts > framework adherence > check 2: no hardcoded model ids except lib/perplexity.ts DEFAULT_MODEL
+AssertionError: found 1 model ids violation(s):
+  - lib/perplexity.ts:2: // by the orchestrator worker as model id "preset:high". The /api/models route: expected [ { file: 'lib/perplexity.ts', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "file": "lib/perplexity.ts",
++     "line": "// by the orchestrator worker as model id \"preset:high\". The /api/models route",
++     "lineNo": 2,
++   },
++ ]
+
+ ❯ app/framework-adherence.test.ts:178:114
+    176|     // Known mid-plan violation: lib/perplexity.ts static preset/gemin…
+    177|     // (todo 15 rewrites it). The DEFAULT_MODEL line itself is permitt…
+    178|     expect(violations, formatViolations("model ids", violations.map((v…
+       |                                                                                                                  ^
+    179|   })
+    180|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  scripts/desktop-guard-hooks.test.ts > native Kilo regression-only contract hooks > catches duplicate violations, but tolerates line shifts of an existing one
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ scripts/desktop-guard-hooks.test.ts:68:3
+     66|   })
+     67|
+     68|   it("catches duplicate violations, but tolerates line shifts of an ex…
+       |   ^
+     69|     const { hooks, root } = await setup()
+     70|     writeFileSync(path.join(root, "orchestrator/runtime.py"), "browser…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  scripts/desktop-guard-hooks.test.ts > native Kilo regression-only contract hooks > blocks SDK signature and literal BrowserInput violations using installed Python packages
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ scripts/desktop-guard-hooks.test.ts:109:3
+    107|   })
+    108|
+    109|   it("blocks SDK signature and literal BrowserInput violations using i…
+       |   ^
+    110|     const { hooks, root } = await setup()
+    111|     symlinkSync(path.resolve("orchestrator/.venv"), path.join(root, "o…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  2 failed | 23 passed (25)
+      Tests  4 failed | 530 passed (534)
+   Start at  01:17:06
+   Duration  39.63s (transform 29.04s, setup 0ms, import 174.76s, tests 71.29s, environment 18ms)
+

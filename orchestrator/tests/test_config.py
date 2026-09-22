@@ -107,8 +107,24 @@ def test_model_stream_batch_interval() -> None:
     assert MODEL_STREAM_BATCH_INTERVAL == timedelta(milliseconds=200)
 
 
+def test_stream_can_drain_overlap_matches_workflow_streams_recipe() -> None:
+    """CAN waits after the turn so subscribers drain before truncate().
+
+    Workflow Streams Pattern 1 is a sleep overlap after the last publish.
+    The value lives in config.py, not as a literal in ChatWorkflow.run.
+    """
+    from config import STREAM_CAN_DRAIN_OVERLAP
+    import workflow
+
+    assert STREAM_CAN_DRAIN_OVERLAP == timedelta(seconds=1)
+    assert workflow.STREAM_CAN_DRAIN_OVERLAP is STREAM_CAN_DRAIN_OVERLAP
+
+
 def test_model_activity_policy_uses_temporal_defaults() -> None:
-    assert MODEL_START_TO_CLOSE is None
+    from config import MCP_START_TO_CLOSE
+
+    assert MODEL_START_TO_CLOSE == timedelta(seconds=60)
+    assert MCP_START_TO_CLOSE == timedelta(seconds=30)
     assert MODEL_SCHEDULE_TO_CLOSE is None
     assert MODEL_HEARTBEAT is None
     assert MODEL_RETRY_POLICY.initial_interval == timedelta(seconds=1)

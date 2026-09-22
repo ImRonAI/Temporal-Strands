@@ -4,6 +4,8 @@ import asyncio
 import fcntl
 import os
 import sys
+import time
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call
@@ -13,6 +15,7 @@ from temporalio import activity, workflow
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.contrib.strands.workflow import activity_as_tool
 from temporalio.exceptions import ApplicationError
+from temporalio.testing import ActivityEnvironment
 
 import browser_activity as browser
 
@@ -63,6 +66,9 @@ def test_image_has_an_allowlisted_source_context_and_desktop_dependencies():
     assert "USER desktop" in dockerfile
     assert "HEALTHCHECK" in dockerfile
     assert "xauth" in dockerfile
+    for package in ("xfce4-session", "xfwm4", "xfce4-panel", "xfdesktop4", "dbus-x11"):
+        assert package in dockerfile
+    assert "openbox" not in dockerfile
     assert "XAUTHORITY=/home/desktop/.Xauthority" in dockerfile
 
 
@@ -81,8 +87,10 @@ async def test_worker_uses_native_pydantic_converter_and_single_activity_slot(mo
     monkeypatch.setattr(desktop_worker, "telemetry_plugins", lambda: [])
     verify = MagicMock(side_effect=RuntimeError("Display unavailable") if readiness_failure else None)
     initialize = MagicMock()
+    reclaim = AsyncMock(return_value=False)
     monkeypatch.setattr(desktop_worker, "verify_browser_runtime", verify)
     monkeypatch.setattr(desktop_worker, "initialize_desktop", initialize)
+    monkeypatch.setattr(desktop_worker, "reclaim_orphaned_desktop", reclaim)
     stopped = SimpleNamespace(set=MagicMock(), wait=AsyncMock())
     monkeypatch.setattr(desktop_worker.asyncio, "Event", lambda: stopped)
     monkeypatch.setattr(asyncio.get_running_loop(), "add_signal_handler", MagicMock())
@@ -93,6 +101,7 @@ async def test_worker_uses_native_pydantic_converter_and_single_activity_slot(mo
         with pytest.raises(RuntimeError, match="Display unavailable"):
             await desktop_worker.main()
         initialize.assert_not_called()
+        reclaim.assert_not_awaited()
         worker.assert_not_called()
         return
 
@@ -101,6 +110,8 @@ async def test_worker_uses_native_pydantic_converter_and_single_activity_slot(mo
     connect.assert_awaited_once_with("test-temporal:7233", data_converter=pydantic_data_converter, plugins=[])
     verify.assert_called_once_with()
     initialize.assert_called_once_with()
+    # Ownership is re-evaluated after the epoch reset, before any poll.
+    reclaim.assert_awaited_once_with(client)
     worker.assert_called_once()
     assert worker.call_args.args == (client,)
     options = worker.call_args.kwargs
@@ -113,9 +124,9 @@ async def test_worker_uses_native_pydantic_converter_and_single_activity_slot(mo
     stopped.wait.assert_awaited_once_with()
 
 
-def test_both_tool_paths_route_natively_with_finite_no_retry_options():
+def test_both_tool_paths_route_natively_with_heartbeat_and_no_retry():
     from computer_use_activity import COMPUTER_USE_ACTIVITIES, COMPUTER_USE_TOOL_NAMES
-    from config import DESKTOP_BROWSER_TASK_QUEUE
+    from config import DESKTOP_BROWSER_TASK_QUEUE, DESKTOP_JOB_HEARTBEAT_TIMEOUT, DESKTOP_TASK_TIMEOUT
     from workflow import PERMANENT_COMMUNITY_TOOLS, _DESKTOP_ACTIVITY_OPTIONS
     import run_worker
 
@@ -125,8 +136,10 @@ def test_both_tool_paths_route_natively_with_finite_no_retry_options():
         assert tool.tool_type == "temporal_activity"
         assert tool._options["task_queue"] == DESKTOP_BROWSER_TASK_QUEUE
         assert tool._options["retry_policy"].maximum_attempts == 1
-        assert tool._options["start_to_close_timeout"].total_seconds() > 0
-        assert tool._options["schedule_to_close_timeout"].total_seconds() > 0
+        assert tool._options.get("start_to_close_timeout") == DESKTOP_TASK_TIMEOUT
+        assert tool._options.get("schedule_to_start_timeout") is None
+        assert tool._options.get("schedule_to_close_timeout") is None
+        assert tool._options["heartbeat_timeout"] == DESKTOP_JOB_HEARTBEAT_TIMEOUT
         assert tool._options["cancellation_type"] == workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED
     host_names = {activity._Definition.must_from_callable(fn).name for fn in run_worker.WORKER_ACTIVITIES}
     assert not host_names & {"browser", *COMPUTER_USE_TOOL_NAMES}
@@ -268,6 +281,21 @@ def test_action_binds_owner_and_preserves_session_across_run_ids(runtime):
         assert state["mode"] == "agent"
 
 
+def test_desktop_action_heartbeats_while_gui_work_blocks(runtime, monkeypatch):
+    monkeypatch.setattr(browser, "DESKTOP_JOB_HEARTBEAT_INTERVAL", timedelta(milliseconds=40))
+    env = ActivityEnvironment()
+    beats: list[tuple] = []
+    env.on_heartbeat = lambda *details: beats.append(details)
+
+    def run():
+        with browser.desktop_action():
+            time.sleep(0.15)
+        return True
+
+    assert env.run(run) is True
+    assert len(beats) >= 2
+
+
 @pytest.mark.parametrize("field,value", [("namespace", "other-namespace"), ("workflow_id", "other-owner")])
 def test_action_rejects_other_workflows_and_namespaces(runtime, field, value):
     with browser.desktop_action():
@@ -345,6 +373,101 @@ def test_worker_restart_changes_epoch_and_requires_recovery_for_existing_owner(r
         assert state["mode"] == "recovery"
         assert state["session_name"] == "shared-browser-session"
 
+def _owner_probe_client(monkeypatch, *, status=None, error=None):
+    """Temporal client whose describe() reports ``status`` or raises ``error``."""
+    from temporalio.client import Client
+
+    handle = MagicMock()
+    if error is not None:
+        handle.describe = AsyncMock(side_effect=error)
+    else:
+        handle.describe = AsyncMock(return_value=SimpleNamespace(status=status))
+    client = MagicMock(spec=Client)
+    client.namespace = "test"
+    client.get_workflow_handle.return_value = handle
+    return client, handle
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("closed_status", ["COMPLETED", "FAILED", "CANCELED", "TERMINATED", "TIMED_OUT", "NOT_FOUND"])
+async def test_startup_reclaims_desktop_from_closed_or_unknown_owner(runtime, monkeypatch, closed_status):
+    """A closed owner can never release; the restarted worker must not stay in recovery forever."""
+    import desktop_worker
+    from temporalio.client import WorkflowExecutionStatus
+    from temporalio.service import RPCError, RPCStatusCode
+
+    with browser.desktop_action():
+        with browser.desktop_state() as state:
+            state["session_name"] = "shared-browser-session"
+    browser.initialize_desktop()  # container restart: existing owner -> recovery
+    with browser.desktop_state() as state:
+        assert state["mode"] == "recovery"
+        epoch = state["epoch"]
+    if closed_status == "NOT_FOUND":
+        client, handle = _owner_probe_client(
+            monkeypatch, error=RPCError("not found", RPCStatusCode.NOT_FOUND, b""))
+    else:
+        client, handle = _owner_probe_client(monkeypatch, status=WorkflowExecutionStatus[closed_status])
+
+    assert await desktop_worker.reclaim_orphaned_desktop(client) is True
+
+    client.get_workflow_handle.assert_called_once_with("owner")
+    handle.describe.assert_awaited_once()
+    with browser.desktop_state() as state:
+        assert state["owner"] is None
+        assert state["mode"] == "agent"
+        assert "session_name" not in state
+        assert state["epoch"] == epoch  # epoch reset belongs to initialize_desktop alone
+    with browser.desktop_action():
+        pass  # a fresh owner may act again
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["running", "continued_as_new", "rpc_error", "other_namespace"])
+async def test_startup_keeps_recovery_when_owner_may_still_be_live(runtime, monkeypatch, kind):
+    import desktop_worker
+    from temporalio.client import WorkflowExecutionStatus
+    from temporalio.service import RPCError, RPCStatusCode
+
+    with browser.desktop_action():
+        pass
+    browser.initialize_desktop()
+    if kind == "rpc_error":
+        client, _ = _owner_probe_client(
+            monkeypatch, error=RPCError("unavailable", RPCStatusCode.UNAVAILABLE, b""))
+    elif kind == "other_namespace":
+        client, _ = _owner_probe_client(monkeypatch, status=WorkflowExecutionStatus.COMPLETED)
+        client.namespace = "elsewhere"
+    else:
+        status = WorkflowExecutionStatus.RUNNING if kind == "running" else WorkflowExecutionStatus.CONTINUED_AS_NEW
+        client, _ = _owner_probe_client(monkeypatch, status=status)
+
+    assert await desktop_worker.reclaim_orphaned_desktop(client) is False
+
+    if kind == "other_namespace":
+        client.get_workflow_handle.assert_not_called()
+    with browser.desktop_state() as state:
+        assert state["owner"] == {"namespace": "test", "workflow_id": "owner"}
+        assert state["mode"] == "recovery"
+    with pytest.raises(ApplicationError, match="owned, paused, or requires recovery"):
+        with browser.desktop_action():
+            pytest.fail("Recovery must still fence agent input")
+
+
+@pytest.mark.asyncio
+async def test_startup_reclaim_is_a_no_op_without_an_owner(runtime):
+    import desktop_worker
+    from temporalio.client import Client
+
+    client = MagicMock(spec=Client)
+    client.namespace = "test"
+    assert await desktop_worker.reclaim_orphaned_desktop(client) is False
+    client.get_workflow_handle.assert_not_called()
+    with browser.desktop_state() as state:
+        assert state["owner"] is None and state["mode"] == "agent"
+
+
+
 
 def test_state_exception_does_not_commit_partial_changes_and_releases_lock(runtime):
     with pytest.raises(RuntimeError, match="abort state update"):
@@ -372,7 +495,9 @@ def test_native_lock_files_cannot_follow_symlinks(runtime, tmp_path, name):
 
 def test_startup_waits_for_display_and_supervises_all_children():
     source = (ROOT / "desktop/start-desktop.sh").read_text()
-    assert source.index("xdpyinfo") < source.index("openbox &")
+    assert source.index("xdpyinfo") < source.index("startxfce4 &")
+    assert "openbox" not in source
+    assert source.index("startxfce4 &") < source.index("x11vnc -display")
     assert "wait -n" in source
     assert "trap" in source
     assert "kill" in source

@@ -440,6 +440,30 @@ describe("AgentChat message rendering", () => {
     expect(html).toContain('data-media-type="image/png"')
     expect(html).toContain('data-base64="QUJD"')
   })
+
+  it("keeps a sent pasted prompt as the same attachment card, not an image", () => {
+    const text = "A pasted prompt that stays a card after send. ".repeat(12)
+    const url = `data:text/plain;base64,${Buffer.from(text, "utf8").toString("base64")}`
+    setChat({
+      messages: [
+        {
+          id: "u1",
+          role: "user",
+          parts: [
+            { type: "text", text: "Look at this" },
+            { type: "file", url, mediaType: "text/plain", filename: "Pasted prompt.txt" },
+          ],
+        },
+      ],
+    })
+    const html = render()
+    expect(html).toContain('data-testid="pasted-prompt-attachment"')
+    expect(html).toContain("A pasted prompt that stays a")
+    expect(html).not.toContain("Pasted prompt.txt")
+    expect(html).toContain("Look at this")
+    expect(html).not.toContain('data-testid="attachment-image"')
+    expect(html).not.toContain('data-media-type="text/plain"')
+  })
 })
 
 describe("AgentChat pending state and errors", () => {

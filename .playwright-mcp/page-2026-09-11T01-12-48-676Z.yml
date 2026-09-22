@@ -1,0 +1,32 @@
+- generic [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: v0 / studio
+      - navigation [ref=e75]:
+        - button "Community" [ref=e76]
+        - button "Pricing" [ref=e77]
+        - button "Enterprise" [ref=e78]
+        - button "Docs" [ref=e79]
+      - generic [ref=e9]:
+        - button "Compare models" [ref=e10] [cursor=pointer]
+        - button "Sign in" [ref=e11]
+        - button "Start building" [ref=e12]
+    - generic [ref=e82]:
+      - log [ref=e83]:
+        - generic [ref=e85]:
+          - paragraph [ref=e90]: A Kanban board with drag and drop
+          - paragraph [ref=e119]: Reply briefly to say you can hear me. Do not inspect, create, or change files; do not use shell, browser, or research tools.
+          - generic [ref=e123]:
+            - button "Thinking…" [expanded] [ref=e125]
+            - generic [ref=e137]: Working
+      - group [ref=e98]:
+        - group [ref=e99]
+        - textbox "Ask for a change, or start something new…" [active] [ref=e101]
+        - group [ref=e102]:
+          - generic [ref=e103]:
+            - button [ref=e104]
+            - button "High (preset)" [ref=e105]
+            - button "Web preview" [ref=e109]
+          - button "Stop" [ref=e145]
+  - button "Open Next.js Dev Tools" [ref=e111] [cursor=pointer]
+  - alert [ref=e74]

@@ -1,6 +1,6 @@
 strands-agents[gemini]==1.50.2
 strands-agents-tools[local_chromium_browser]==0.8.5
-strands-heterogeneous-graph-tool @ file:../../strands-tools
+# The graph implementation is orchestrator/graph_tool.py; no sibling checkout.
 # Agent Skills catalog (skills_config.py). Pinned to the commit verified on
 # 2026-09-05; the package is not on PyPI.
 strands_agentskills @ git+https://github.com/aws-samples/sample-strands-agents-agentskills@c5564fcd2e7c249ec57b32027ffbea49e9abeb7b

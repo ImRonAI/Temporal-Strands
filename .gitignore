@@ -16,6 +16,7 @@ fair-expanse-493212-h8-138622c839d2.json
 node_modules
 .next/
 .next-desktop-acceptance/
+.next-obsidian-inspect/
 .DS_Store
 .worktrees/
 # Graph tool durable state (SQLite store + session dirs)

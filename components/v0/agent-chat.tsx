@@ -33,6 +33,8 @@ import { GraphActivity } from "@/components/v0/graph-activity"
 import { computerUsePreview } from "@/components/v0/computer-use"
 import { ComputerUsePreviewPanel } from "@/components/v0/computer-use-preview"
 import { Composer } from "@/components/v0/composer"
+import { SentPastedPrompt } from "@/components/v0/pasted-prompt-attachment"
+import { pastedPromptText } from "@/components/v0/pasted-prompt"
 import { reasoningLevels } from "@/components/v0/model-picker"
 import { projectIdePreview } from "@/components/v0/project-ide"
 import { ProjectIdePanel } from "@/components/v0/project-ide-panel"
@@ -408,15 +410,38 @@ export function AgentChat({
                     description="Send a shared prompt or start this model's conversation below."
                   />
                 )}
-                {messages.map((message, messageIndex) => (
+                {messages.map((message, messageIndex) => {
+                  const sentPrompts = message.role === "user"
+                    ? message.parts.flatMap((part, index) =>
+                        isFileUIPart(part) && pastedPromptText(part) != null ? [{ part, index }] : [],
+                      )
+                    : []
+                  const showBubble = message.role === "assistant" || message.parts.some((part) => {
+                    if (isTextUIPart(part)) return true
+                    return isFileUIPart(part) && pastedPromptText(part) == null
+                  })
+                  return (
                   <MessageShell key={message.id} reduce={reduce}>
                     <Message from={message.role}>
+                      {sentPrompts.length > 0 ? (
+                        <div className="flex w-full flex-col items-end gap-2">
+                          {sentPrompts.map(({ part, index }) => (
+                            <SentPastedPrompt
+                              id={`${message.id}-pasted-${index}`}
+                              key={`${message.id}-pasted-${index}`}
+                              part={part}
+                            />
+                          ))}
+                        </div>
+                      ) : null}
                       {/* Vendored MessageContent is w-fit, which collapses
                           width-only children: the GraphActivity canvas
                           (w-full inside a fit-content parent) shrank to the
                           React Flow intrinsic minimum (~142px). Assistant
-                          messages stretch instead; user bubbles keep w-fit. */}
-                      <MessageContent className="group-[.is-assistant]:w-full group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:border group-[.is-user]:border-border group-[.is-user]:bg-secondary/90 group-[.is-user]:text-prose group-[.is-user]:shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.06)]">
+                          messages stretch instead; user bubbles keep w-fit.
+                          Pasted prompts stay outside this bubble so the card
+                          keeps the same glass treatment it had in the composer. */}
+                      {showBubble ? <MessageContent className="group-[.is-assistant]:w-full group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:border group-[.is-user]:border-border group-[.is-user]:bg-secondary/90 group-[.is-user]:text-prose group-[.is-user]:shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.06)]">
                         {message.role === "assistant" && (
                           <AgentActivity
                             parts={message.parts}
@@ -467,6 +492,7 @@ export function AgentChat({
                           // the agent. useChat stores them as data: URLs, which is
                           // exactly what Image renders from.
                           if (isFileUIPart(part)) {
+                            if (pastedPromptText(part) != null) return null
                             return (
                               <Image
                                 key={`${message.id}-${i}`}
@@ -480,10 +506,11 @@ export function AgentChat({
                           }
                           return null
                         })}
-                      </MessageContent>
+                      </MessageContent> : null}
                     </Message>
                   </MessageShell>
-                ))}
+                  )
+                })}
                 {awaitingAssistant && (
                   <MessageShell key="awaiting-assistant" reduce={reduce}>
                     <Message from="assistant">

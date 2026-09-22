@@ -9,7 +9,7 @@ with a fake for proxy tests.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,12 +20,14 @@ import asyncio
 import json
 import time
 from types import SimpleNamespace
+from datetime import datetime, timezone
 
 from temporalio import workflow
 from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamClient
 from temporalio.converter import DataConverter
 from temporalio.exceptions import ApplicationError
-from temporalio.client import WorkflowUpdateFailedError
+from temporalio.client import WorkflowExecutionStatus, WorkflowUpdateFailedError
+from temporalio.service import RPCError, RPCStatusCode
 
 from config import PROVIDER_DISPLAY_NAMES
 
@@ -37,6 +39,24 @@ _MODEL_NEW = {
     "provider": "perplexity-agent-api",
     "label": "model-new",
 }
+
+
+@pytest.mark.asyncio
+async def test_startup_query_timeout_is_actionable_and_never_submits_a_turn(monkeypatch):
+    seed_catalog(monkeypatch, [_MODEL_A])
+    handle = MagicMock()
+    handle.query = AsyncMock(side_effect=RPCError("Timeout expired", RPCStatusCode.DEADLINE_EXCEEDED, b""))
+    handle.start_update = AsyncMock()
+    temporal_client = MagicMock()
+    temporal_client.get_workflow_handle.return_value = handle
+    monkeypatch.setitem(server._state, "client", temporal_client)
+    monkeypatch.setattr(server.WorkflowStreamClient, "create", MagicMock(return_value=SimpleNamespace(get_offset=AsyncMock())))
+    with pytest.raises(server.HTTPException) as raised:
+        await server.turn_stream("chat-timeout", server.TurnRequest(prompt="test", model_id="model-a"))
+    assert raised.value.status_code == 503
+    assert "worker for activation errors" in raised.value.detail
+    assert "No new turn was submitted" in raised.value.detail
+    handle.start_update.assert_not_called()
 
 
 def seed_catalog(
@@ -73,7 +93,7 @@ def test_turn_subscription_recovers_without_repeating_update(client, monkeypatch
         return "complete"
     handle = MagicMock()
     handle.query = AsyncMock(return_value=None)
-    handle.start_update = AsyncMock(return_value=SimpleNamespace(result=result))
+    handle.start_update = AsyncMock(return_value=SimpleNamespace(workflow_run_id="synthetic-run", result=result))
     temporal_client = MagicMock()
     temporal_client.get_workflow_handle.return_value = handle
     monkeypatch.setitem(server._state, "client", temporal_client)
@@ -104,7 +124,7 @@ def test_turn_subscription_exhaustion_returns_clean_error(client, monkeypatch):
         await asyncio.Event().wait()
     handle = MagicMock()
     handle.query = AsyncMock(return_value=None)
-    handle.start_update = AsyncMock(return_value=SimpleNamespace(result=result))
+    handle.start_update = AsyncMock(return_value=SimpleNamespace(workflow_run_id="synthetic-run", result=result))
     temporal_client = MagicMock()
     temporal_client.get_workflow_handle.return_value = handle
     monkeypatch.setitem(server._state, "client", temporal_client)
@@ -174,7 +194,7 @@ def test_turn_subscribes_before_update_and_keeps_the_first_frame(
 
     async def start_update(*args: Any, **kwargs: Any) -> Any:
         calls.append("start_update")
-        return SimpleNamespace(result=result)
+        return SimpleNamespace(workflow_run_id="synthetic-run", result=result)
 
     handle = MagicMock()
     handle.query = AsyncMock(return_value=None)
@@ -400,6 +420,122 @@ async def test_turn_completion_cancels_pending_native_read(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("rollovers,stalled", [(0, False), (1, False), (2, False), (0, True)])
+async def test_turn_completion_offset_query_crosses_native_rollover(monkeypatch, rollovers, stalled):
+    """Only RPC routing is simulated; native storage, state and client are real."""
+    monkeypatch.setattr(server, "SSE_COMPLETION_DRAIN_TIMEOUT", 0.2)
+    monkeypatch.setattr(server, "SSE_SUBSCRIBE_RESTART_DELAY", 0.001)
+    monkeypatch.setattr(workflow, "get_signal_handler", lambda _: None)
+    monkeypatch.setattr(workflow, "payload_converter", lambda: DataConverter.default.payload_converter)
+    monkeypatch.setattr(workflow, "now", lambda: datetime.now(timezone.utc))
+
+    async def wait_condition(predicate, **kwargs):
+        if not predicate():
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(workflow, "wait_condition", wait_condition)
+
+    class Run:
+        def __init__(self, prior_state=None):
+            self.handlers = {}
+            self.validators = {}
+
+            def register(name, handler, **kwargs):
+                self.handlers[name] = handler
+                if "validator" in kwargs:
+                    self.validators[name] = kwargs["validator"]
+
+            monkeypatch.setattr(workflow, "set_signal_handler", register)
+            monkeypatch.setattr(workflow, "set_update_handler", register)
+            monkeypatch.setattr(workflow, "set_query_handler", register)
+            self.stream = WorkflowStream(prior_state)
+
+    runs = [Run()]
+    finished = asyncio.Event()
+    queries = []
+    cancelled_queries = []
+    polls = []
+    turn_calls = []
+
+    def get_handle(workflow_id, *, run_id=None):
+        async def query(name, **kwargs):
+            if name == server.ChatWorkflow.turn_start_offset:
+                return None
+            admitted_run = len(runs) - 1 if run_id is None else int(run_id)
+            queries.append(admitted_run)
+            if finished.is_set() and (admitted_run < rollovers or stalled):
+                # An unpinned query is routed once at admission, not re-routed
+                # when that execution closes while its response is pending.
+                if not stalled:
+                    old = runs[admitted_run].stream
+                    old.detach_pollers()
+                    runs.append(Run(old.get_state()))
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled_queries.append(admitted_run)
+            return runs[admitted_run].handlers[name]()
+
+        async def start_update(name, arg, **kwargs):
+            admitted_run = len(runs) - 1 if run_id is None else int(run_id)
+            if name == server.ChatWorkflow.turn:
+                turn_calls.append(arg)
+
+                async def result():
+                    await finished.wait()
+                    return "rollover reply"
+            else:
+                polls.append((admitted_run, arg.from_offset, arg.topics))
+                try:
+                    runs[admitted_run].validators[name](arg)
+                except ApplicationError as error:
+                    raise WorkflowUpdateFailedError(error) from error
+
+                async def result():
+                    return await runs[admitted_run].handlers[name](arg)
+            return SimpleNamespace(workflow_run_id=str(admitted_run), result=result)
+
+        async def describe():
+            current = len(runs) - 1 if run_id is None else int(run_id)
+            status = (WorkflowExecutionStatus.RUNNING if current == len(runs) - 1
+                      else WorkflowExecutionStatus.CONTINUED_AS_NEW)
+            return SimpleNamespace(run_id=str(current), status=status)
+
+        return SimpleNamespace(id=workflow_id, query=query, start_update=start_update, describe=describe)
+
+    temporal_client = SimpleNamespace(get_workflow_handle=get_handle, data_converter=DataConverter.default)
+    monkeypatch.setitem(server._state, "client", temporal_client)
+    # Do not patch WorkflowStreamClient.create/subscribe/get_offset: exercise
+    # their actual unpinned handles, paging, decoding and carried global offsets.
+    response = await server.turn_stream("rollover-stream", server.TurnRequest(prompt="synthetic only"))
+    for label in range(5):
+        runs[0].stream.topic("events").publish({"label": label, "padding": "x" * 400_000})
+    runs[0].stream.topic("excluded-topic").publish({"label": "filtered tail"})
+    body = response.body_iterator
+    frames = [await anext(body)]
+    await asyncio.sleep(0)  # A decoded item can be buffered when the turn settles.
+    finished.set()
+    await asyncio.sleep(0)
+    started = time.monotonic()
+    frames.extend([frame async for frame in body])
+    events = [json.loads(frame.removeprefix(b"data: ")) for frame in frames]
+    assert time.monotonic() - started < 1
+    assert len(turn_calls) == 1, "only event reads may be repeated"
+    if stalled:
+        assert "Incomplete event delivery: completion drain timed out" in events[-1]["error"]
+        assert not any(event.get("done") for event in events)
+        assert queries == [0, 0], "do not retry a query on an unchanged run"
+        assert cancelled_queries == [0]
+        return
+    assert [event["label"] for event in events if "label" in event] == list(range(5))
+    assert events[-1] == {"done": True, "reply": "rollover reply"}
+    assert queries == [0, *range(rollovers + 1)]
+    assert cancelled_queries == list(range(rollovers))
+    assert any(run == rollovers and offset == 1 and not topics for run, offset, topics in polls)
+    assert len(polls) > 2, "exercise native response-size pagination"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("fault,detail", [
     ("gap", "offset"), ("premature-end", "ended"),
     ("read-timeout", "timed out"), ("query-timeout", "timed out"),
@@ -437,14 +573,14 @@ async def test_turn_completion_without_native_events(monkeypatch, failure):
 
 
 @pytest.mark.asyncio
-async def test_connector_setup_failure_survives_native_workflow_envelope(monkeypatch):
-    error = ApplicationError("Connector setup needed at https://console.perplexity.ai/group/connectors",
-                             type="PerplexityModelError", non_retryable=True)
+async def test_model_error_message_survives_native_workflow_envelope(monkeypatch):
+    message = 'Managed connector "connector_googledrive" is not connected.'
+    error = ApplicationError(message, type="PerplexityModelError", non_retryable=True)
     harness = NativeTurnStream(monkeypatch, failure=WorkflowUpdateFailedError(error))
     harness.finished.set()
     response = await server.turn_stream("chat-1", server.TurnRequest(prompt="hello"))
     frames = [json.loads(frame.decode().removeprefix("data: ").strip()) async for frame in response.body_iterator]
-    assert "https://console.perplexity.ai/group/connectors" in frames[-1]["error"]
+    assert message in frames[-1]["error"]
     assert harness.turn_calls == 1
 
 
@@ -605,7 +741,8 @@ def test_health_lists_provider_catalog(
             },
         ],
     )
-    monkeypatch.setattr(server, "task_queue_has_pollers", AsyncMock(return_value=True))
+    pollers = AsyncMock(side_effect=lambda *, desktop=False: not desktop)
+    monkeypatch.setattr(server, "task_queue_has_pollers", pollers)
     monkeypatch.setitem(server._state, "client", MagicMock())
 
     response = client.get("/health")
@@ -617,15 +754,19 @@ def test_health_lists_provider_catalog(
         "temporal",
         "worker",
         "pollers",
+        "desktop",
         "models",
         "providers",
         "default_model",
     }
     assert "model_ids" not in body
+    # The desktop worker is reported separately and never gates chat readiness.
     assert body["status"] == "ok"
     assert body["temporal"] is True
     assert body["worker"] is True
     assert body["pollers"] is True
+    assert body["desktop"] is False
+    assert pollers.await_args_list == [call(), call(desktop=True)]
     assert body["models"] == [
         {
             "id": "preset:high",
@@ -695,6 +836,62 @@ def test_catalog_is_cached_then_refreshed_after_ttl(
     )
     client.get("/health")
     assert fetch.await_count == 2
+
+
+def test_failed_refresh_serves_last_known_catalog_while_worker_polls(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ModelCatalogWorkflow timeout on refresh (busy worker) must not blank the
+    catalog: /health keeps the declared models and /sessions does not 503."""
+    fetch = seed_catalog(monkeypatch, [_MODEL_A])
+    monkeypatch.setattr(server, "task_queue_has_pollers", AsyncMock(return_value=True))
+    temporal_client = MagicMock()
+    temporal_client.start_workflow = AsyncMock()
+    monkeypatch.setitem(server._state, "client", temporal_client)
+
+    assert client.get("/health").json()["models"] == [_MODEL_A]
+    assert fetch.await_count == 1
+
+    # Age the cache past its TTL and make the refresh fail (empty = timed out).
+    server._catalog_cache["fetched_at"] = (
+        time.monotonic() - server.CATALOG_CACHE_TTL.total_seconds() - 1
+    )
+    fetch.return_value = []
+
+    health = client.get("/health").json()
+    assert fetch.await_count == 2
+    assert health["models"] == [_MODEL_A]
+    assert health["status"] == "ok"
+
+    response = client.post("/sessions", json={"model_id": "model-a"})
+    assert response.status_code == 200, response.text
+    temporal_client.start_workflow.assert_awaited_once()
+
+    # The stale timestamp is preserved so the next call retries the refresh.
+    fetch.return_value = [_MODEL_A, _MODEL_NEW]
+    assert client.get("/health").json()["models"] == [_MODEL_A, _MODEL_NEW]
+
+
+def test_failed_refresh_without_pollers_reports_no_catalog(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stale catalog is NOT served when no worker polls the queue: that is a
+    genuine outage and /health must report degraded."""
+    fetch = seed_catalog(monkeypatch, [_MODEL_A])
+    pollers = AsyncMock(return_value=True)
+    monkeypatch.setattr(server, "task_queue_has_pollers", pollers)
+    monkeypatch.setitem(server._state, "client", MagicMock())
+
+    client.get("/health")
+    server._catalog_cache["fetched_at"] = (
+        time.monotonic() - server.CATALOG_CACHE_TTL.total_seconds() - 1
+    )
+    fetch.return_value = []
+    pollers.return_value = False
+
+    health = client.get("/health").json()
+    assert health["models"] == []
+    assert health["status"] == "degraded"
 
 
 def test_start_session_refreshes_catalog_once_on_miss(
@@ -773,11 +970,32 @@ def test_readiness_lease_helpers_are_gone() -> None:
         )
 
 
+def _validating_turn_client(monkeypatch: pytest.MonkeyPatch, current_model: str) -> MagicMock:
+    """A Temporal client whose session already holds ``current_model``.
+
+    ``turn_stream`` queries the workflow's current model before deciding
+    whether a switch needs catalog discovery, so the handle's ``query`` must be
+    awaitable. ``start_update`` is recorded so a test can prove the rejected
+    request never submitted a turn.
+    """
+    handle = MagicMock()
+    handle.query = AsyncMock(return_value=current_model)
+    handle.start_update = AsyncMock()
+    temporal_client = MagicMock()
+    temporal_client.get_workflow_handle.return_value = handle
+    monkeypatch.setitem(server._state, "client", temporal_client)
+    monkeypatch.setattr(
+        server.WorkflowStreamClient, "create",
+        MagicMock(return_value=SimpleNamespace(get_offset=AsyncMock(return_value=0))),
+    )
+    return handle
+
+
 def test_turn_unknown_model_id_is_400_listing_available(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seed_catalog(monkeypatch, [_MODEL_A, _MODEL_B])
-    monkeypatch.setitem(server._state, "client", MagicMock())
+    handle = _validating_turn_client(monkeypatch, "model-a")
 
     response = client.post(
         "/sessions/chat-1/turns/stream",
@@ -789,15 +1007,17 @@ def test_turn_unknown_model_id_is_400_listing_available(
     assert "nope" in detail
     assert "model-a" in detail
     assert "model-b" in detail
+    handle.start_update.assert_not_called()
 
 
 def test_turn_rejects_unverified_reasoning_effort(client, monkeypatch):
     seed_catalog(monkeypatch, [{"id": "gemini-3.8-flash", "provider": "google-ai-studio", "label": "gemini-3.8-flash"}])
-    monkeypatch.setitem(server._state, "client", MagicMock())
+    handle = _validating_turn_client(monkeypatch, "gemini-3.8-flash")
     response = client.post("/sessions/chat-1/turns/stream", json={
         "prompt": "hi", "model_id": "gemini-3.8-flash", "reasoning_effort": "minimal",
     })
     assert response.status_code == 422
+    handle.start_update.assert_not_called()
 
 
 def test_turn_valid_model_id_is_accepted_and_forwarded(

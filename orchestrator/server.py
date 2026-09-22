@@ -84,8 +84,7 @@ from config import (
 )
 from perplexity_operations import AGENT_RUNS_TOPIC
 from browser_activity import artifact_root
-from run_worker import agent_identity
-from skills_config import augmented_system_prompt
+from run_worker import agent_identity, assemble_model_factories
 from workspace_api import WorkspaceRequestBoundary, router as workspace_router, workspace_lifespan
 from workflow import (
     THINKING_TOPIC,
@@ -176,35 +175,33 @@ _catalog_cache: dict[str, Any] = {"models": None, "fetched_at": 0.0}
 
 
 async def _execute_catalog_workflow() -> list[dict[str, str]]:
-    """Run ModelCatalogWorkflow once and return its catalog as plain dicts.
+    """Build the provider-declaring catalog directly in this process.
 
-    Failure is not an error condition here: no worker polling the task queue
-    means the activity never starts and this raises, which is exactly the
-    degraded state /health reports. Callers get an empty catalog.
+    Same code path the worker uses at boot (``assemble_model_factories``), so
+    the list is identical to what the worker registers, without a Temporal
+    round-trip that a busy single worker can miss. Empty only when the build
+    itself fails.
     """
-    client = _state["client"]
-    if client is None:
-        return []
     try:
-        # Bounded on both sides: execution_timeout lets Temporal abandon the
-        # run server-side, and the asyncio bound stops /health from hanging
-        # when nothing is polling the queue at all.
-        catalog = await asyncio.wait_for(
-            client.execute_workflow(
-                ModelCatalogWorkflow.run,
-                id=f"model-catalog-{uuid4()}",
-                task_queue=TASK_QUEUE,
-                execution_timeout=CATALOG_WORKFLOW_TIMEOUT,
-            ),
+        _, catalog, _ = await asyncio.wait_for(
+            assemble_model_factories(),
             timeout=CATALOG_WORKFLOW_TIMEOUT.total_seconds(),
         )
     except Exception as error:  # noqa: BLE001 - fail closed, never crash /health
-        logger.warning("model catalog workflow failed: %s", error)
+        logger.warning("model catalog build failed: %s: %s", type(error).__name__, error)
         return []
     return [
         {"id": entry.id, "provider": entry.provider, "label": entry.label}
         for entry in catalog
     ]
+
+
+def models_prompt(models: list[dict[str, str]]) -> str:
+    """The current model list as a system-prompt section for the agent."""
+    if not models:
+        return ""
+    lines = [f"- {m['id']} ({PROVIDER_DISPLAY_NAMES.get(m['provider'], m['provider'])})" for m in models]
+    return "Models available in this deployment right now:\n" + "\n".join(lines)
 
 
 async def model_catalog(*, refresh: bool = False) -> list[dict[str, str]]:
@@ -229,6 +226,17 @@ async def model_catalog(*, refresh: bool = False) -> list[dict[str, str]]:
     if models:
         _catalog_cache["models"] = models
         _catalog_cache["fetched_at"] = now
+        return models
+    # A refresh that fails (typically ModelCatalogWorkflow exceeding
+    # CATALOG_WORKFLOW_TIMEOUT while the single worker is busy with a turn)
+    # must not blank a catalog the worker already declared: the picker would
+    # empty and session starts would 503 even though the worker is up. Serve
+    # the last known-good catalog when the pollers are still there, and only
+    # report "no catalog" when the task queue really has no worker. The stale
+    # fetched_at is left as-is so the next call retries the refresh.
+    if cached and await task_queue_has_pollers():
+        logger.warning("model catalog refresh failed; serving %d cached entries", len(cached))
+        return cached
     return models
 
 
@@ -256,8 +264,13 @@ async def validated_model(model_id: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    _, system_prompt = agent_identity()
-    _state["system_prompt"] = augmented_system_prompt(system_prompt)
+    # agent.json prompt only. The Agent Skills catalog is NOT baked in here:
+    # the workflow's TemporalAgent carries the official strands.AgentSkills
+    # plugin, which injects name/description metadata per invocation and
+    # loads a SKILL.md only when the model calls its ``skills`` tool. Baking
+    # the 527-skill dump into ChatInput.system_prompt shipped ~300KB on every
+    # model activity (Temporal TMPRL1103 payload warnings).
+    _, _state["system_prompt"] = agent_identity()
     try:
         _state["client"] = await Client.connect(
             os.environ.get("TEMPORAL_ADDRESS", "localhost:7233"),
@@ -356,6 +369,10 @@ async def health() -> dict[str, Any]:
     """
     temporal_ok = _state["client"] is not None
     pollers_ok = await task_queue_has_pollers()
+    # The Linux desktop worker is a separate poller on its own queue. It does
+    # not gate chat readiness (status stays "ok" without it) but the UI and
+    # startup scripts need to know whether browser/computer-use can execute.
+    desktop_ok = await task_queue_has_pollers(desktop=True)
     models = await model_catalog()
     default_model = None
     if models:
@@ -367,6 +384,7 @@ async def health() -> dict[str, Any]:
         # A worker IS its pollers: nothing else can serve the task queue.
         "worker": pollers_ok,
         "pollers": pollers_ok,
+        "desktop": desktop_ok,
         "models": models,
         "providers": PROVIDER_DISPLAY_NAMES,
         "default_model": default_model,
@@ -403,19 +421,23 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
         and not body.videos
     ):
         raise HTTPException(422, "A prompt or at least one attachment is required")
-    if body.model_id is not None:
-        await validated_model(body.model_id)
     client = temporal()
     handle = client.get_workflow_handle(session_id)
-    if body.reasoning_effort is not None:
-        model_id = body.model_id or await handle.query(ChatWorkflow.model_id)
-        if body.reasoning_effort not in REASONING_LEVELS.get(model_id, []):
-            raise HTTPException(422, f"Unsupported reasoning effort for {model_id}: {body.reasoning_effort}")
 
     # Start reading where the stream currently ends, so this turn's frames are
     # not preceded by every earlier turn's replay.
     stream_client = WorkflowStreamClient.create(client, session_id)
     try:
+        if body.model_id is not None or body.reasoning_effort is not None:
+            current_model = await handle.query(ChatWorkflow.model_id)
+            # The existing workflow already holds a validated model selection.
+            # Only switches need catalog discovery; a slow unrelated readiness
+            # workflow must not prevent an unchanged-model conversation.
+            if body.model_id is not None and body.model_id != current_model:
+                await validated_model(body.model_id)
+            model_id = body.model_id or current_model
+            if body.reasoning_effort is not None and body.reasoning_effort not in REASONING_LEVELS.get(model_id, []):
+                raise HTTPException(422, f"Unsupported reasoning effort for {model_id}: {body.reasoning_effort}")
         # Prefer the in-flight turn's own start offset over the live tail.
         # get_offset() returns base_offset + log length, so a client that
         # reconnects while a turn is still streaming would subscribe past every
@@ -428,6 +450,9 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
     except RPCError as error:
         if error.status == RPCStatusCode.NOT_FOUND:
             raise HTTPException(404, f"Unknown session: {session_id}") from error
+        if error.status == RPCStatusCode.DEADLINE_EXCEEDED:
+            logger.warning("Session %s did not answer the stream-start query: %s", session_id, error)
+            raise HTTPException(503, "The workflow did not answer its startup query. Check the worker for activation errors. No new turn was submitted.") from error
         raise HTTPException(502, str(error)) from error
 
     async def body_iter() -> AsyncIterator[bytes]:
@@ -522,9 +547,33 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
                 try:
                     try:
                         deadline = asyncio.get_running_loop().time() + SSE_COMPLETION_DRAIN_TIMEOUT
-                        end_offset = await asyncio.wait_for(
-                            stream_client.get_offset(), timeout=SSE_COMPLETION_DRAIN_TIMEOUT,
-                        )
+                        completion_client = stream_client
+                        query_run_id = update_handle.workflow_run_id
+                        offset_task = asyncio.create_task(completion_client.get_offset())
+                        try:
+                            async with asyncio.timeout_at(deadline):
+                                while True:
+                                    done, _ = await asyncio.wait(
+                                        {offset_task}, timeout=SSE_SUBSCRIBE_RESTART_DELAY,
+                                    )
+                                    if done:
+                                        end_offset = offset_task.result()
+                                        break
+                                    # An unpinned query can still be admitted to a
+                                    # closing run. Unlike subscribe(), get_offset()
+                                    # does not follow CAN while awaiting its reply.
+                                    latest = await handle.describe()
+                                    if latest.run_id != query_run_id:
+                                        offset_task.cancel()
+                                        with suppress(asyncio.CancelledError, Exception):
+                                            await offset_task
+                                        query_run_id = latest.run_id
+                                        completion_client = WorkflowStreamClient.create(client, session_id)
+                                        offset_task = asyncio.create_task(completion_client.get_offset())
+                        finally:
+                            offset_task.cancel()
+                            with suppress(asyncio.CancelledError, Exception):
+                                await offset_task
                         anext_task.cancel()
                         with suppress(asyncio.CancelledError, Exception):
                             await anext_task
@@ -534,7 +583,7 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
                         if last_offset < end_offset:
                             # The watermark is global. Read every topic to reach it,
                             # but expose only the existing SSE topic contract.
-                            subscription = stream_client.subscribe(None, from_offset=last_offset)
+                            subscription = completion_client.subscribe(None, from_offset=last_offset)
                         while last_offset < end_offset:
                             remaining = deadline - asyncio.get_running_loop().time()
                             if remaining <= 0:

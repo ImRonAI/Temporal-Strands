@@ -13,12 +13,9 @@ One place for the three things every nested-agent activity needs:
    strands.agent.agent.Agent``. Runtime ``agent`` / ``model`` handles are
    dropped, result dataclasses keep the fields the frontend reads, circular
    structures are cut by a depth cap.
-3. **Safe tool resolution** — :func:`resolve_tools` builds the in-activity
-   tool list for ephemeral parent/sub agents: the base set (``use_skill``,
-   ``file_read``, ``file_write``) plus community tools resolved through the
-   existing ``load_tool`` search roots (``load_tool.tool_file_path`` +
-   ``strands.tools.loader``). Unknown names raise a clear error instead of an
-   unbounded import bypass.
+3. **Activity-side parent Agent** — a live ``TemporalAgent`` cannot cross the
+   activity boundary (skill Pattern 2). :func:`parent_agent` rebuilds a plain
+   ``Agent`` so ``graph_tool._select_tools`` can read ``parent.tool_registry``.
 
 ``think_activity`` deliberately keeps its own copy of the model registry — it
 predates this module and its behavior is pinned by tests; do not fold it in
@@ -27,9 +24,12 @@ opportunistically.
 
 from __future__ import annotations
 
+import copy
 import json
+import logging
 from collections.abc import Callable, Mapping
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from strands.agent.agent_result import AgentResult
@@ -40,6 +40,7 @@ from temporalio.exceptions import ApplicationError
 # Worker-set registry of model factories, keyed by registered model id.
 # Empty until configure() runs, which only happens in the worker.
 _MODEL_FACTORIES: dict[str, Callable[[], Any]] = {}
+logger = logging.getLogger(__name__)
 
 
 def configure(model_factories: Mapping[str, Callable[[], Any]]) -> None:
@@ -87,6 +88,35 @@ async def session_model_id() -> str | None:
         return None
     handle = activity.client().get_workflow_handle(info.workflow_id)
     return await handle.query("model_id")
+
+
+async def session_loaded_tools() -> list[dict[str, str]]:
+    """``{"path", "name"}`` records of the tools the orchestrator loaded onto
+    itself via ``load_tool`` (the parent workflow's ``loaded_tools`` query).
+
+    Empty outside a workflow. A run started before the query existed cannot
+    answer it; that degrades to "nothing loaded" with a warning rather than
+    failing the sub-agent call (telemetry.py convention).
+    """
+    try:
+        info = activity.info()
+    except RuntimeError:
+        return []
+    if not info.workflow_id:
+        return []
+    handle = activity.client().get_workflow_handle(info.workflow_id)
+    try:
+        records = await handle.query("loaded_tools")
+    except Exception as error:  # noqa: BLE001 - optional, see docstring
+        activity.logger.warning("loaded_tools query unavailable: %s", error)
+        return []
+    if not isinstance(records, list):
+        return []
+    return [
+        {"path": str(rec["path"]), "name": str(rec["name"])}
+        for rec in records
+        if isinstance(rec, dict) and rec.get("path") and rec.get("name")
+    ]
 
 
 # Strands ModelStreamEvent.prepare() merges the node's invocation_state into
@@ -172,94 +202,89 @@ def sanitize_stream_payload(raw: Any, name_key: str = "skill_name") -> dict[str,
     }
 
 
-class UnknownToolError(ValueError):
-    """A requested tool name resolves to nothing in the safe registry."""
+# Worker-factory keys that belong on the outer TemporalAgent request only.
+_OUTER_MODEL_PARAMS = frozenset({"background", "store", "tools", "skills"})
 
 
-def canonical_tool_name(tool: Any) -> str:
-    """The name Strands registers the tool under.
+def in_process_model(model: Any) -> Any:
+    """The factory Model, stripped for a plain ``Agent`` inside an activity.
 
-    Decorated tools carry ``tool_name``; module-style tools (e.g.
-    ``strands_tools.file_read``) carry their name in ``TOOL_SPEC["name"]`` and
-    have a dotted ``__name__`` that never matches a requested name.
+    Official ``create_agent_with_model`` / ``use_agent`` inherit a plain Model.
+    The worker factory also attaches Agent API native tools, builtin skills,
+    and ``background``+``store`` for the outer TemporalAgent. Merging those
+    with Strands function tools is the live ``invalid request`` /
+    ``An error occurred during streaming`` failure on graph nodes
+    (chat-975a5afb58315ff9). The activity is already durable — drop the outer
+    envelope so the node request is the official function-tool surface.
     """
-    name = getattr(tool, "tool_name", None)
-    if isinstance(name, str) and name:
-        return name
-    spec = getattr(tool, "TOOL_SPEC", None)
-    if isinstance(spec, dict) and isinstance(spec.get("name"), str):
-        return spec["name"]
-    return str(getattr(tool, "__name__", "") or "").rpartition(".")[2]
-
-
-def base_subagent_tools(model: Any) -> list[Any]:
-    """Tools every ephemeral parent/sub agent carries.
-
-    The two reference agentskills tools when the catalog is available —
-    Pattern 3 ``use_skill(skill_name, request)`` (create_skill_agent_tool)
-    and Pattern 2 ``skill(skill_name)`` (create_skill_tool) — plus the
-    Pattern-3 sandbox tools (``file_read`` / ``file_write``), matching
-    examples 2 and 3 of aws-samples/sample-strands-agents-agentskills.
-    Never includes ``graph`` or ``use_agent`` themselves — recursion is
-    structural, via topology.
-    """
-    from skills_config import (
-        SkillsUnavailable,
-        create_inline_skill_tool,
-        create_use_skill_tool,
-        skill_subagent_tools,
+    getter = getattr(model, "get_config", None)
+    if not callable(getter):
+        return model
+    config = getter() or {}
+    params = config.get("params")
+    if not isinstance(params, dict) or not _OUTER_MODEL_PARAMS.intersection(params):
+        return model
+    cleaned = copy.deepcopy(
+        {key: value for key, value in params.items() if key not in _OUTER_MODEL_PARAMS}
     )
-
-    tools: list[Any] = []
-    try:
-        tools.append(create_use_skill_tool(model))
-        tools.append(create_inline_skill_tool())
-    except SkillsUnavailable:
-        pass
-    tools.extend(skill_subagent_tools())
-    return tools
+    updater = getattr(model, "update_config", None)
+    if callable(updater):
+        updater(params=cleaned, stateful=False)
+    return model
 
 
-def resolve_tools(names: list[str] | None, model: Any) -> list[Any]:
-    """The base sub-agent tools plus any requested community tools.
+async def parent_agent(model: Any) -> Any:
+    """Plain ``Agent`` whose ``tool_registry`` official ``_select_tools`` reads.
 
-    Extra names resolve through the existing safe loader path only
-    (``load_tool.tool_file_path`` search roots -> ``load_tools_from_file_path``).
-    Raises :class:`UnknownToolError` with the full unknown list so callers can
-    return a clear tool error instead of silently running with fewer tools.
+    Skill Pattern 2: a live ``TemporalAgent`` cannot cross the activity
+    boundary. Official ``create_agent_with_model`` inherits
+    ``parent.tool_registry`` by name (omit ``tools`` → every key; unknown
+    name → warning, not an import). Rebuild that parent with the tools that
+    actually run inside this activity: official ``load_tool`` records from
+    the session. Names that were not loaded are not on the registry.
     """
-    import os
-
-    from strands.tools.loader import load_tools_from_file_path
+    from strands import Agent
+    from strands_tools.load_tool import load_tool as official_load_tool
 
     from load_tool import tool_file_path
 
-    tools = base_subagent_tools(model)
-    have = {canonical_tool_name(tool) for tool in tools}
-    unknown: list[str] = []
-    for name in names or []:
-        if name in have:
+    parent = Agent(
+        model=model,
+        tools=[],
+        system_prompt="",
+        callback_handler=None,
+    )
+    have: set[str] = set()
+    for rec in await session_loaded_tools():
+        if rec["name"] in have:
             continue
-        path = tool_file_path(name)
-        if not os.path.exists(path):
-            unknown.append(name)
-            continue
-        loaded = [
-            candidate
-            for candidate in load_tools_from_file_path(path)
-            if candidate.tool_name == name
-        ]
-        if not loaded:
-            unknown.append(name)
-            continue
-        tools.append(loaded[0])
-        have.add(name)
-    if unknown:
-        raise UnknownToolError(
-            f"unknown tool(s) {sorted(unknown)!r}; available: "
-            f"{sorted(have)!r} plus community modules under orchestrator/tools/"
+        result = official_load_tool(
+            path=tool_file_path(rec["path"]), name=rec["name"], agent=parent
         )
-    return tools
+        if result.get("status") != "success":
+            logger.warning("load_tool %s not restored: %s", rec["name"], result)
+        else:
+            have.add(rec["name"])
+    return parent
+
+
+def agent_workspace(workflow_id: str | None = None) -> Path:
+    """Session directory for graph/skill/use_agent writes. Not the host home."""
+    from config import AGENT_WORKSPACE_ROOT
+
+    raw = workflow_id or "anon"
+    name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in raw)
+    root = AGENT_WORKSPACE_ROOT / name
+    (root / "workspace").mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def workspace_task_prefix(workflow_id: str | None = None) -> str:
+    path = agent_workspace(workflow_id) / "workspace"
+    return (
+        f"Session workspace (write only here): {path}\n"
+        "Do not use /home/user, ~, or the host home directory.\n\n"
+    )
 
 
 def heartbeat() -> None:
@@ -267,7 +292,7 @@ def heartbeat() -> None:
     try:
         activity.heartbeat()
     except RuntimeError:  # pragma: no cover - no activity context (unit tests)
-        pass
+        logger.debug("Sub-agent heartbeat skipped outside activity context")
 
 
 async def quiet_heartbeat_ticker(interval_seconds: float) -> None:

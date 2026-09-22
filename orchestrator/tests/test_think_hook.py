@@ -162,7 +162,7 @@ async def test_before_invocation_wiring_uses_config_timeouts() -> None:
 
 @pytest.mark.asyncio
 async def test_activity_input_builds_think_input_from_last_message() -> None:
-    # Empty agent.json persona -> the session's own system prompt is used.
+    # Empty agent.json persona -> native think default, not the session prompt.
     hook, wiring, registry = make_hook(
         FakeStream(), system_prompt="the persona", think_persona=""
     )
@@ -172,7 +172,7 @@ async def test_activity_input_builds_think_input_from_last_message() -> None:
     assert isinstance(think_input, ThinkInput)
     assert think_input.thought == "what is the plan?"
     assert think_input.cycle_count == 1
-    assert think_input.system_prompt == "the persona"
+    assert think_input.system_prompt == ""
 
     await registered(registry, event)[0](event)
     assert wiring.dispatched == [think_input]

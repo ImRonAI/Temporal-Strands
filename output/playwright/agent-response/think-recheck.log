@@ -1,0 +1,11 @@
+Already up to date
+Done in 595ms using pnpm v11.18.0
+
+ RUN  v4.1.10 /Users/tims-stuff/Desktop/v0-clone-blurple
+
+
+ Test Files  2 passed (2)
+      Tests  35 passed (35)
+   Start at  01:20:57
+   Duration  10.58s (transform 1.06s, setup 0ms, import 4.20s, tests 9.76s, environment 0ms)
+

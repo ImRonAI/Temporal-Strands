@@ -1,10 +1,16 @@
-# Linux desktop for the stock strands browser: Xvfb + openbox + x11vnc +
+# Linux desktop for the stock strands browser: Xvfb + XFCE + x11vnc +
 # noVNC + a Temporal worker running the native LocalChromiumBrowser activity.
 # Build context: orchestrator/
 FROM python:3.13-slim-bookworm@sha256:ed86c82274b3c69b52fb5820f358f0bd7df0b603332063cb5c6e32bd220c3e6e
 
+# Full XFCE session (window manager, panel, desktop icons/wallpaper, settings
+# daemon, terminal, file manager) so the noVNC viewer shows a real desktop, not
+# a bare root window. dbus-x11 provides the session bus xfce4-session needs.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    xvfb x11vnc openbox novnc websockify curl x11-utils procps tini xterm mousepad \
+    xvfb x11vnc novnc websockify curl x11-utils procps tini \
+    dbus-x11 xfce4-session xfwm4 xfce4-panel xfdesktop4 xfce4-settings \
+    xfce4-terminal thunar mousepad xterm \
+    elementary-xfce-icon-theme greybird-gtk-theme fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/orchestrator

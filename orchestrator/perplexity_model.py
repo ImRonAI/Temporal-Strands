@@ -39,7 +39,10 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 import agent_api_tools
-from config import NATIVE_OUTPUT_ITEM_TYPES, PERMANENT_HTTP_STATUSES, PERPLEXITY_API_BASE
+from config import (
+    NATIVE_OUTPUT_ITEM_TYPES, PERMANENT_API_ERROR_TYPES, PERMANENT_HTTP_STATUSES,
+    PERPLEXITY_API_BASE, PERPLEXITY_AUTO_TOOL_CHOICE_MODELS,
+)
 from desktop_observation import latest_observation, resolve_observation
 from workspace_state import StateConflict
 
@@ -85,6 +88,8 @@ def _is_permanent(error: APIError) -> bool:
     if getattr(error, "status_code", None) in _PERMANENT_HTTP_STATUSES:
         return True
     code = getattr(error, "code", None)
+    if code in PERMANENT_API_ERROR_TYPES or getattr(error, "type", None) in PERMANENT_API_ERROR_TYPES:
+        return True
     if isinstance(code, int) or (isinstance(code, str) and code.isdigit()):
         return int(code) in _PERMANENT_HTTP_STATUSES
     return False
@@ -275,6 +280,18 @@ class PerplexityModel(OpenAIResponsesModel):
         state = self._invocation.get()
         if state and (effort := state.effort) is not None:
             request["reasoning"] = {**(request.get("reasoning") or {}), "effort": effort}
+        if self.config["model_id"] in PERPLEXITY_AUTO_TOOL_CHOICE_MODELS:
+            choice = request.get("tool_choice")
+            if isinstance(choice, dict) and choice.get("type") == "function":
+                # Use the provider's supported native selection mode. The
+                # workflow hook still validates Think first; the model keeps
+                # ownership of its effort and cycle_count arguments.
+                request["tool_choice"] = "auto"
+                request["instructions"] = (
+                    (request.get("instructions") or "")
+                    + f"\n\nBefore responding or calling any other tool, call {choice['name']} first. "
+                    "Choose its arguments yourself."
+                )
         if extra := {k: request.pop(k) for k in list(request) if k not in _OPENAI_FIELDS}:
             request["extra_body"] = extra
         return request

@@ -4,8 +4,8 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 export PATH="$PATH:/Applications/Docker.app/Contents/Resources/bin"
 context="${DESKTOP_DOCKER_CONTEXT:-colima}"
 mode="${1:-start}"
-if [[ $# -gt 1 || ( "$mode" != start && "$mode" != build ) ]]; then
-    printf 'Usage: %s [start|build]\n' "$0" >&2
+if [[ $# -gt 1 || ( "$mode" != start && "$mode" != build && "$mode" != prepare ) ]]; then
+    printf 'Usage: %s [start|build|prepare]\n' "$0" >&2
     exit 1
 fi
 image="gwen-desktop:native"
@@ -17,11 +17,14 @@ if [[ "$desktop_uid" == 0 ]]; then
 fi
 docker --context "$context" info >/dev/null
 
-if [[ "$mode" == start ]]; then
+if [[ "$mode" != build ]]; then
     if ! image_info="$(docker --context "$context" image inspect --format \
         "{{.Id}} {{index .Config.Labels \"$source_label\"}}" "$image" 2>/dev/null)"; then
-        printf 'Desktop image %s is missing in Docker context %s. Run pnpm build:desktop first.\n' "$image" "$context" >&2
-        exit 1
+        if [[ "$mode" == start ]]; then
+            printf 'Desktop image %s is missing in Docker context %s. Run pnpm build:desktop first.\n' "$image" "$context" >&2
+            exit 1
+        fi
+        image_info=""
     fi
 fi
 
@@ -40,6 +43,15 @@ source_hash="$(
 )"
 source_hash="$(printf '%s' "$source_hash" | shasum -a 256)"
 source_hash="${source_hash%% *}"
+
+if [[ "$mode" == prepare ]]; then
+    if [[ "${image_info#* }" == "$source_hash" ]]; then
+        printf 'Desktop image matches source and UID; reusing it.\n'
+        exit 0
+    fi
+    printf 'Desktop image is missing or stale; rebuilding before starting services...\n'
+    mode=build
+fi
 
 if [[ "$mode" == build ]]; then
     if docker --context "$context" buildx version >/dev/null 2>&1; then

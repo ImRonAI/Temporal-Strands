@@ -1027,16 +1027,16 @@ async def test_activity_as_hook_dispatches_serializable_input_and_discards_resul
 
 
 def test_desktop_config_constants_are_finite_and_distinct_from_model_policy() -> None:
-    from config import MODEL_RETRY_POLICY, MODEL_START_TO_CLOSE
+    from config import DESKTOP_JOB_HEARTBEAT_INTERVAL, MODEL_RETRY_POLICY, MODEL_START_TO_CLOSE
 
     assert DESKTOP_MUTATION_RETRY_POLICY.maximum_attempts == 1
     assert DESKTOP_OBSERVATION_RETRY_POLICY.maximum_attempts == 3
     assert MODEL_RETRY_POLICY.maximum_attempts == 0  # unlimited, model-only
-    assert MODEL_START_TO_CLOSE is None  # existing "uncapped" model envelope untouched
-    assert timedelta(0) < DESKTOP_MUTATION_TIMEOUT <= timedelta(minutes=1)
+    assert MODEL_START_TO_CLOSE == timedelta(seconds=60)
+    assert DESKTOP_MUTATION_TIMEOUT == DESKTOP_TASK_TIMEOUT
     assert timedelta(0) < DESKTOP_OBSERVATION_TIMEOUT <= timedelta(minutes=1)
     assert DESKTOP_JOB_HEARTBEAT_TIMEOUT == timedelta(seconds=30)
-    assert DESKTOP_MUTATION_TIMEOUT < DESKTOP_TASK_TIMEOUT
+    assert DESKTOP_JOB_HEARTBEAT_INTERVAL < DESKTOP_JOB_HEARTBEAT_TIMEOUT < DESKTOP_TASK_TIMEOUT
     assert DESKTOP_OBSERVATION_TIMEOUT < DESKTOP_TASK_TIMEOUT
     assert isinstance(DESKTOP_MUTATION_RETRY_POLICY, RetryPolicy)
 
@@ -1044,13 +1044,10 @@ def test_desktop_config_constants_are_finite_and_distinct_from_model_policy() ->
 def test_desktop_options_satisfy_temporal_schedule_validation_without_fallback() -> None:
     """Temporal rejects an activity with neither start_to_close nor
     schedule_to_close (``_outbound_schedule_activity``). Desktop options carry
-    real values, so ``closable_activity_options`` never applies its 1-day shim."""
-    from config import UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE, closable_activity_options
-
+    one of those fields and do not use a 1-day schedule-to-close."""
     for options in (MUTATION_OPTIONS, OBSERVATION_OPTIONS):
         assert options["start_to_close_timeout"] or options["schedule_to_close_timeout"]
-        assert closable_activity_options(dict(options)) == options
-        assert options["schedule_to_close_timeout"] != UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE
+        assert options["schedule_to_close_timeout"] != timedelta(days=1)
 
 
 @pytest.mark.asyncio

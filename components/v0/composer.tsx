@@ -1,7 +1,7 @@
 "use client"
 
 import type { ChatStatus } from "ai"
-import type { ReactNode } from "react"
+import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react"
 import { AppWindowIcon, PaperclipIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -28,27 +28,132 @@ import {
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input"
 import { ModelPicker } from "@/components/v0/model-picker"
+import { PastedPromptAttachment } from "@/components/v0/pasted-prompt-attachment"
+import {
+  PASTED_PROMPT_INSTRUCTION,
+  applyPastedEdits,
+  isLongPaste,
+  messageForPastedPrompt,
+  pastedPromptFilename,
+  type PastedPrompt,
+} from "@/components/v0/pasted-prompt"
 
-function AttachmentsDisplay() {
+function AttachmentsDisplay({
+  pasted,
+  setPasted,
+}: {
+  pasted: readonly PastedPrompt[]
+  setPasted: (update: (current: PastedPrompt[]) => PastedPrompt[]) => void
+}) {
   const attachments = usePromptInputAttachments()
+  const seen = useRef(new Set<string>())
+
+  useEffect(() => {
+    const live = new Set(
+      attachments.files.map((file) => file.filename).filter((name): name is string => Boolean(name)),
+    )
+    for (const name of live) seen.current.add(name)
+    setPasted((current) => {
+      const next = current.filter((item) => !seen.current.has(item.filename) || live.has(item.filename))
+      return next.length === current.length ? current : next
+    })
+  }, [attachments.files, setPasted])
 
   if (attachments.files.length === 0) {
     return null
   }
 
+  const pastedByName = new Map(pasted.map((item) => [item.filename, item]))
+
   return (
     <Attachments variant="inline" className="px-1 pt-1">
-      {attachments.files.map((attachment) => (
-        <Attachment
-          data={attachment}
-          key={attachment.id}
-          onRemove={() => attachments.remove(attachment.id)}
-        >
-          <AttachmentPreview />
-          <AttachmentRemove />
-        </Attachment>
-      ))}
+      {attachments.files.map((attachment) => {
+        const prompt = attachment.filename ? pastedByName.get(attachment.filename) : undefined
+        if (prompt) {
+          return (
+            <PastedPromptAttachment
+              attachment={attachment}
+              key={attachment.id}
+              onRemove={() => {
+                attachments.remove(attachment.id)
+                setPasted((current) => current.filter((item) => item.filename !== prompt.filename))
+              }}
+              onTextChange={(text) => {
+                setPasted((current) =>
+                  current.map((item) => (item.filename === prompt.filename ? { ...item, text } : item)),
+                )
+              }}
+              prompt={prompt}
+            />
+          )
+        }
+        return (
+          <Attachment
+            data={attachment}
+            key={attachment.id}
+            onRemove={() => attachments.remove(attachment.id)}
+          >
+            <AttachmentPreview />
+            <AttachmentRemove />
+          </Attachment>
+        )
+      })}
     </Attachments>
+  )
+}
+
+function ComposerTextarea({
+  text,
+  onTextChange,
+  placeholder,
+  pasted,
+  setPasted,
+}: {
+  text: string
+  onTextChange: (value: string) => void
+  placeholder?: string
+  pasted: readonly PastedPrompt[]
+  setPasted: (update: (current: PastedPrompt[]) => PastedPrompt[]) => void
+}) {
+  const attachments = usePromptInputAttachments()
+
+  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const clipboard = event.clipboardData
+    if (!clipboard) return
+
+    const files: File[] = []
+    for (const item of clipboard.items) {
+      if (item.kind !== "file") continue
+      const file = item.getAsFile()
+      if (file) files.push(file)
+    }
+    if (files.length > 0) {
+      event.preventDefault()
+      attachments.add(files)
+      return
+    }
+
+    const pastedText = clipboard.getData("text/plain")
+    if (!isLongPaste(pastedText)) return
+
+    event.preventDefault()
+    const filename = pastedPromptFilename(pastedText, [
+      ...pasted.map((item) => item.filename),
+      ...attachments.files.map((file) => file.filename),
+    ])
+    setPasted((current) => [...current, { filename, text: pastedText }])
+    attachments.add([new File([pastedText], filename, { type: "text/plain" })])
+    if (!text.trim()) onTextChange(PASTED_PROMPT_INSTRUCTION)
+  }
+
+  return (
+    <PromptInputTextarea
+      value={text}
+      onChange={(event) => onTextChange(event.target.value)}
+      onPaste={handlePaste}
+      placeholder={placeholder ?? "Describe what you want to ship…"}
+      className="min-h-[64px] px-4 pt-3.5 text-base leading-relaxed text-foreground placeholder:text-muted-foreground md:text-base"
+    />
   )
 }
 
@@ -123,9 +228,21 @@ export function Composer({
   onReasoningEffortChange,
   globalDrop = true,
 }: ComposerProps) {
+  const [pasted, setPasted] = useState<PastedPrompt[]>([])
+
   return (
     <PromptInput
-      onSubmit={onSubmit}
+      onSubmit={(message) => {
+        const pastedNames = new Set(pasted.map((item) => item.filename))
+        const includesPasted = (message.files ?? []).some(
+          (file) => file.filename && pastedNames.has(file.filename),
+        )
+        onSubmit({
+          ...message,
+          files: applyPastedEdits(message.files, pasted),
+          text: messageForPastedPrompt(message.text, includesPasted),
+        })
+      }}
       accept={ACCEPTED_FILE_TYPES}
       globalDrop={globalDrop}
       multiple
@@ -139,14 +256,15 @@ export function Composer({
         className="hairline-indigo pointer-events-none absolute inset-x-10 top-0 z-10 h-px opacity-0 transition-opacity duration-700 group-focus-within/composer:opacity-100"
       />
       <PromptInputHeader className="border-0">
-        <AttachmentsDisplay />
+        <AttachmentsDisplay pasted={pasted} setPasted={setPasted} />
       </PromptInputHeader>
       <PromptInputBody>
-        <PromptInputTextarea
-          value={text}
-          onChange={(e) => onTextChange(e.target.value)}
-          placeholder={placeholder ?? "Describe what you want to ship…"}
-          className="min-h-[64px] px-4 pt-3.5 text-base leading-relaxed text-foreground placeholder:text-muted-foreground md:text-base"
+        <ComposerTextarea
+          onTextChange={onTextChange}
+          pasted={pasted}
+          placeholder={placeholder}
+          setPasted={setPasted}
+          text={text}
         />
       </PromptInputBody>
       <PromptInputFooter className="border-0 px-2.5 pb-2.5">

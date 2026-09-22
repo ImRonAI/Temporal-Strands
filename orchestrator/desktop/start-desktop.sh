@@ -38,8 +38,19 @@ for ((attempt=0; attempt<30; attempt++)); do
     sleep 1
 done
 xdpyinfo -display "$DISPLAY" >/dev/null
-openbox &
+# Full XFCE desktop (xfwm4 + panel + xfdesktop + settings daemon) under a
+# private session bus. Stock software, stock configuration; no root, no
+# polkit/systemd-logind (unavailable in the container and not required).
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-$(id -u)}"
+mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+export XDG_SESSION_TYPE=x11 XDG_CURRENT_DESKTOP=XFCE
+dbus-launch --exit-with-session startxfce4 &
 pids+=("$!")
+for ((attempt=0; attempt<30; attempt++)); do
+    pgrep -x xfwm4 >/dev/null && pgrep -x xfce4-panel >/dev/null && break
+    kill -0 "${pids[1]}" 2>/dev/null || exit 1
+    sleep 1
+done
 
 # Input starts fenced (view-only). The API grants/revokes through x11vnc's
 # native remote-control commands on handoff.

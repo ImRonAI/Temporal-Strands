@@ -223,12 +223,68 @@ def skills_prompt(skill_names: list[str] | None = None) -> str:
     return agentskills.generate_skills_prompt(skills)
 
 
-def augmented_system_prompt(base: str) -> str:
-    """Reference examples 2 and 3: ``f"{base_prompt}\\n\\n{skills_prompt}"``."""
-    prompt = skills_prompt()
-    if not prompt:
-        return base
-    return f"{base}\n\n{prompt}"
+@lru_cache(maxsize=1)
+def catalog_skills() -> tuple[Any, ...]:
+    """The catalog as official ``strands.Skill`` instances, loaded once per process.
+
+    ``Skill.from_directory`` walks ``skills_dir()`` on the worker (never inside
+    workflow code) and returns sandbox-independent ``Skill`` objects whose
+    instructions are already in memory. Empty tuple when the directory is
+    missing (optional infrastructure, telemetry.py convention).
+    """
+    from strands import Skill
+
+    directory = skills_dir()
+    if not directory.is_dir():
+        logger.warning("skills directory missing: %s", directory)
+        return ()
+    # Per-skill resilience, as the plugin's own ``_load_skill_paths`` does:
+    # one malformed SKILL.md is logged and skipped, never aborts its siblings
+    # (``Skill.from_directory`` only tolerates ValueError/FileNotFoundError,
+    # and two catalog entries raise ``yaml.ScannerError``).
+    skills: list[Any] = []
+    for child in sorted(directory.iterdir()):
+        if not child.is_dir() or not any((child / name).is_file() for name in ("SKILL.md", "skill.md")):
+            continue
+        try:
+            skills.append(Skill.from_file(child))
+        except Exception as error:  # noqa: BLE001 - a broken SKILL.md must not kill the catalog
+            logger.warning("path=<%s> | skipping skill: %s", child, error)
+    logger.info("loaded %d strands Skill entries from %s", len(skills), directory)
+    return tuple(skills)
+
+
+def agent_skills_plugin(skill_names: list[str] | None = None) -> Any:
+    """The official ``strands.AgentSkills`` plugin over the catalog.
+
+    https://strandsagents.com/docs/user-guide/concepts/plugins/skills
+
+    Used ONLY for scoped nested agents (``use_agent(skills=[...])``). The
+    plugin injects a name/description ``<available_skills>`` block on
+    ``BeforeInvocationEvent`` and returns a skill's full SKILL.md only when the
+    model calls its ``skills`` tool. The orchestrator itself never carries the
+    catalog: ~700 skills is ~300KB of metadata per model call. Skills run
+    through the permanent ``use_skill`` activity.
+
+    Skills are supplied as ``Skill`` instances (``catalog_skills``), the
+    plugin's sandbox-independent source: filesystem paths would be read
+    through ``agent.sandbox`` inside workflow code, which Temporal forbids.
+
+    ``skill_names`` scopes the plugin to that subset; an unknown name raises
+    ``LookupError`` listing the available names.
+    """
+    from strands import AgentSkills
+
+    skills = list(catalog_skills())
+    if skill_names is not None:
+        by_name = {skill.name: skill for skill in skills}
+        missing = [name for name in skill_names if name not in by_name]
+        if missing:
+            raise LookupError(
+                f"unknown skill(s) {missing!r}; available: {sorted(by_name)}"
+            )
+        skills = [by_name[name] for name in skill_names]
+    return AgentSkills(skills=skills)
 
 
 def create_inline_skill_tool(skill_names: list[str] | None = None) -> Any:
@@ -252,7 +308,9 @@ def create_inline_skill_tool(skill_names: list[str] | None = None) -> Any:
 
 
 def create_use_skill_tool(
-    model: Any, assigned_skills: list[str] | None = None
+    model: Any,
+    assigned_skills: list[str] | None = None,
+    tools: list[Any] | None = None,
 ) -> Any:
     """Pattern 3: ``use_skill(skill_name, request)`` factory product.
 
@@ -261,7 +319,11 @@ def create_use_skill_tool(
     ``skill(skill_name)`` tool plus those skills' catalog metadata, and
     consumes them in its own context — the reference ``additional_tools``
     parameter, filled with the reference ``create_skill_tool`` product.
-    Never nested sub-agents: ``use_skill`` itself is not in the tool list.
+
+    ``tools`` are parent-registry entries (tool objects or the recorded
+    file of a ``load_tool``-ed name) the caller assigns to each skill
+    sub-agent on top of the reference sandbox tools (``file_read`` /
+    ``file_write``) — the same ``additional_tools`` slot.
     """
     agentskills = _import_agentskills()
     if agentskills is None:
@@ -270,6 +332,8 @@ def create_use_skill_tool(
     additional_tools = skill_subagent_tools()
     if assigned_skills:
         additional_tools.append(create_inline_skill_tool(assigned_skills))
+    if tools:
+        additional_tools.extend(tools)
     return agentskills.create_skill_agent_tool(
         list(discovered_skills()),
         skills_dir(),

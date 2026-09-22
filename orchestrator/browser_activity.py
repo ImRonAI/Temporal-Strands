@@ -10,6 +10,7 @@ the stock tool manages its own event loop internally.
 """
 
 import asyncio
+import contextvars
 import fcntl
 import json
 import os
@@ -18,6 +19,7 @@ import shlex
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -29,7 +31,8 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from config import (
-    DESKTOP_HANDOFF_TIMEOUT, DESKTOP_VNC_COMMAND_TIMEOUT, DESKTOP_VNC_VIEW_COMMAND,
+    DESKTOP_HANDOFF_TIMEOUT, DESKTOP_JOB_HEARTBEAT_INTERVAL,
+    DESKTOP_VNC_COMMAND_TIMEOUT, DESKTOP_VNC_VIEW_COMMAND,
     DESKTOP_VNC_REVOKE_SCRIPT, DESKTOP_VNC_GRANT_SCRIPT,
 )
 from desktop_observation import store_observation
@@ -69,8 +72,43 @@ def initialize_desktop() -> None:
 
 
 @contextmanager
+def _temporal_heartbeat():
+    """Pulse Temporal while this thread is blocked on GUI work.
+
+    Cancellation is delivered on heartbeat. The ticker copies the activity
+    context into a daemon thread because Playwright/PyAutoGUI can block the
+    activity thread longer than the heartbeat timeout.
+    """
+    try:
+        activity.heartbeat()
+    except RuntimeError:
+        yield
+        return
+    stop = threading.Event()
+    ctx = contextvars.copy_context()
+
+    def pulse() -> None:
+        interval = DESKTOP_JOB_HEARTBEAT_INTERVAL.total_seconds()
+        while not stop.wait(interval):
+            try:
+                activity.heartbeat()
+            except (RuntimeError, asyncio.CancelledError):
+                return
+
+    thread = threading.Thread(
+        target=ctx.run, args=(pulse,), name="desktop-heartbeat", daemon=True,
+    )
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=DESKTOP_JOB_HEARTBEAT_INTERVAL.total_seconds())
+
+
+@contextmanager
 def desktop_action():
-    """Keep the native action lock until GUI completion, not Temporal timeout."""
+    """Keep the native action lock until GUI completion; Temporal tracks liveness via heartbeat."""
     if platform.system() != "Linux" or not os.environ.get("DISPLAY"):
         raise ApplicationError("Desktop input cannot execute on the host", non_retryable=True)
     info = activity.info()
@@ -87,7 +125,8 @@ def desktop_action():
             state["owner"] = owner
             epoch = state["epoch"]
         try:
-            yield epoch
+            with _temporal_heartbeat():
+                yield epoch
         except BaseException:
             with desktop_state() as state:
                 state["mode"] = "recovery"

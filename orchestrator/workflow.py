@@ -7,7 +7,9 @@ verified against temporalio 1.31.0 / strands-agents 1.50.2:
 - Pattern 9 (continue-as-new): each turn is a ``@workflow.update`` so the caller
   gets its reply from the same call, and the agent is rebuilt inside ``run`` from
   carried messages. This is the one documented exception to "build the agent in
-  ``__init__``" (guide R7).
+  ``__init__``" (guide R7). History pressure waits for the in-flight turn to
+  finish, then ``WorkflowStream.continue_as_new`` (streams CAN after the
+  iteration, never ``detach_pollers`` mid-turn).
 - Pattern 3 (HITL): the turn loop answers ``result.stop_reason == "interrupt"``;
   ``approve`` signals the answer back. Every interrupt in ``result.interrupts``
   is answered and the full list handed back (guide R9).
@@ -31,7 +33,7 @@ protected route ``app/api/orchestrator/route.ts``:
                      ``graph_activity``.
 
 Think uses the async adaptation in ``think_activity.py``. The model makes a
-mandatory first tool call and chooses effort/cycles; Astra inherits its tools.
+mandatory first tool call; each cycle inherits the parent model and tools.
 The original activity/hook are retained only for pre-migration workflow replay.
 """
 
@@ -71,35 +73,28 @@ from config import (
     AGENT_CREATE_RETRY_POLICY,
     AGENT_OPERATION_HEARTBEAT,
     AGENT_OPERATION_RETRY_POLICY,
-    AGENT_OPERATION_SCHEDULE_TO_CLOSE,
     AGENT_OPERATION_START_TO_CLOSE,
     BROWSER_RETRY_POLICY,
     DESKTOP_BROWSER_TASK_QUEUE,
-    DESKTOP_MUTATION_TIMEOUT,
+    DESKTOP_JOB_HEARTBEAT_TIMEOUT,
     DESKTOP_MUTATION_RETRY_POLICY,
-    DESKTOP_SCHEDULE_TO_START,
-    DESKTOP_ACTION_SCHEDULE_TO_CLOSE,
     DESKTOP_TASK_TIMEOUT,
     DESKTOP_HANDOFF_TIMEOUT,
-    closable_activity_options,
     GRAPH_HEARTBEAT_TIMEOUT,
     GRAPH_RETRY_POLICY,
     GRAPH_START_TO_CLOSE,
     USE_AGENT_HEARTBEAT_TIMEOUT,
     USE_AGENT_RETRY_POLICY,
     USE_AGENT_START_TO_CLOSE,
-    COMPUTER_USE_HEARTBEAT,
-    COMPUTER_USE_SCHEDULE_TO_CLOSE,
-    COMPUTER_USE_START_TO_CLOSE,
+    MCP_START_TO_CLOSE,
     MODEL_HEARTBEAT,
     MODEL_RETRY_POLICY,
-    MODEL_SCHEDULE_TO_CLOSE,
     MODEL_START_TO_CLOSE,
     MODEL_STREAM_BATCH_INTERVAL,
+    STREAM_CAN_DRAIN_OVERLAP,
     THINK_HEARTBEAT_TIMEOUT,
     THINK_RETRY_POLICY,
     THINK_START_TO_CLOSE,
-    THINK_REASONING_EFFORTS,
 )
 
 with workflow.unsafe.imports_passed_through():
@@ -110,12 +105,10 @@ with workflow.unsafe.imports_passed_through():
     from computer_use_activity import COMPUTER_USE_ACTIVITIES, COMPUTER_USE_TOOL_NAMES
     from graph_activity import graph_activity
     from load_tool import (
-        STRANDS_TOOLS_DIR,
         load_tool_activity,
         mcp_client_activity,
         register_community_tool,
         tool_file_path,
-        wrap_loaded_io_tool,
     )
     from think_activity import ThinkInput
     from use_agent_activity import use_agent_activity
@@ -125,21 +118,12 @@ with workflow.unsafe.imports_passed_through():
     from strands.vended_plugins.context_injector import ContextInjector
     from strands_tools import stop as native_stop
 
-# Temporal validates that every activity carries start_to_close_timeout OR
-# schedule_to_close_timeout (_workflow_instance._outbound_schedule_activity).
-# config.py currently leaves the MODEL_* / AGENT_OPERATION_* envelopes fully
-# unset ("we do not cap"), which that validation rejects at schedule time and
-# permanently fails the workflow task. Callers wrap their activity options in
-# ``closable_activity_options`` (config.py) so a generous schedule-to-close
-# fallback is applied only when both timeouts are None (graceful degradation,
-# telemetry.py convention).
-_MCP_ACTIVITY_OPTIONS = closable_activity_options(
-    dict(
-        start_to_close_timeout=MODEL_START_TO_CLOSE,
-        schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,
-        heartbeat_timeout=MODEL_HEARTBEAT,
-        retry_policy=MODEL_RETRY_POLICY,
-    )
+# MCP tool activities: start-to-close from the installed Strands guide
+# (TemporalMCPClient, 30s). Schedule-to-close is omitted.
+_MCP_ACTIVITY_OPTIONS = dict(
+    start_to_close_timeout=MCP_START_TO_CLOSE,
+    heartbeat_timeout=MODEL_HEARTBEAT,
+    retry_policy=MODEL_RETRY_POLICY,
 )
 
 # Formation graph: whole-formation runs are billable and non-idempotent, so
@@ -160,13 +144,28 @@ _USE_AGENT_ACTIVITY_OPTIONS = dict(
     retry_policy=USE_AGENT_RETRY_POLICY,
 )
 
+# Temporal's server default for an omitted schedule-to-start and
+# schedule-to-close is unlimited (python SDK: workflow._activities). The
+# worker still requires one of start-to-close or schedule-to-close
+# (_workflow_instance._outbound_schedule_activity). Desktop tools set
+# start-to-close to the existing task budget and leave the other two unset,
+# so a serialized queue waits for the desktop worker instead of dying on a
+# 1-day schedule-to-close. Liveness after the worker starts the attempt is
+# the heartbeat.
 _DESKTOP_ACTIVITY_OPTIONS = dict(
     task_queue=DESKTOP_BROWSER_TASK_QUEUE,
-    start_to_close_timeout=DESKTOP_MUTATION_TIMEOUT,
-    schedule_to_start_timeout=DESKTOP_SCHEDULE_TO_START,
-    schedule_to_close_timeout=DESKTOP_ACTION_SCHEDULE_TO_CLOSE,
+    start_to_close_timeout=DESKTOP_TASK_TIMEOUT,
+    heartbeat_timeout=DESKTOP_JOB_HEARTBEAT_TIMEOUT,
     retry_policy=BROWSER_RETRY_POLICY,
     cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+)
+
+# Native tool metadata is process-wide, like the permanent bindings below.
+# Rebuilding its Pydantic schemas per agent/replay can trip Temporal's workflow
+# deadlock detector before the new session can even answer a query.
+COMPUTER_USE_TOOLS = tuple(
+    activity_as_tool(action, **_DESKTOP_ACTIVITY_OPTIONS)
+    for action in COMPUTER_USE_ACTIVITIES
 )
 
 PERMANENT_COMMUNITY_TOOLS = (
@@ -203,12 +202,9 @@ THINK_TOOL = activity_as_tool(
 # one automatic attempt (no idempotency key on POST /v1/responses — see
 # config.AGENT_CREATE_RETRY_POLICY); retrieve/list/download are read-only and
 # retry normally.
-_AGENT_OPERATION_OPTIONS = closable_activity_options(
-    dict(
-        start_to_close_timeout=AGENT_OPERATION_START_TO_CLOSE,
-        schedule_to_close_timeout=AGENT_OPERATION_SCHEDULE_TO_CLOSE,
-        heartbeat_timeout=AGENT_OPERATION_HEARTBEAT,
-    )
+_AGENT_OPERATION_OPTIONS = dict(
+    start_to_close_timeout=AGENT_OPERATION_START_TO_CLOSE,
+    heartbeat_timeout=AGENT_OPERATION_HEARTBEAT,
 )
 
 _AGENT_CREATE_ACTIVITIES = (
@@ -378,7 +374,9 @@ def _clamp_tool_results(messages: Messages) -> Messages:
                                 item = {**item, "text": json.dumps(data)}
                                 text = item["text"]
                         except json.JSONDecodeError:
-                            pass
+                            # Preserve ordinary tool text that only resembles JSON.
+                            new_result_content.append(item)
+                            continue
                     new_result_content.append(item)
                 block = {**block, "toolResult": {**result, "content": new_result_content}}
             new_content.append(block)
@@ -672,14 +670,13 @@ class _HotLoadHook(HookProvider):
             if result.get("status") != "success" or not path or not tool_name:
                 return
             path = tool_file_path(path)
-            if not Path(path).exists():
-                package = STRANDS_TOOLS_DIR / f"{tool_name}.py"
-                if package.is_file():
-                    path = str(package)
-            # Register the loaded file on the live agent and wrap it as an
-            # activity — the same call the continue-as-new rebuild makes
-            # (``register_community_tool`` = official load + wrap_loaded_io_tool).
-            register_community_tool(event.agent, path, tool_name)
+            # The official load_tool against the live agent, then the swap to
+            # its activity-dispatching stub — the same call the
+            # continue-as-new rebuild makes.
+            registered = register_community_tool(event.agent, path, tool_name)
+            if registered.get("status") != "success":
+                workflow.logger.warning("load_tool %s not registered: %s", tool_name, registered)
+                return
             if not any(rec.name == tool_name for rec in self._loaded_tools):
                 self._loaded_tools.append(LoadedTool(path=path, name=tool_name))
             return
@@ -758,10 +755,12 @@ class _ThinkFirstHook(HookProvider):
     """
 
     def __init__(self, system_prompt: str, stream: WorkflowStream, *, model_chosen: bool = False) -> None:
-        # WHO the nested thinker is, from agent.json's ``think`` key; without
-        # one the session's own system prompt is used, as before. The
-        # activity resolves the persona/methodology itself from its inputs.
-        self._system_prompt = THINK_SYSTEM_PROMPT or system_prompt
+        # Optional agent.json think.system_prompt only. An empty value leaves
+        # strands_tools.think's default persona in place.
+        # Empty persona uses strands_tools.think's default analytical prompt.
+        # Do not fall back to the session prompt — that is the choreography
+        # that turns Think into an orchestrator memo.
+        self._system_prompt = THINK_SYSTEM_PROMPT or ""
         self._stream = stream
         self._applied_offset: int | None = None
         self._turn_start_offset: int | None = None
@@ -825,7 +824,6 @@ class _ThinkFirstHook(HookProvider):
             thought=prompt,
             cycle_count=1,
             system_prompt=self._system_prompt,
-            thinking_system_prompt=THINK_METHODOLOGY_PROMPT,
         )
 
     def _fold_think_notes(self, event: BeforeModelCallEvent) -> None:
@@ -1025,10 +1023,6 @@ class ChatWorkflow:
             if name not in catalog_names
         )
         is_gemini = self._model_id.startswith("gemini")
-        computer_use_tools = tuple(
-            activity_as_tool(action, **_DESKTOP_ACTIVITY_OPTIONS)
-            for action in COMPUTER_USE_ACTIVITIES
-        )
         computer_use_hooks = [
             _HumanControlHook(
                 self._human_control, self._handoff_requested, self._handoffs.publish,
@@ -1040,29 +1034,35 @@ class ChatWorkflow:
             model_chosen=getattr(self, "_model_chosen_think", False),
         )
         tools = [*PERMANENT_COMMUNITY_TOOLS, THINK_TOOL, *AGENT_API_TOOLS,
-                 *catalog, *extras, *computer_use_tools]
+                 *catalog, *extras, *COMPUTER_USE_TOOLS]
         if getattr(self, "_model_chosen_think", False):
             @tool(name="think", context=True)
-            async def think(thought: str, reasoning_effort: str, cycle_count: int,
-                            tool_context: ToolContext, tools: list[str] | None = None,
-                            system_prompt: str | None = None,
-                            thinking_system_prompt: str | None = None, verbose: bool = False):
-                """Async Strands Think on GPT-6-Astra with this agent's tools and context.
+            async def think(thought: str, cycle_count: int, system_prompt: str,
+                            tool_context: ToolContext,
+                            tools: list[str] | None = None,
+                            thinking_system_prompt: str | None = None):
+                """Recursive thinking tool. Each cycle is a nested agent that can
+                interleave reasoning with tool calls. Streaming adapts
+                strands_tools.think. Tools inherit from the
+                parent the native way (omit ``tools``). Cycles run on the
+                session's worker-registered model, so upstream's
+                model_provider/model_settings are not offered.
 
                 Args:
-                    thought: Question or task to analyze with evidence.
-                    reasoning_effort: Choose minimal, low, medium, high, xhigh, or max for this entire call.
-                    cycle_count: Choose 0-10 cycles. Zero returns immediately without an Astra request.
-                    tools: Omit to inherit all tools except Think; otherwise select tool names.
-                    system_prompt: Optional thinking persona.
-                    thinking_system_prompt: Optional thinking methodology.
-                    verbose: Show cycle details on the configured tool console.
+                    thought: The thought, question, or problem to process.
+                    cycle_count: Number of thinking cycles. Each cycle
+                        builds on the previous cycle's conclusion.
+                    system_prompt: Custom system prompt for the nested thinker.
+                    thinking_system_prompt: Optional HOW-it-thinks instructions.
+                        Omit to use the community tool's default ("use other
+                        available tools as needed").
+                    tools: Parent tool names to include; omit to inherit all except think.
                 """
                 async for event in think_activity.think_async(
-                    thought, cycle_count, reasoning_effort, agent=tool_context.agent,
-                    tools=tools, system_prompt=system_prompt,
-                    thinking_system_prompt=thinking_system_prompt or THINK_METHODOLOGY_PROMPT,
-                    verbose=verbose, invocation_state=tool_context.invocation_state,
+                    thought, cycle_count, system_prompt, agent=tool_context.agent,
+                    tools=tools, model_name=self._model_id,
+                    thinking_system_prompt=thinking_system_prompt,
+                    invocation_state=tool_context.invocation_state,
                     hooks=[_ToolResultHook(self._tool_results.publish),
                            _HumanControlHook(self._human_control, self._handoff_requested, self._handoffs.publish),
                            *([_ComputerUseSafetyHook()] if is_gemini else []),
@@ -1070,23 +1070,13 @@ class ChatWorkflow:
                     on_agent=self._set_thinker, resolve_interrupts=self._think_approval,
                 ):
                     yield event
-            properties = think.tool_spec["inputSchema"]["json"]["properties"]
-            properties["reasoning_effort"]["enum"] = list(THINK_REASONING_EFFORTS)
-            properties["cycle_count"].update(minimum=0, maximum=10)
             tools = [binding for binding in tools if getattr(binding, "tool_name", None) != "think"]
             tools.insert(0, think)
-        model_options = closable_activity_options(
-            dict(
-                start_to_close_timeout=MODEL_START_TO_CLOSE,
-                schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,
-            )
-        )
         agent = TemporalAgent(
             # A registered factory NAME from run_worker.py's models= mapping,
             # never a Model instance (guide R1).
             model=self._model_id,
-            start_to_close_timeout=model_options["start_to_close_timeout"],
-            schedule_to_close_timeout=model_options["schedule_to_close_timeout"],
+            start_to_close_timeout=MODEL_START_TO_CLOSE,
             heartbeat_timeout=MODEL_HEARTBEAT,
             retry_policy=MODEL_RETRY_POLICY,
             # Every batch is a durable Signal appended to workflow history,
@@ -1102,6 +1092,11 @@ class ChatWorkflow:
             messages=list(messages),
             tool_executor=SequentialToolExecutor(),
             plugins=[
+                # No AgentSkills plugin here on purpose: with ~700 registered
+                # skills its per-invocation <available_skills> block is ~300KB
+                # on every model activity (Temporal TMPRL1103). Skills run
+                # through the permanent use_skill activity. Nothing
+                # skill-related rides in the system prompt or workflow input.
                 # Default "userTurn" trigger: the catalog is folded into the
                 # fresh user ask only. With "everyTurn" Strands appends it
                 # AFTER each tool result (a tool result must stay the first
@@ -1126,7 +1121,9 @@ class ChatWorkflow:
             ],
         )
         for rec in self._loaded_tools:
-            register_community_tool(agent, rec.path, rec.name)
+            registered = register_community_tool(agent, rec.path, rec.name)
+            if registered.get("status") != "success":
+                workflow.logger.warning("load_tool %s not restored: %s", rec.name, registered)
         self._agent_extra_mcp = tuple(self._extra_mcp_servers)
         return agent
 
@@ -1463,6 +1460,21 @@ class ChatWorkflow:
         return self._model_id
 
     @workflow.query
+    def loaded_tools(self) -> list[dict[str, str]]:
+        """Community tools the orchestrator loaded onto itself via ``load_tool``.
+
+        The sub-agent activities (``graph`` / ``use_agent`` / ``use_skill``)
+        rebuild the parent's tool registry from this list, so nested agents
+        inherit exactly what the orchestrator loaded before dispatching them
+        (the official ``strands_tools.use_agent`` / ``graph`` rule: node
+        ``tools`` filter the parent's registry; omitted means all of it).
+        """
+        return [
+            {"path": rec.path, "name": rec.name}
+            for rec in getattr(self, "_loaded_tools", [])
+        ]
+
+    @workflow.query
     def session_id(self) -> str:
         return self._session_id
 
@@ -1504,9 +1516,28 @@ class ChatWorkflow:
         self._closing = True
 
         release_on_end = workflow.patched("desktop-release-on-end-v1")
+        # Pattern 9 (strands-temporal guide): drain the in-flight turn, then
+        # continue-as-new. Workflow Streams CAN is the same shape — finish the
+        # iteration, then detach_pollers. Detaching first while invoke_async
+        # is still running rejects live polls with StreamDraining; the SSE
+        # bridge gives up after three restarts and the UI goes silent while
+        # the worker keeps going.
+        can_after_turn = workflow.patched("stream-can-after-turn-v1")
+        if can_after_turn:
+            await workflow.wait_condition(lambda: not self._lock.locked())
         ending = self._done
-        # Detach long-poll updates before draining; otherwise they prevent end
-        # and rollover from ever reaching a quiescent desktop boundary.
+        if can_after_turn and not ending and not self._handoff_rollover:
+            # Split the workflow task so the turn's update completion is
+            # recorded before continue-as-new. Same WFT used to fail with
+            # PayloadsTooLarge and roll back the reply. The sleep is the
+            # Workflow Streams overlap so the SSE drain can catch the tail
+            # before truncate() drops it from the CAN payload.
+            await workflow.sleep(STREAM_CAN_DRAIN_OVERLAP)
+            ending = self._done
+            if not ending:
+                self._stream.truncate(self._stream_offset())
+        # Detach long-poll updates before draining remaining handlers;
+        # otherwise a parked subscriber keeps all_handlers_finished false.
         self._stream.detach_pollers()
         await workflow.wait_condition(workflow.all_handlers_finished)
         if release_on_end:

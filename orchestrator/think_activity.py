@@ -1,118 +1,147 @@
-"""Async Strands Think with upstream prompts and default parent-tool inheritance.
+"""Streaming port of the installed ``strands_tools.think`` community tool.
 
-User-approved changes: fixed Astra, caller-chosen effort/0-10 cycles, full context
-within a call, and conclusions plus evidence. Workflow-side execution preserves
-native Temporal tool routing. The old activity below remains registered only for
-pre-migration histories; it is not the new Think implementation.
+Source: https://github.com/strands-agents/tools/blob/main/src/strands_tools/think.py
+
+``think_async`` follows the same cycle loop, prompt builder, tool inheritance,
+and result envelope. It uses ``stream_async`` instead of ``agent(prompt)``, so
+reasoning traces and in-cycle tool calls reach Chain of Thought. The old ``think`` activity below
+remains registered only for pre-migration histories. Temporal uses named worker
+model factories and retains approval hooks; provider overrides are unsupported
+in that path rather than constructing live provider models inside a workflow.
 """
 
 from __future__ import annotations
 
 import logging
 import asyncio
-import copy
+import os
 import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from strands import Agent
-from strands.agent.conversation_manager import NullConversationManager
-from strands.hooks import MessageAddedEvent
-from strands.tools.executors import SequentialToolExecutor
 from strands_tools.think import ThoughtProcessor
+from strands_tools.utils.models.model import create_model
 from strands_tools.utils import console_util
 from temporalio import activity, workflow
 from temporalio.contrib.strands import TemporalAgent
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
 
 from config import (
-    THINK_STREAM_BATCH_INTERVAL, THINK_MODEL_ID, THINK_START_TO_CLOSE,
-    THINK_HEARTBEAT_TIMEOUT, THINK_RETRY_POLICY, THINK_REASONING_EFFORTS,
+    THINK_STREAM_BATCH_INTERVAL, THINK_START_TO_CLOSE,
+    THINK_HEARTBEAT_TIMEOUT, THINK_RETRY_POLICY,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _inherit_tools(parent: Agent | None, specified_tools: list[str] | None) -> list[Any]:
+    """Same tool filter as strands_tools.think.ThoughtProcessor.process_cycle."""
+    if parent is None:
+        return []
+    registry = parent.tool_registry.registry
+    if specified_tools is not None:
+        inherited = []
+        for name in specified_tools:
+            if name == "think":
+                logger.warning("Excluding 'think' tool from nested agent to prevent recursion")
+                continue
+            if name in registry:
+                inherited.append(registry[name])
+            else:
+                logger.warning("Tool '%s' not found in parent agent's tool registry", name)
+        return inherited
+    return [tool for name, tool in registry.items() if name != "think"]
+
+
+def _cycle_agent(
+    parent: Agent | None,
+    inherited: list[Any],
+    system_prompt: str,
+    *,
+    durable: bool,
+    hooks: list[Any] | None,
+    model_name: str | None,
+    model_provider: str | None,
+    model_settings: dict[str, Any] | None,
+) -> Agent:
+    """Fresh Agent per cycle, matching upstream ``messages=[]`` + inherited tools.
+
+    Temporal uses the parent's selected factory name and publishes the nested
+    agent's StreamEvents on THINKING_TOPIC. Inherited tools are the parent's
+    actual registered bindings, preserving their activity routing and options.
+    """
+    extra: dict[str, Any] = {"hooks": hooks or []}
+    if parent is not None:
+        extra["callback_handler"] = parent.callback_handler
+        extra["trace_attributes"] = getattr(parent, "trace_attributes", None) or {}
+    if durable:
+        from workflow import THINKING_TOPIC
+        # Resolve the same worker factory as the parent, never a substitute model.
+        if model_provider is not None:
+            raise ValueError("Think provider overrides require a worker-registered model; select the session model instead")
+        if model_name is None:
+            raise ValueError("Temporal Think requires the parent model factory name")
+        return TemporalAgent(
+            model=model_name, messages=[], tools=inherited, system_prompt=system_prompt,
+            streaming_topic=THINKING_TOPIC,
+            streaming_batch_interval=THINK_STREAM_BATCH_INTERVAL,
+            start_to_close_timeout=THINK_START_TO_CLOSE,
+            heartbeat_timeout=THINK_HEARTBEAT_TIMEOUT,
+            retry_policy=THINK_RETRY_POLICY, **extra,
+        )
+    selected = parent.model if parent is not None else None
+    if model_provider is not None:
+        provider = os.getenv("STRANDS_PROVIDER", "bedrock") if model_provider == "env" else model_provider
+        try:
+            selected = create_model(provider=provider, config=model_settings)
+        except Exception as error:
+            # This fallback is the upstream tool's behavior, not retry logic.
+            logger.warning("Failed to create %s model: %s; using parent's model", provider, error)
+    return Agent(model=selected, messages=[], tools=inherited, system_prompt=system_prompt, **extra)
 
 
 async def think_async(
-    thought: str, cycle_count: int, reasoning_effort: str, *, agent: Agent,
-    tools: list[str] | None = None, system_prompt: str | None = None,
-    thinking_system_prompt: str | None = None, verbose: bool = False,
+    thought: str, cycle_count: int, system_prompt: str,
+    tools: list[str] | None = None, model_provider: str | None = None,
+    model_settings: dict[str, Any] | None = None,
+    thinking_system_prompt: str | None = None, agent: Agent | None = None, *,
+    model_name: str | None = None,
     invocation_state: dict[str, Any] | None = None, hooks: list[Any] | None = None,
     on_agent: Callable[[Any], None] | None = None, resolve_interrupts: Any = None,
 ):
-    """Async streaming adaptation of strands_tools.think (0.8.5).
+    """Streaming port of ``strands_tools.think.think``.
 
-    Tool inheritance/exclusion, upstream prompt construction, cycle chaining and
-    the error/summary envelope are unchanged. User-approved changes: fixed Astra,
-    caller-chosen effort and 0-10 cycles, zero-call fast return, current parent
-    context, a single native agent retaining all cycle messages, and tool evidence.
-    Runtime hooks/callbacks are supplied by the workflow, not by model arguments.
+    Same cycle loop, prompt builder, tool inheritance, and success/error
+    envelope as the installed community tool. ``stream_async`` replaces
+    ``agent(prompt)`` so reasoning deltas and in-cycle tool calls reach the UI.
     """
-    generated = []
-    conclusions = []
+    conclusions: list[str] = []
     thinker = None
     try:
-        if type(cycle_count) is not int or not 0 <= cycle_count <= 10:
-            raise ValueError("cycle_count must be an integer from 0 to 10")
-        if cycle_count == 0:
-            yield {"status": "success", "content": [{"text": ""}]}
-            return
-        # The API validates model-specific values; do not silently downgrade or
-        # derive effort from task text. The caller explicitly supplies this value.
-        if reasoning_effort not in THINK_REASONING_EFFORTS:
-            raise ValueError(f"reasoning_effort must be one of {THINK_REASONING_EFFORTS}")
-        available = agent.tool_registry.registry
-        selected = list(available) if tools is None else tools
-        inherited = [available[name] for name in selected if name != "think" and name in available]
-        context = copy.deepcopy(agent.messages)
-        # A tool invocation happens with the parent's current tool batch open.
-        # Supply only complete history to the child; never rewrite parent history.
-        pending = set()
-        boundary = len(context)
-        for index, message in enumerate(context):
-            for block in message.get("content", []):
-                if "toolUse" in block:
-                    if not pending:
-                        boundary = index
-                    pending.add(block["toolUse"]["toolUseId"])
-                elif "toolResult" in block:
-                    pending.discard(block["toolResult"]["toolUseId"])
-        if pending:
-            context = context[:boundary]
-        options = dict(
-            messages=context, tools=inherited, callback_handler=None,
-            system_prompt=system_prompt or agent.system_prompt,
-            tool_executor=SequentialToolExecutor(), hooks=hooks or [],
-            conversation_manager=NullConversationManager(),
-        )
-        durable = workflow.in_workflow()
-        if durable:
-            from workflow import THINKING_TOPIC
-            thinker = TemporalAgent(
-                model=THINK_MODEL_ID, streaming_topic=THINKING_TOPIC,
-                streaming_batch_interval=THINK_STREAM_BATCH_INTERVAL,
-                start_to_close_timeout=THINK_START_TO_CLOSE,
-                heartbeat_timeout=THINK_HEARTBEAT_TIMEOUT,
-                retry_policy=THINK_RETRY_POLICY, **options,
+        custom_system_prompt = system_prompt
+        if not custom_system_prompt:
+            custom_system_prompt = (
+                "You are an expert analytical thinker. Process the thought deeply and provide clear insights."
             )
-        else:
-            factory = _MODEL_FACTORIES.get(THINK_MODEL_ID)
-            if factory is None:
-                raise RuntimeError(f"No registered model factory for {THINK_MODEL_ID}; no fallback is allowed")
-            thinker = Agent(model=factory(), **options)
-        thinker.hooks.add_callback(MessageAddedEvent, lambda event: generated.append(copy.deepcopy(event.message)))
-        if on_agent:
-            on_agent(thinker)
+        durable = workflow.in_workflow()
         state = {key: value for key, value in (invocation_state or {}).items()
                  if key not in {"agent", "request_state", "event_loop_cycle_id", "event_loop_cycle_span", "require_think"}}
-        state["reasoning_effort"] = reasoning_effort
         prompt_for = ThoughtProcessor({}, _CONSOLE).create_thinking_prompt
         current = thought
         for cycle in range(1, cycle_count + 1):
             prompt = prompt_for(current, cycle, cycle_count, thinking_system_prompt)
+            thinker = _cycle_agent(
+                agent, _inherit_tools(agent, tools), custom_system_prompt,
+                durable=durable, hooks=hooks, model_name=model_name,
+                model_provider=model_provider, model_settings=model_settings,
+            )
+            if on_agent:
+                on_agent(thinker)
             result = None
             async for event in thinker.stream_async(prompt, invocation_state=dict(state)):
-                # Temporal's model activity already publishes raw model events;
-                # publishing them again here would duplicate the UI stream.
+                # TemporalAgent already publishes raw model events on THINKING_TOPIC.
                 if not durable and "event" in event:
                     yield event
                 if "result" in event:
@@ -128,29 +157,24 @@ async def think_async(
                         result = event["result"]
             if result is None:
                 raise RuntimeError("Think stream produced no result")
-            if result.stop_reason not in ("end_turn", "stop_sequence"):
-                raise RuntimeError(f"Think did not complete its cycle: {result.stop_reason}")
             reply = str(result).strip()
             conclusions.append(f"Cycle {cycle}/{cycle_count}:\n{reply}")
             current = f"Previous cycle concluded: {reply}\nContinue developing these ideas further."
-            if verbose:
-                _CONSOLE.print(f"Cycle {cycle}/{cycle_count}: {reply}")
-        content = [{"text": "\n\n".join(conclusions)}]
-        if any("toolUse" in block for message in generated for block in message.get("content", [])):
-            content.append({"json": {"messages": generated}})
-        yield {"status": "success", "content": content}
+            if on_agent:
+                on_agent(None)
+                thinker = None
+        yield {
+            "status": "success",
+            "content": [{"text": "\n\n".join(conclusions)}],
+        }
     except asyncio.CancelledError:
         raise
     except Exception as error:
-        yield {"status": "error", "content": [
-            {"text": f"Error in think tool: {error}"},
-            {"json": {"cycle_conclusions": conclusions, "messages": generated}},
-        ]}
+        yield {
+            "status": "error",
+            "content": [{"text": f"Error in think tool: {error}\n{traceback.format_exc()}"}],
+        }
     finally:
-        if thinker is not None:
-            for name, binding in thinker.tool_registry.registry.items():
-                if name != "think" and name not in agent.tool_registry.registry:
-                    agent.tool_registry.register_tool(binding)
         if on_agent:
             on_agent(None)
 
@@ -170,7 +194,6 @@ class ThinkInput:
     thinking_system_prompt: str | None = None
 
 
-logger = logging.getLogger(__name__)
 # Activities have no console; outside STRANDS_TOOL_CONSOLE_MODE console_util
 # returns the discarding one upstream's processor accepts.
 _CONSOLE = console_util.create()
@@ -215,7 +238,7 @@ async def _run_cycle(prompt: str, system_prompt: str, model: Any,
             try:
                 activity.heartbeat()  # keeps long cycles cancel/resume-visible
             except RuntimeError:  # pragma: no cover - no activity context
-                pass
+                logger.debug("Think heartbeat skipped outside activity context")
         result = event.get("result", result)
     return str(result).strip() if result is not None else ""
 

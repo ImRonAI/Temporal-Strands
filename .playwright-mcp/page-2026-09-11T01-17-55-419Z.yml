@@ -1,0 +1,37 @@
+- generic [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: v0 / studio
+      - navigation [ref=e75]:
+        - button "Community" [ref=e76]
+        - button "Pricing" [ref=e77]
+        - button "Enterprise" [ref=e78]
+        - button "Docs" [ref=e79]
+      - generic [ref=e9]:
+        - button "Compare models" [ref=e10] [cursor=pointer]
+        - button "Sign in" [ref=e11]
+        - button "Start building" [ref=e12]
+    - generic [ref=e82]:
+      - log [ref=e83]:
+        - generic [ref=e85]:
+          - paragraph [ref=e90]: A Kanban board with drag and drop
+          - paragraph [ref=e119]: Reply briefly to say you can hear me. Do not inspect, create, or change files; do not use shell, browser, or research tools.
+          - generic [ref=e122]:
+            - button "Chain of Thought" [expanded] [ref=e146]
+            - paragraph [ref=e148]: I can hear you.
+          - paragraph [ref=e153]: Use list_agent_models to check the live catalog and tell me whether openai/gpt-6-astra is available. Base the answer on the tool result. Do not use shell, filesystem, browser, or delegation tools; do not inspect or change project files.
+          - paragraph [ref=e187]: Retry the catalog check that failed before submission. Use list_agent_models and report whether openai/gpt-6-astra is in its actual result. Do not use shell, filesystem, browser, or delegation tools and do not access project files.
+          - generic [ref=e191]:
+            - button "Thinking…" [expanded] [ref=e193]
+            - generic [ref=e205]: Working
+      - group [ref=e98]:
+        - group [ref=e99]
+        - textbox "Ask for a change, or start something new…" [active] [ref=e101]
+        - group [ref=e102]:
+          - generic [ref=e103]:
+            - button [ref=e104]
+            - button "High (preset)" [ref=e105]
+            - button "Web preview" [ref=e109]
+          - button "Stop" [ref=e145]
+  - button "Open Next.js Dev Tools" [ref=e111] [cursor=pointer]
+  - alert [ref=e74]

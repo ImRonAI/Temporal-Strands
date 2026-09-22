@@ -6,28 +6,15 @@ consolidated into this one module at the user's explicit direction. Behavior
 is identical to the source; only the module layout and import paths changed --
 this module never imports the external package.
 
-Extends the official graph tool in exactly two ways: nested formations as
-nodes (``swarm``/``graph``/``workflow``/``parallel``/``skill_agent`` compile
-to the native SDK executors ``GraphBuilder.add_node`` already accepts), and
-async streaming (``execute`` yields every native ``multiagent_*`` event from
+The only extension past ``strands_tools.graph`` is async streaming:
+``execute`` yields every native ``multiagent_*`` event from
 ``Graph.stream_async``; the final yield is the official ``{"status",
-"content"}`` result).
+"content"}`` result. Nodes are agents. There is no node ``type``.
 
-Model selection is by registered **model id**, never by provider. The
-application registers named model factories (the same mapping Temporal's
-``StrandsPlugin(models=...)`` receives) via :func:`configure_models`; a node
-that names ``model_id`` gets ``factories[model_id]()``, and every other node
-inherits the parent agent's model -- the official tool's inheritance rule.
-The official ``model_provider``/``model_settings`` knobs are intentionally
-absent: they build models from provider names and environment variables,
-which bypasses the application's provider entirely.
-
-``skill_agent`` nodes build a skill's isolated sub-agent EXACTLY as the
-vendored use_skill tool does (agentskills/tool/agent_skill.py): validate the
-name, load SKILL.md instructions, and call ``_create_skill_agent`` -- which
-injects the skill's references/ and scripts/ paths via ``build_skill_header``.
-The resulting Agent participates directly in a Graph or Swarm: the SDK's
-agents-as-nodes pattern, no wrapper.
+Model selection is ``model_settings.model_id``, a registered factory name
+(Temporal ``model=``), via :func:`configure_models`. Omit it and the node
+inherits the parent model. ``model_provider`` is not called: ``create_model``
+builds a provider from the environment and bypasses the worker factories.
 """
 
 from __future__ import annotations
@@ -38,7 +25,6 @@ from typing import Any, AsyncIterator, Callable, Dict, List, Mapping, Optional
 
 from strands import Agent, tool
 from strands.models import Model
-from strands.multiagent import Swarm
 from strands.multiagent.graph import Graph, GraphBuilder
 
 logger = logging.getLogger(__name__)
@@ -76,20 +62,43 @@ def configure_models(model_factories: Mapping[str, Callable[[], Model]]) -> None
     _model_factories.update(model_factories)
 
 
-def resolve_model(model_id: Optional[str], parent_agent: Optional[Agent]) -> Optional[Model]:
-    """The model for one node: its ``model_id`` factory, else the parent's model.
+def _inherited_model_id(parent_agent: Optional[Agent]) -> Optional[str]:
+    """The registered factory name on the parent model, if it has one."""
+    if not parent_agent or parent_agent.model is None:
+        return None
+    getter = getattr(parent_agent.model, "get_config", None)
+    if not callable(getter):
+        return None
+    config = getter() or {}
+    inherited = config.get("model_id")
+    return inherited if isinstance(inherited, str) and inherited else None
 
-    Raises ``ValueError`` listing the registered ids when ``model_id`` is not
-    registered, so a bad id fails at create rather than silently inheriting.
+
+def resolve_model(model_id: Optional[str], parent_agent: Optional[Agent]) -> Optional[Model]:
+    """The model for one node: its ``model_id`` factory, else a new parent factory.
+
+    Official ``GraphManager.create_graph`` inherits ``parent.model`` when the
+    node names no provider. Skill Rule 1: we inherit the registered factory
+    *name* and construct a fresh instance. ``PerplexityModel`` is stateful
+    (``store=True``); parallel nodes cannot share one instance.
+
+    Blank means omit — inherit. Raises ``ValueError`` listing the registered
+    ids when ``model_id`` is not registered, so a bad id fails at create
+    rather than silently inheriting.
     """
-    if model_id is None:
+    from subagent_support import in_process_model
+
+    if not model_id:
+        inherited = _inherited_model_id(parent_agent)
+        if inherited and inherited in _model_factories:
+            return in_process_model(_model_factories[inherited]())
         return parent_agent.model if parent_agent else None
     factory = _model_factories.get(model_id)
     if factory is None:
         raise ValueError(
             f"Unknown model_id {model_id!r}; registered: {sorted(_model_factories)}"
         )
-    return factory()
+    return in_process_model(factory())
 
 
 def configure_skills(
@@ -126,6 +135,10 @@ def build_skill_agent(
     exactly those names is added to ``additional_tools`` and the scoped
     catalog prompt is appended to the sub-agent's system prompt, so it loads
     their instructions into its own context — never a nested sub-agent.
+
+    A node ``tools`` list assigns those parent-registry tools to the
+    sub-agent (the official ``create_agent_with_model`` filter rule) on top
+    of the configured skill sandbox tools.
     """
     try:
         from agentskills.parser import load_instructions
@@ -147,6 +160,11 @@ def build_skill_agent(
     resolved = model or _skill_model or (parent_agent.model if parent_agent else None)
     assigned = node_def.get("skills") or []
     tools = list(_skill_tools or [])
+    if node_def.get("tools"):
+        have = {_tool_name(t) for t in tools}
+        tools.extend(
+            t for t in _select_tools(parent_agent, node_def["tools"]) if _tool_name(t) not in have
+        )
     if assigned:
         from skills_config import create_inline_skill_tool, skills_prompt
 
@@ -160,10 +178,6 @@ def build_skill_agent(
     return agent
 
 
-# Tool names that expose the Agent Skills catalog (reference patterns 2 & 3).
-_SKILL_TOOL_NAMES = frozenset({"use_skill", "skill"})
-
-
 def _tool_name(tool_obj: Any) -> str:
     name = getattr(tool_obj, "tool_name", None)
     if isinstance(name, str) and name:
@@ -174,28 +188,13 @@ def _tool_name(tool_obj: Any) -> str:
     return str(getattr(tool_obj, "__name__", "") or "").rpartition(".")[2]
 
 
-def _skills_prompt() -> str:
-    """The reference Phase-1 catalog prompt for agents that carry skill tools.
-
-    Exactly ``agentskills.generate_skills_prompt`` over the configured skills
-    registry — the aws-samples example-3 wiring, where the agent owning
-    ``use_skill`` gets ``f"{base_prompt}\\n\\n{skills_prompt}"`` so it can only
-    name skills that actually exist.
-    """
-    if not _skills:
-        return ""
-    try:
-        from agentskills import generate_skills_prompt
-    except ImportError:
-        return ""
-    return generate_skills_prompt(list(_skills.values()))
-
-
 def _select_tools(
     parent_agent: Optional[Agent], tools: Optional[List[str]]
 ) -> List[Any]:
-    """The official create_agent_with_model tool rule: named subset of the
-    parent's registry, or the whole registry when no names are given."""
+    """Official ``create_agent_with_model``: named subset, or the whole registry.
+
+    Unknown names log the official warning. They are not imported.
+    """
     if not parent_agent or not parent_agent.tool_registry:
         return []
     registry = parent_agent.tool_registry.registry
@@ -210,111 +209,65 @@ def _select_tools(
     return selected
 
 
+def _node_model_id(node_def: Dict[str, Any], model_id: Optional[str]) -> Optional[str]:
+    """Official ``model_settings.model_id``, else the formation default.
+
+    Blank and ``"/"`` are omission. ``model_provider`` is not a factory name.
+    """
+    settings = node_def.get("model_settings") or {}
+    if not isinstance(settings, dict):
+        settings = {}
+    chosen = settings.get("model_id") or model_id
+    if not chosen or chosen == "/":
+        return None
+    return str(chosen)
+
+
 def _build_agent(
     node_def: Dict[str, Any],
     parent_agent: Optional[Agent],
     model_id: Optional[str],
     tools: Optional[List[str]],
 ) -> Agent:
-    """Build one agent node: registered model by id (or inherited), parent tools.
+    """Official ``GraphManager.create_graph`` agent branch.
 
-    When the node carries a skill tool (``use_skill`` / ``skill``), the skills
-    catalog prompt (``agentskills.generate_skills_prompt``) is appended to its
-    system prompt exactly as the reference example-3 agent does — without it
-    the node's model has no ``<available_skills>`` list and invents skill
-    names, which is how the parallel ``use_skill`` calls failed with
-    ``SkillNotFoundError: Skill 'pplx_sdk' not found``.
+    A node is an agent: ``id``, ``role``, ``system_prompt``, optional ``tools``,
+    optional ``model_settings.model_id``. When ``model_settings`` or
+    ``model_provider`` is set, ``create_agent_with_model`` filters
+    ``parent.tool_registry`` by the tool names. Otherwise the node inherits
+    ``parent.model`` and every parent-registry tool, and a node ``tools`` list
+    is not applied.
     """
-    selected = _select_tools(parent_agent, node_def.get("tools") or tools)
-    system_prompt = node_def["system_prompt"]
-    if any(_tool_name(t) in _SKILL_TOOL_NAMES for t in selected):
-        catalog = _skills_prompt()
-        if catalog:
-            system_prompt = f"{system_prompt}\n\n{catalog}"
+    kind = node_def.get("type", "agent")
+    if kind != "agent":
+        raise ValueError(
+            f"Unknown node type: {kind!r}. Graph nodes are agents "
+            "(id, role, system_prompt, optional tools, optional model_settings)."
+        )
+    settings = node_def.get("model_settings") or {}
+    has_model = bool(node_def.get("model_provider") or settings or model_id)
+    if has_model:
+        selected = _select_tools(parent_agent, node_def.get("tools") or tools)
+        resolved = resolve_model(_node_model_id(node_def, model_id), parent_agent)
+    else:
+        selected = (
+            list(parent_agent.tool_registry.registry.values())
+            if parent_agent and parent_agent.tool_registry
+            else []
+        )
+        resolved = resolve_model(None, parent_agent)
+    extra: Dict[str, Any] = {}
+    if parent_agent:
+        extra["callback_handler"] = parent_agent.callback_handler
+        extra["trace_attributes"] = parent_agent.trace_attributes
     agent = Agent(
-        system_prompt=system_prompt,
-        model=resolve_model(node_def.get("model_id") or model_id, parent_agent),
+        system_prompt=node_def["system_prompt"],
+        model=resolved,
         tools=selected,
-        callback_handler=parent_agent.callback_handler if parent_agent else None,
-        trace_attributes=parent_agent.trace_attributes if parent_agent else None,
+        **extra,
     )
-    # Swarm requires uniquely named members; Graph node ids also read name.
     agent.name = node_def["id"]
     return agent
-
-
-def _build_executor(
-    node_def: Dict[str, Any],
-    parent_agent: Optional[Agent],
-    model_id: Optional[str],
-    tools: Optional[List[str]],
-):
-    """Compile one topology node to a native SDK executor."""
-    kind = node_def.get("type", "agent")
-
-    if kind == "agent":
-        return _build_agent(node_def, parent_agent, model_id, tools)
-
-    if kind == "skill_agent":
-        # The skill's isolated sub-agent, built by the vendored use_skill
-        # path, participating directly as a formation node.
-        return build_skill_agent(
-            node_def, parent_agent, resolve_model(node_def.get("model_id") or model_id, parent_agent)
-        )
-
-    if kind == "swarm":
-        # Native Swarm takes list[Agent] only (Graph nests, Swarm does not).
-        members = [
-            build_skill_agent(
-                member, parent_agent, resolve_model(member.get("model_id") or model_id, parent_agent)
-            )
-            if member.get("type") == "skill_agent"
-            else _build_agent(member, parent_agent, model_id, tools)
-            for member in node_def["agents"]
-        ]
-        return Swarm(members)
-
-    if kind == "graph":
-        # Nested Graph as a node is native (GraphBuilder.add_node accepts it).
-        return build_graph(node_def, parent_agent, model_id, tools)
-
-    if kind == "workflow":
-        # Workflow compiles to a nested Graph: task dependencies become edges.
-        # A task carrying "skill" becomes a skill_agent node; any other task
-        # becomes an agent node, exactly as before.
-        nested = {
-            "nodes": [
-                {
-                    "id": task["task_id"],
-                    "type": "skill_agent",
-                    "skill": task["skill"],
-                    **({"skills": task["skills"]} if task.get("skills") else {}),
-                }
-                if "skill" in task
-                else {
-                    "id": task["task_id"],
-                    "system_prompt": task.get("system_prompt")
-                    or task["description"],
-                    **{key: task[key] for key in ("model_id", "tools") if key in task},
-                }
-                for task in node_def["tasks"]
-            ],
-            "edges": [
-                {"from": dep, "to": task["task_id"]}
-                for task in node_def["tasks"]
-                for dep in task.get("dependencies", [])
-            ],
-        }
-        return build_graph(nested, parent_agent, model_id, tools)
-
-    if kind == "parallel":
-        # Parallel agents compile to a nested Graph of sibling entry nodes.
-        nested = {"nodes": list(node_def["agents"]), "edges": []}
-        return build_graph(nested, parent_agent, model_id, tools)
-
-    raise ValueError(
-        f"Unknown node type: {kind!r}. Valid: agent, skill_agent, swarm, graph, workflow, parallel"
-    )
 
 
 def build_graph(
@@ -323,16 +276,11 @@ def build_graph(
     model_id: Optional[str] = None,
     tools: Optional[List[str]] = None,
 ) -> Graph:
-    """Build a native Graph from a (possibly nested) topology.
-
-    Mirrors the official GraphManager.create_graph construction, with
-    ``_build_executor`` in place of the agent-only branch. ``model_id`` is
-    the formation-wide default a node may override with its own ``model_id``.
-    """
+    """Official ``GraphManager.create_graph``: one Agent per node, then edges."""
     builder = GraphBuilder()
     for node_def in topology["nodes"]:
         builder.add_node(
-            _build_executor(node_def, parent_agent, model_id, tools),
+            _build_agent(node_def, parent_agent, model_id, tools),
             node_def["id"],
         )
     for edge in topology.get("edges", []):
@@ -359,12 +307,58 @@ class GraphManager:
                 "created_at": time.time(),
                 "node_count": len(topology["nodes"]),
                 "edge_count": len(topology.get("edges", [])),
+                "entry_points": list(topology.get("entry_points") or []),
                 "topology": topology,
+                "last_execution": None,
             },
         }
         return {
             "status": "success",
             "message": f"Graph {graph_id} created successfully with {len(topology['nodes'])} nodes",
+        }
+
+    def status(self, graph_id: str) -> Dict[str, Any]:
+        """Official ``GraphManager.get_graph_status``."""
+        if graph_id not in self.graphs:
+            return {"status": "error", "message": f"Graph {graph_id} not found"}
+        metadata = self.graphs[graph_id]["metadata"]
+        topology = metadata["topology"]
+        nodes = []
+        for node_def in topology["nodes"]:
+            dependencies = [
+                edge["from"]
+                for edge in topology.get("edges", [])
+                if edge["to"] == node_def["id"]
+            ]
+            tools = node_def.get("tools")
+            nodes.append({
+                "id": node_def["id"],
+                "role": node_def.get("role") or node_def["id"],
+                "model_provider": node_def.get("model_provider", "default"),
+                "tools_count": len(tools) if tools else "default",
+                "dependencies": dependencies,
+            })
+        return {
+            "status": "success",
+            "data": {
+                "graph_id": graph_id,
+                "total_nodes": metadata["node_count"],
+                "entry_points": [{"node_id": ep} for ep in metadata["entry_points"]],
+                "execution_status": "ready",
+                "last_execution": metadata.get("last_execution"),
+                "nodes": nodes,
+            },
+        }
+
+    def record_execution(self, graph_id: str, task: str, result: Any, execution_time: int) -> None:
+        metadata = self.graphs[graph_id]["metadata"]
+        metadata["last_execution"] = {
+            "task": task,
+            "status": result.status.value,
+            "completed_nodes": result.completed_nodes,
+            "failed_nodes": result.failed_nodes,
+            "execution_time": execution_time,
+            "timestamp": time.time(),
         }
 
     def delete(self, graph_id: str) -> Dict[str, Any]:
@@ -387,53 +381,25 @@ async def graph(
     tools: Optional[List[str]] = None,
     agent: Optional[Any] = None,
 ) -> AsyncIterator[Any]:
-    """Create and execute multi-agent graphs with nested formations and streaming.
+    """Official ``strands_tools.graph`` topology, streamed.
 
-    Same actions and topology format as the official graph tool, plus nested
-    node types. "execute" streams every native multiagent event before the
-    final result.
+    Actions: create, execute, status, list, delete. A node is an agent:
 
-    Choosing a node "type" (default "agent"):
-    - "agent": one specialist doing one job. Fields: id, system_prompt,
-      optional model_id/tools. Exactly 1 agent.
-    - "skill_agent": a registered skill's isolated sub-agent as a node
-      (built exactly like use_skill builds it, references/scripts paths
-      included). Fields: id, skill (registered skill name). Also valid
-      inside swarm "agents" lists. Requires configure_skills(...) at app
-      setup; unknown skill names fail at create.
-    - "swarm": specialists that should hand off to EACH OTHER dynamically
-      (exploration, debate, collaborative research -- no fixed order).
-      Fields: id, agents (list of agent nodes ONLY, no nesting; each needs
-      a unique id). Use 2-5 agents; the SDK caps runs at 20 handoffs / 20
-      iterations by default.
-    - "graph": a nested deterministic pipeline as one node (recursive:
-      its nodes may themselves be any type). Fields: id, nodes, edges.
-    - "workflow": a task list with dependencies -- tasks run in dependency
-      order, independent tasks run in parallel. Fields: id, tasks (each
-      task: task_id, description, optional dependencies/system_prompt/
-      model_id/tools; a task with "skill" runs that registered skill's
-      sub-agent instead). One agent per task.
-    - "parallel": independent fan-out -- all listed agents run at once with
-      the same input. Fields: id, agents (list of agent or skill_agent
-      nodes). One agent per entry, no ordering.
-    Rule of thumb: known order -> graph/workflow edges; unknown order ->
-    swarm; same input to N specialists at once -> parallel.
+        {"id", "role", "system_prompt",
+         "model_settings": {"model_id"} (optional),
+         "tools": [registry names] (optional)}
 
-    Using skills: give a node the skill sub-agent tool by name, e.g.
-    {"id": "coder", "system_prompt": "...", "tools": ["use_skill"]}.
-    The node's agent then calls use_skill(skill_name=..., request=...) to
-    run that skill in an isolated sub-agent (its references/ and scripts/
-    paths are injected into the sub-agent's prompt). The parent agent that
-    owns this graph tool must also have the use_skill tool registered --
-    node "tools" lists are filtered from the parent's tool registry.
-    Omitting "tools" on a node inherits ALL parent tools (official
-    behavior); list exact tool names to scope a node down.
+    ``model_settings.model_id`` is a registered factory name (Temporal
+    ``model=``). Omit it to inherit the parent model and every parent-registry
+    tool. There is no node ``type``. Edges express order; parallel execution
+    is whatever the SDK schedules from those edges.
 
     Args:
-        action: "create", "execute", "list", or "delete".
+        action: "create", "execute", "status", "list", or "delete".
         graph_id: Unique identifier for the graph.
-        topology: Graph topology (required for create); official format with
-            the optional per-node "type" extension described above.
+        topology: Official topology. Nodes are agents. Edges are {"from", "to"}.
+            ``stream_async`` emits ``multiagent_handoff`` on each batch
+            transition (``from_node_ids`` / ``to_node_ids``).
         task: Task to execute through the graph (required for execute).
         model_id: Default registered model id for agents in the graph; nodes
             may override with their own model_id. Omit to inherit the parent
@@ -474,6 +440,8 @@ async def graph(
                     result = event["result"]
                 yield event
             execution_time = round((time.time() - start_time) * 1000)
+            if result is not None:
+                _manager.record_execution(graph_id, task, result, execution_time)
             if result is None:
                 yield {"status": "error", "content": [{"text": f"Graph {graph_id} produced no result"}]}
                 return
@@ -489,6 +457,17 @@ async def graph(
                     *({"text": text} for text in results_text),
                 ],
             }
+            return
+
+        if action == "status":
+            if not graph_id:
+                yield {"status": "error", "content": [{"text": "graph_id is required for status action"}]}
+                return
+            result = _manager.status(graph_id)
+            if result["status"] == "error":
+                yield {"status": "error", "content": [{"text": result["message"]}]}
+                return
+            yield {"status": "success", "content": [{"text": str(result["data"])}]}
             return
 
         if action == "list":
@@ -507,7 +486,7 @@ async def graph(
             yield {"status": result["status"], "content": [{"text": result["message"]}]}
             return
 
-        yield {"status": "error", "content": [{"text": f"Unknown action: {action}. Valid actions: create, execute, list, delete"}]}
+        yield {"status": "error", "content": [{"text": f"Unknown action: {action}. Valid actions: create, execute, status, list, delete"}]}
     except Exception as exc:  # noqa: BLE001 -- tool boundary, official tool does the same
         logger.error("graph tool error: %s", exc, exc_info=True)
         yield {"status": "error", "content": [{"text": f"⚠️ Graph Error: {exc}"}]}

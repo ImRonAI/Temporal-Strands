@@ -54,7 +54,6 @@ from catalog_workflow import ModelCatalogWorkflow, model_catalog, set_catalog
 from compare_workflow import CompareWorkflow
 from config import (
     BUILTIN_SKILLS,
-    CONNECTORS,
     DEFAULT_MODEL_ID,
     GEMINI_MAX_OUTPUT_TOKENS,
     GEMINI_MODEL_IDS,
@@ -84,6 +83,9 @@ from workflow import ChatWorkflow, mcp_client_factories
 _ROOT = Path(__file__).resolve().parent
 load_dotenv(_ROOT.parent / ".env.local", override=False)
 os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
+# Official strands_tools.file_write / editor / shell consent skip.
+# STRANDS_NON_INTERACTIVE does not disable file_write's [y/*] prompt.
+os.environ.setdefault("BYPASS_TOOL_CONSENT", "true")
 
 logger = logging.getLogger(__name__)
 
@@ -172,25 +174,10 @@ def build_perplexity_factories(
     the closure and never enters model configuration or workflow state.
     """
     tools = native_tools()
-    connector_labels = [
-        tool["server_label"] for tool in tools if tool.get("type") == "connector"
-    ]
-    if connector_labels:
-        logger.warning(
-            "Configured Agent API connectors: %s; authorization status unverified "
-            "(no public connector list/status endpoint). An API Group administrator "
-            "must verify connections at https://console.perplexity.ai/group/connectors",
-            connector_labels,
-        )
-    missing_labels = [
-        connector["server_label"] for connector in CONNECTORS
-        if connector["server_label"] not in connector_labels
-    ]
-    if missing_labels:
-        logger.warning(
-            "Connector configuration missing from explicit PERPLEXITY_CONNECTOR_IDS selection: %s. "
-            "Other configured connectors and tools remain enabled.", missing_labels,
-        )
+    logger.info(
+        "Registered Agent API connectors: %s",
+        [tool["server_label"] for tool in tools if tool.get("type") == "connector"],
+    )
     registered_ids = [*PRESET_MODEL_IDS, *model_ids]
     factories = {
         # PerplexityModel pins base_url to PERPLEXITY_API_BASE and
@@ -300,8 +287,7 @@ async def assemble_model_factories() -> tuple[
     appears exactly once with its worker-declared provider.
     Graceful startup: a missing Perplexity key skips Perplexity with a warning;
     a catalog fetch failure keeps the six preset factories; a missing Google
-    key skips Gemini. Missing connector configuration warns without disabling
-    other tools. Malformed explicit configuration fails before registration.
+    key skips Gemini. SystemExit only when no factories remain.
     """
     factories: dict[str, Callable[[], Any]] = {}
     catalog: list[RegisteredModel] = []
@@ -313,12 +299,6 @@ async def assemble_model_factories() -> tuple[
             "PERPLEXITY_API_KEY is not set; skipping Perplexity model factories"
         )
     else:
-        # Validate operator setup before catalog I/O or any factory registration.
-        # Connector IDs alone cannot establish API Group authorization.
-        try:
-            connector_tools()
-        except ValueError as error:
-            raise SystemExit(str(error)) from error
         catalog_ids: list[str] = []
         try:
             catalog_ids = await fetch_model_ids(perplexity_key)
@@ -527,7 +507,6 @@ async def main() -> None:
     # the worker default here would stop skill_agent nodes from inheriting
     # the live session model the graph activity resolves per run.
     skill_count = ensure_skills_configured(None)
-
     logger.info(
         "Worker up on %r agent=%s default_model=%s models=%d skills=%s skills_dir=%s mcp_servers=%s",
         TASK_QUEUE,
@@ -545,8 +524,8 @@ async def main() -> None:
             try:
                 from strands_tools.mcp_client import mcp_client
                 mcp_client(action="disconnect", connection_id=name)
-            except Exception:
-                pass
+            except Exception as error:
+                logger.warning("MCP disconnect failed for %s: %s", name, error)
 
 
 if __name__ == "__main__":

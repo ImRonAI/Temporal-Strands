@@ -19,6 +19,7 @@ these functions. File creation remains unexposed pending runtime write policy.
 
 import errno
 import hashlib
+import logging
 import os
 import stat
 import time
@@ -318,10 +319,12 @@ def create_project_file(root_fd: int, staging_fd: int, path: str, text: str) -> 
             if created:
                 try:
                     os.unlink(temporary, dir_fd=staging_fd)
-                except OSError:
+                except OSError as error:
                     # Private staging cleanup is best-effort; never unlink the
                     # destination, which may already be an acknowledged file.
-                    pass
+                    logging.getLogger(__name__).warning(
+                        "Private staging cleanup failed: %s", error
+                    )
     return {"path": path, "sha256": hashlib.sha256(content).hexdigest(), "byte_size": len(content)}
 
 

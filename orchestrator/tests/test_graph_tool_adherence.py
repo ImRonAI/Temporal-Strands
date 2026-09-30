@@ -201,7 +201,7 @@ def test_activity_as_tool_produces_structural_graph_spec() -> None:
     defs = schema["$defs"]
     assert {"GraphTopology", "GraphNode", "GraphEdge", "GraphModelSettings"} <= set(defs)
     node_props = defs["GraphNode"]["properties"]
-    assert set(node_props) == {"id", "role", "system_prompt", "model_settings", "tools"}
+    assert set(node_props) == {"id", "role", "system_prompt", "model_settings", "tools", "skills"}
     assert "nodes" in defs["GraphTopology"]["properties"]
 
     # task is a plain string parameter.

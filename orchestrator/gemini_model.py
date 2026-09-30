@@ -17,6 +17,8 @@ import base64
 import json
 import mimetypes
 from collections.abc import AsyncGenerator
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any
 
 from google import genai
@@ -195,9 +197,23 @@ class _GroundingTapClient:
         return getattr(self._client, name)
 
 
+@dataclass
+class _Invocation:
+    """Per-turn stream state: reasoning effort and the grounding tap sink."""
+
+    grounding: dict[str, Any] = field(default_factory=dict)
+    effort: str | None = None
+
+
 class GeminiModel(_GeminiModel):
-    _reasoning_effort: str | None = None
-    _grounding: dict[str, Any]
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        # Temporal's ModelActivity caches one model instance per name per
+        # worker. Per-turn effort and grounding must not leak across
+        # concurrent sessions sharing that instance.
+        self._invocation: ContextVar[_Invocation | None] = ContextVar(
+            "gemini_invocation", default=None
+        )
+        super().__init__(*args, **kwargs)
 
     def _format_request_content(self, messages: Messages) -> list[genai.types.Content]:
         contents = super()._format_request_content(messages)
@@ -276,6 +292,14 @@ class GeminiModel(_GeminiModel):
                     mime_type=mime,
                 ),
             )
+        if "document" in content:
+            fmt = content["document"]["format"]
+            return genai.types.Part(
+                inline_data=genai.types.Blob(
+                    data=_blob_bytes(content["document"]["source"]["bytes"]),
+                    mime_type=mimetypes.types_map.get(f".{fmt}", "application/octet-stream"),
+                ),
+            )
         if "video" in content:
             fmt = content["video"]["format"]
             mime = mimetypes.types_map.get(f".{fmt}", f"video/{fmt}")
@@ -322,7 +346,8 @@ class GeminiModel(_GeminiModel):
 
         https://ai.google.dev/gemini-api/docs/thinking#set-budget
         """
-        effort = self._reasoning_effort
+        state = self._invocation.get()
+        effort = state.effort if state is not None else None
         if effort is not None:
             thinking = (params or {}).get("thinking_config") or {}
             if isinstance(thinking, genai.types.ThinkingConfig):
@@ -334,9 +359,11 @@ class GeminiModel(_GeminiModel):
         return super()._format_request_config(tool_specs, system_prompt, params)
 
     def _get_client(self) -> genai.Client:
-        if not hasattr(self, "_grounding"):
-            self._grounding = {}
-        return _GroundingTapClient(super()._get_client(), sink=self._grounding)  # type: ignore[return-value]
+        state = self._invocation.get()
+        # Outside a stream turn (e.g. structured_output) no one consumes the
+        # sink; the tap writes into a throwaway dict.
+        sink = state.grounding if state is not None else {}
+        return _GroundingTapClient(super()._get_client(), sink=sink)  # type: ignore[return-value]
 
     async def stream(
         self,
@@ -351,21 +378,24 @@ class GeminiModel(_GeminiModel):
         # drops (candidates[0].grounding_metadata — the last stream event is
         # often usage-only), and we append it as trailing {"gemini": …} frames.
         # https://ai.google.dev/gemini-api/docs/generate-content/maps-grounding
-        self._reasoning_effort = (kwargs.get("invocation_state") or {}).get("reasoning_effort")
-        if (kwargs.get("invocation_state") or {}).get("require_think"):
-            tool_choice = {"tool": {"name": "think"}}
-        self._grounding = {}
+        # A fresh sink per turn: a replayed activity attempt or a concurrent
+        # session on the same cached instance must not surface the previous
+        # turn's grounding frames or effort.
+        state = _Invocation(
+            effort=(kwargs.get("invocation_state") or {}).get("reasoning_effort")
+        )
+        token = self._invocation.set(state)
         try:
             async for chunk in super().stream(
                 messages, tool_specs, system_prompt, tool_choice, **kwargs
             ):
                 yield chunk
-            if search := self._grounding.get("search"):
+            if search := state.grounding.get("search"):
                 yield {"gemini": search}  # type: ignore[typeddict-item]
-            if maps := self._grounding.get("maps"):
+            if maps := state.grounding.get("maps"):
                 yield {"gemini": maps}  # type: ignore[typeddict-item]
         finally:
-            self._reasoning_effort = None
+            self._invocation.reset(token)
 
 
 __all__ = ["GeminiModel", "maps_from_grounding", "search_from_grounding"]

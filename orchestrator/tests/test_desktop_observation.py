@@ -338,7 +338,7 @@ def test_latest_result_missing_observation_cannot_reuse_old_pixels(artifact_stor
     ref = store_image()
     messages = [
         {"role": "assistant", "content": [
-            {"toolUse": {"toolUseId": call_id, "name": "browser", "input": {}}} for call_id in ("old", "new")
+            {"toolUse": {"toolUseId": call_id, "name": "take_screenshot", "input": {}}} for call_id in ("old", "new")
         ]},
         {"role": "user", "content": [
             {"toolResult": {"toolUseId": "old", "status": "success", "content": [
@@ -355,6 +355,40 @@ def test_latest_result_missing_observation_cannot_reuse_old_pixels(artifact_stor
         desktop_observation.latest_observation(messages)
     messages[-1]["content"][-1]["toolResult"]["status"] = "error"
     assert desktop_observation.latest_observation(messages) is None
+
+
+def test_browser_screenshot_result_exposes_its_observation(artifact_store):
+    ref = store_image()
+    messages = [
+        {"role": "assistant", "content": [{"toolUse": {"toolUseId": "shot", "name": "browser", "input": {}}}]},
+        {"role": "user", "content": [{"toolResult": {"toolUseId": "shot", "status": "success", "content": [
+            {"text": json.dumps({"status": "success",
+                                 "content": [{"text": "Screenshot saved as screenshots/x.png"}],
+                                 "observation": ref.model_dump(mode="json")})},
+        ]}}]},
+    ]
+    assert desktop_observation.latest_observation(messages) == ("shot", "browser", ref)
+
+
+def test_later_browser_action_without_observation_invalidates_older_pixels(artifact_store):
+    ref = store_image()
+    screenshot = [
+        {"role": "assistant", "content": [{"toolUse": {"toolUseId": "shot", "name": "browser", "input": {}}}]},
+        {"role": "user", "content": [{"toolResult": {"toolUseId": "shot", "status": "success", "content": [
+            {"text": json.dumps({"status": "success", "observation": ref.model_dump(mode="json")})},
+        ]}}]},
+    ]
+    navigate = [
+        {"role": "assistant", "content": [{"toolUse": {"toolUseId": "nav", "name": "browser", "input": {}}}]},
+        {"role": "user", "content": [{"toolResult": {"toolUseId": "nav", "status": "success", "content": [
+            {"text": json.dumps({"status": "success", "content": [{"text": "Navigated to https://example.com"}]})},
+        ]}}]},
+    ]
+    # Non-screenshot browser results legitimately carry no observation; the
+    # page may have changed, so the earlier pixels are not reused. No raise.
+    assert desktop_observation.latest_observation(screenshot + navigate) is None
+    navigate[-1]["content"][0]["toolResult"]["status"] = "error"
+    assert desktop_observation.latest_observation(screenshot + navigate) is None
 
 
 def test_think_evidence_exposes_actual_child_screenshot_to_parent_model(artifact_store):

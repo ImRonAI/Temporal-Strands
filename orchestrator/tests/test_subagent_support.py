@@ -8,6 +8,7 @@ TemporalAgent cannot cross the activity boundary (skill Pattern 2).
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 from typing import Any, AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -18,6 +19,77 @@ from strands.models.model import Model
 from graph_tool import _select_tools, _tool_name
 from load_tool import STRANDS_TOOLS_DIR
 from subagent_support import agent_workspace, parent_agent, workspace_task_prefix
+
+
+def test_stream_projection_preserves_evidence_without_mutating_sdk_state():
+    from subagent_support import publishable
+
+    current = {"toolUseId": "t1", "name": "write", "input": '{"content":"large"}'}
+    event = {"type": "tool_use_stream", "current_tool_use": current,
+             "delta": {"toolUse": {"input": "large"}}, "request_state": {"prompt": "private"}}
+    assert publishable(event, agent_event=True) == {
+        "type": "tool_use_stream", "current_tool_use": {"toolUseId": "t1", "name": "write"}}
+    assert event["current_tool_use"] is current
+    assert current["input"] == '{"content":"large"}'
+    assert event["delta"]["toolUse"]["input"] == "large"
+    # Do not strip legitimate result fields just because their names match runtime state.
+    result = {"type": "tool_result", "tool_result": {"content": [{"json": {
+        "messages": ["evidence"], "request_state": "failed", "system_prompt": "generated"}}]}}
+    assert publishable(result, agent_event=True) == result
+    for frame in ({"reasoningText": "analysis", "reasoning": True},
+                  {"event": {"perplexity": {"type": "response.reasoning.started", "thought": "searching"}}},
+                  {"event": {"gemini": {"type": "google_search", "queries": ["q"]}}}):
+        assert publishable(frame, agent_event=True) == frame
+
+
+@pytest.mark.asyncio
+async def test_native_tool_stream_storage_grows_linearly():
+    from strands import Agent, tool
+    from graph_activity import flatten_native_event
+    from subagent_support import sanitize_stream_payload
+    from test_graph_activity import ScriptedModel, text_events
+
+    @tool
+    def accept_content(content: str) -> str:
+        """Accept generated content without writing it."""
+        return str(len(content))
+
+    class ContentModel(ScriptedModel):
+        def __init__(self, chunks):
+            super().__init__()
+            self.chunks = chunks
+
+        async def stream(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls > 1:
+                for event in text_events("finished"):
+                    yield event
+                return
+            yield {"messageStart": {"role": "assistant"}}
+            yield {"contentBlockStart": {"start": {"toolUse": {"toolUseId": "call-1", "name": "accept_content"}}}}
+            for part in ['{"content":"', *(["x" * 100] * self.chunks), '"}']:
+                yield {"contentBlockDelta": {"delta": {"toolUse": {"input": part}}}}
+            yield {"contentBlockStop": {}}
+            yield {"messageStop": {"stopReason": "tool_use"}}
+
+    sizes = []
+    for chunks in (200, 400):
+        graph_frames, agent_frames = [], []
+        async for event in Agent(model=ContentModel(chunks), tools=[accept_content], callback_handler=None).stream_async("Generate content"):
+            graph_frames.extend(flatten_native_event({"type": "multiagent_node_stream", "node_id": "writer", "event": event}))
+            frame = sanitize_stream_payload({"agent_name": "writer", "event": event}, name_key="agent_name")
+            if frame is not None:
+                agent_frames.append(frame)
+        for events in ([frame["event"] for frame in graph_frames], [frame["event"] for frame in agent_frames]):
+            fragments = [event["event"]["contentBlockDelta"]["delta"]["toolUse"]["input"]
+                         for event in events if "toolUse" in event.get("event", {}).get("contentBlockDelta", {}).get("delta", {})]
+            assert json.loads("".join(fragments)) == {"content": "x" * (chunks * 100)}
+            assert any(event.get("message", {}).get("role") == "user" for event in events)
+            assert any(event.get("data") == "finished" for event in events)
+            assert not any("input" in event.get("current_tool_use", {}) or "event_loop_cycle_span" in event for event in events)
+        sizes.append(sum(len(json.dumps(frame).encode()) for frame in graph_frames + agent_frames))
+    assert sizes[1] < sizes[0] * 2.1
+    assert sizes[1] < 500_000
 
 os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
 os.environ.setdefault("BYPASS_TOOL_CONSENT", "true")
@@ -91,12 +163,12 @@ async def test_select_tools_named_subset_unknown_is_official_warning() -> None:
 
 
 @pytest.mark.asyncio
-async def test_select_tools_omit_inherits_registry() -> None:
+async def test_select_tools_omit_assigns_nothing() -> None:
     loaded = [{"path": CALCULATOR, "name": "calculator"}]
     with patch("subagent_support.activity", _activity_mock(loaded)):
         parent = await parent_agent(SilentModel())
-    selected = _select_tools(parent, None)
-    assert {_tool_name(t) for t in selected} == {"calculator"}
+    assert _select_tools(parent, None) == []
+    assert _select_tools(parent, []) == []
 
 
 @pytest.mark.asyncio

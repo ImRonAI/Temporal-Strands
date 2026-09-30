@@ -167,6 +167,25 @@ def test_d_think_activity_imports_strands_tools_think() -> None:
     )
 
 
+def test_think_is_native_on_temporal_agent_with_hook_activity() -> None:
+    import run_worker
+    import think_activity
+    import workflow
+    from temporalio import activity
+    from temporalio.contrib.strands.workflow import TemporalActivityTool
+
+    # THINK_TOOL is the activity-as-tool binding of the thin @activity.defn
+    # wrapper; the installed strands_tools.think callable lives inside the
+    # activity (workflows block the threads a sync tool needs).
+    assert isinstance(workflow.THINK_TOOL, TemporalActivityTool)
+    assert workflow.THINK_TOOL.tool_name == "think"
+    assert activity._Definition.must_from_callable(think_activity.think).name == "think"
+    assert think_activity.think in run_worker.WORKER_ACTIVITIES
+    tree = _parse(_module_stem_to_path("think_activity"))
+    assert any(module == "strands_tools.think" for module, _ in _imported_names(tree))
+    assert not hasattr(workflow.ChatWorkflow, "_think_context")
+
+
 # ---------------------------------------------------------------------------
 # (e) No ``execute_activity`` Call inside any HookProvider subclass
 # ---------------------------------------------------------------------------

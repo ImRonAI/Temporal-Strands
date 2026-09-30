@@ -215,6 +215,44 @@ async def test_reasoning_effort_maps_to_thinking_level_without_mutating_defaults
     assert thinking["thinking_level"].lower() == effort
     assert thinking["include_thoughts"] is True
     assert model.config["params"]["thinking_config"]["thinking_level"] == "high"
+    assert model._invocation.get() is None
+
+    # The next turn on the same cached instance falls back to the params
+    # default: Temporal's ModelActivity reuses one instance per model name.
+    _ = [event async for event in model.stream([])]
+    thinking = generate.call_args.kwargs["config"]["thinking_config"]
+    assert thinking["thinking_level"].lower() == "high"
+    assert model._invocation.get() is None
+
+
+@pytest.mark.asyncio
+async def test_grounding_frames_do_not_leak_into_the_next_turn_on_one_instance():
+    """A second session on the same cached model instance must not see the
+    previous turn's grounding frames."""
+    current = [_events(_search_grounding())]
+
+    async def generate_content_stream(**kwargs):
+        async def gen():
+            for event in current[0]:
+                yield event
+
+        return gen()
+
+    client = SimpleNamespace(
+        aio=SimpleNamespace(
+            models=SimpleNamespace(generate_content_stream=generate_content_stream)
+        )
+    )
+    model = GeminiModel(client=client, model_id="gemini-3.8-flash")
+
+    first = await _collect(model)
+    assert any("gemini" in frame for frame in first)
+    assert model._invocation.get() is None
+
+    current[0] = _events(None)
+    second = await _collect(model)
+    assert not any("gemini" in frame for frame in second)
+    assert model._invocation.get() is None
 
 
 def test_turn_content_blocks_match_strands_gemini_docs() -> None:
@@ -229,12 +267,24 @@ def test_turn_content_blocks_match_strands_gemini_docs() -> None:
             videos=[TurnVideo(format="mp4", data=base64.b64encode(mp4).decode())],
         )
     )
+    # Base64 text, not bytes: the blocks cross the pydantic JSON converter.
     assert blocks == [
         {"text": "What is this?"},
-        {"image": {"format": "png", "source": {"bytes": png}}},
-        {"document": {"format": "pdf", "source": {"bytes": pdf}}},
-        {"video": {"format": "mp4", "source": {"bytes": mp4}}},
+        {"image": {"format": "png", "source": {"bytes": base64.b64encode(png).decode()}}},
+        {"document": {"format": "pdf", "source": {"bytes": base64.b64encode(pdf).decode()}}},
+        {"video": {"format": "mp4", "source": {"bytes": base64.b64encode(mp4).decode()}}},
     ]
+
+
+def test_gemini_model_decodes_base64_document_bytes() -> None:
+    model = GeminiModel(client_args={"api_key": "test"}, model_id="gemini-3.7-flash")
+    pdf = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3"
+    part = model._format_request_content_part(
+        {"document": {"format": "pdf", "source": {"bytes": base64.b64encode(pdf).decode()}}},
+        {},
+    )
+    assert part.inline_data.data == pdf
+    assert part.inline_data.mime_type == "application/pdf"
 
 
 def test_turn_content_blocks_drop_unsupported_formats() -> None:
@@ -438,7 +488,6 @@ def test_computer_use_function_response_unwraps_temporal_activity_envelope(
         {
             "action": "click",
             "url": "https://example.com",
-            "devtoolsFrontendUrl": "http://localhost:9222/devtools/inspector.html?ws=abc",
         }
     )
     envelope = json.dumps({"status": "success", "content": [{"text": inner}],
@@ -467,12 +516,12 @@ def test_computer_use_function_response_unwraps_temporal_activity_envelope(
     )
     response = contents[-1].parts[0].function_response
     assert response.response["url"] == "https://example.com"
-    assert response.response["devtoolsFrontendUrl"].startswith("http://localhost:9222/")
+    assert "devtoolsFrontendUrl" not in response.response
     assert response.response["action"] == "click"
     assert response.parts[0].inline_data.data == png
 
 
-@pytest.mark.parametrize("name", ["browser", "click", "take_screenshot"])
+@pytest.mark.parametrize("name", ["click", "take_screenshot"])
 def test_gemini_hydrates_only_latest_reference_without_mutating_messages(desktop_image, name):
     ref, png = desktop_image
     old = ref.model_copy(update={"artifact_id": "missing-old-artifact"})
@@ -517,7 +566,7 @@ def test_gemini_rejects_corrupt_reference_instead_of_capturing_host(desktop_imag
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["browser", "click"])
+@pytest.mark.parametrize("name", ["click", "take_screenshot"])
 async def test_gemini_request_contains_stored_pixels_through_parent_stream(desktop_image, name):
     ref, png = desktop_image
     seen = []

@@ -33,7 +33,7 @@ def desktop(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "strands_tools.cursor", None)
     stock = MagicMock()
     stock.browser.return_value = {"status": "success", "content": []}
-    monkeypatch.setattr(cua, "_browser", stock)
+    monkeypatch.setattr(cua, "stock_browser", lambda: stock)
     observation = {"artifact_id": "test-artifact", "desktop_epoch": 123}
     capture = MagicMock(return_value=observation)
     monkeypatch.setattr(cua, "capture_desktop", capture)
@@ -274,7 +274,8 @@ def test_native_activity_signature_filters_only_none_and_preserves_false_and_zer
 
 
 def test_computer_tool_uses_the_same_browser_and_ownership_fence():
-    assert cua._browser is browser._browser
+    assert cua.stock_browser is browser.stock_browser
+    assert cua.stock_browser() is browser._browser
     assert cua.desktop_action is browser.desktop_action
     assert cua.desktop_state is browser.desktop_state
     assert cua.capture_desktop is browser.capture_desktop

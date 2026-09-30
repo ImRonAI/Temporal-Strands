@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest"
 import type { DynamicToolUIPart } from "ai"
 
 import {
-  COMPUTER_USE_TOOL_NAMES, DESKTOP_NOVNC_URL, computerUseFailed,
-  computerUseFields, computerUsePreview, stripComputerUseScreenshot, unwrapToolOutput,
+  COMPUTER_USE_TOOL_NAMES, DESKTOP_FRAMEBUFFER, DESKTOP_NOVNC_URL, computerUseFailed,
+  computerUseFields, computerUsePreview, desktopAspectRatio, stripComputerUseScreenshot, unwrapToolOutput,
 } from "./computer-use"
 
 const observation = {
@@ -115,6 +115,25 @@ describe("computerUsePreview", () => {
   it("does not open for unrelated tools or invent a durable chat ID", () => {
     expect(computerUsePreview([tool("graph")], true).open).toBe(false)
     expect(computerUsePreview(undefined, false).sessionId).toBe("")
+  })
+
+  it("keeps noVNC scaling on so the framebuffer is never cropped or stretched", () => {
+    const url = new URL(DESKTOP_NOVNC_URL)
+    expect(url.pathname).toBe("/vnc.html")
+    expect(url.searchParams.get("resize")).toBe("scale")
+    expect(url.searchParams.get("autoconnect")).toBe("true")
+    expect(url.searchParams.get("reconnect")).toBe("true")
+  })
+
+  it("fits the viewer to the real framebuffer ratio, falling back to the configured display", () => {
+    expect(DESKTOP_FRAMEBUFFER).toEqual({ width: 1440, height: 900 })
+    expect(desktopAspectRatio(null)).toBeCloseTo(1.6)
+    expect(desktopAspectRatio(undefined)).toBeCloseTo(1.6)
+    expect(desktopAspectRatio({ ...observation, mime_type: "image/png", width: 1920, height: 1080 })).toBeCloseTo(16 / 9)
+    // The verified observation from the latest action wins over the default.
+    const preview = computerUsePreview([tool("browser", wrapped({ action: "screenshot",
+      observation: { ...observation, width: 1280, height: 1024 } }))], false)
+    expect(desktopAspectRatio(preview.observation)).toBeCloseTo(1.25)
   })
 
   it("recognizes native computer and browser actions without restoring removed tools", () => {

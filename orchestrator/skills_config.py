@@ -169,9 +169,9 @@ def discovered_skills() -> tuple[Any, ...]:
 
 def skill_subagent_tools() -> list[Any]:
     """Tools isolated skill sub-agents may call (Pattern 3 example parity)."""
-    from strands_tools import file_read, file_write
+    from strands_tools import file_read, file_write, shell
 
-    return [file_read, file_write]
+    return [file_read, file_write, shell]
 
 
 def ensure_skills_configured(model_factory: Any | None = None) -> int:
@@ -322,8 +322,8 @@ def create_use_skill_tool(
 
     ``tools`` are parent-registry entries (tool objects or the recorded
     file of a ``load_tool``-ed name) the caller assigns to each skill
-    sub-agent on top of the reference sandbox tools (``file_read`` /
-    ``file_write``) — the same ``additional_tools`` slot.
+    sub-agent on top of the reference tools (``file_read``, ``file_write``,
+    ``shell``) — the same ``additional_tools`` slot.
     """
     agentskills = _import_agentskills()
     if agentskills is None:

@@ -180,6 +180,21 @@ test("UID changes and unlabelled images require explicit preparation", () => {
   }
 })
 
+test("prepare rebuilds stale sources and reuses a verified image on the next start", () => {
+  const f = fixture()
+  const initial = f.run("prepare")
+  assert.equal(initial.status, 0, initial.stderr)
+  assert.ok(commands(initial).includes("build"))
+  const reused = f.run("prepare")
+  assert.equal(reused.status, 0, reused.stderr)
+  assert.deepEqual(commands(reused), ["info", "image"])
+  writeFileSync(join(f.root, "orchestrator/config.py"), "changed worker config")
+  const rebuilt = f.run("prepare")
+  assert.equal(rebuilt.status, 0, rebuilt.stderr)
+  assert.ok(commands(rebuilt).includes("build"))
+  assert.equal(f.run("start").status, 0)
+})
+
 test("container name collisions fail without stopping or removing any container", () => {
   const f = fixture()
   assert.equal(f.run("build").status, 0)

@@ -11,7 +11,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 from strands_tools.browser.models import BrowserInput
 
-from browser_activity import _browser, capture_desktop, desktop_action, desktop_state
+from browser_activity import stock_browser, capture_desktop, desktop_action, desktop_state
 
 GEMINI_BROWSER_ACTIONS = {
     "click": "Left-click the Linux desktop at x/y (0-999 across the full screenshot).",
@@ -73,7 +73,7 @@ def execute_computer_use(action: str, args: dict[str, Any]) -> dict[str, Any]:
                 if not session:
                     session = "desktop-browser-session"
                     state["session_name"] = session
-                    result = _browser.browser(browser_input=BrowserInput.model_validate({"action": {
+                    result = stock_browser().browser(browser_input=BrowserInput.model_validate({"action": {
                         "type": "init_session", "session_name": session,
                         "description": "Shared physical desktop browser",
                     }}))
@@ -82,7 +82,7 @@ def execute_computer_use(action: str, args: dict[str, Any]) -> dict[str, Any]:
                                 "session_name": session}
                 if canonical == "navigate":
                     browser_args["url"] = args.get("url", "about:blank")
-                result = _browser.browser(browser_input=BrowserInput.model_validate({"action": browser_args}))
+                result = stock_browser().browser(browser_input=BrowserInput.model_validate({"action": browser_args}))
         elif canonical in {"click", "double_click", "triple_click", "middle_click", "right_click"}:
             pyautogui.click(x, y,
                             button={"middle_click": "middle", "right_click": "right"}.get(canonical, "left"),

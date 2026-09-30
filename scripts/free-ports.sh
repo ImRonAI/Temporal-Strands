@@ -13,7 +13,21 @@
 set -euo pipefail
 
 PORTS="3001 7233 8233 8787"
+case "${1:-}" in
+  "") ;;
+  --desktop-only) PORTS="" ;;
+  *) echo "Usage: $0 [--desktop-only]" >&2; exit 1 ;;
+esac
 root="${GWEN_PROJECT_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)}"
+
+# pnpm -> sh -c -> start-all -> cleanup can be several levels deep. None of
+# the current launcher ancestry is an old stack, even if its command matches.
+ancestors=" $$ "
+ancestor="$PPID"
+while [[ "$ancestor" =~ ^[0-9]+$ && "$ancestor" -gt 1 ]]; do
+  ancestors+="$ancestor "
+  ancestor="$(ps -p "$ancestor" -o ppid= 2>/dev/null | tr -d ' ' || true)"
+done
 
 # Verify both command and cwd before signalling. A TCP client of :3001 may
 # be the user's browser; a server on that port may belong to another repo.
@@ -22,7 +36,7 @@ is_project_service() {
   command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
   [[ -n "$command" ]] || return 1
   case "$command" in
-    *run_worker.py*|*worker_supervisor.py*|*"uvicorn server:app"*| \
+    *run_worker.py*|*worker_supervisor.py*|*desktop_worker.py*|*"uvicorn server:app"*| \
     *"temporal server start-dev"*|*"next dev"*|next-server*| \
     *concurrently*|*wait-for-stack.mjs*|*run-desktop.sh*|*start-all.sh*)
       ;;
@@ -32,7 +46,7 @@ is_project_service() {
   # (`bash -c 'pgrep run_worker.py'`). Keep our launch wrappers, and do not
   # treat concurrently's `-c <colors>` flag as that case.
   case "$command" in
-    bash\ -c\ *|sh\ -c\ *|zsh\ -c\ *|/bin/bash\ -c\ *|/bin/sh\ -c\ *)
+    bash\ -c\ *|sh\ -c\ *|zsh\ -c\ *|/bin/bash\ -c\ *|/bin/sh\ -c\ *|/bin/zsh\ -c\ *)
       case "$command" in
         *wait-on*|*wait-for-stack.mjs*|*run-desktop.sh*|*start-all.sh*|*concurrently*) ;;
         *) return 1 ;;
@@ -40,7 +54,8 @@ is_project_service() {
       ;;
   esac
   cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' || true)"
-  [[ "$cwd" == "$root" || "$cwd" == "$root/"* ]]
+  # Nested worktrees are independent checkouts, not children of this stack.
+  [[ "$cwd" == "$root" || "$cwd" == "$root/orchestrator" || "$cwd" == "$root/scripts" ]]
 }
 
 # Refuse unrelated port owners BEFORE stopping any part of this stack.
@@ -58,9 +73,20 @@ done
 # the concurrently parent (whose `-c` flag is colors, not `sh -c`).
 pids=()
 while read -r pid; do
-  [[ "$pid" == "$$" || "$pid" == "$PPID" ]] && continue
+  [[ "$ancestors" == *" $pid "* ]] && continue
   if is_project_service "$pid"; then pids+=("$pid"); fi
-done < <(pgrep -f 'run_worker.py|worker_supervisor.py|uvicorn server:app|temporal server start-dev|next dev|next-server|concurrently|wait-for-stack[.]mjs|run-desktop[.]sh|start-all[.]sh' || true)
+done < <(if [[ -n "$PORTS" ]]; then pgrep -f 'run_worker.py|worker_supervisor.py|desktop_worker.py|uvicorn server:app|temporal server start-dev|next dev|next-server|concurrently|wait-for-stack[.]mjs|run-desktop[.]sh|start-all[.]sh' || true; fi)
+
+# Capture descendants before signalling parents: MCP subprocesses and pnpm
+# wait-on launchers may otherwise be orphaned and wake up on the new server.
+index=0
+while ((index < ${#pids[@]})); do
+  while read -r child; do
+    [[ "$ancestors" == *" $child "* || " ${pids[*]} " == *" $child "* ]] && continue
+    pids+=("$child")
+  done < <(pgrep -P "${pids[$index]}" || true)
+  index=$((index + 1))
+done
 
 if ((${#pids[@]})); then
   echo "  stopping services owned by this checkout: ${pids[*]}"
@@ -72,14 +98,25 @@ if ((${#pids[@]})); then
     sleep 0.25
   done
   for pid in "${pids[@]}"; do
-    if kill -0 "$pid" 2>/dev/null && is_project_service "$pid"; then
+    if kill -0 "$pid" 2>/dev/null; then
       kill -KILL "$pid" 2>/dev/null || true
     fi
   done
+  # SIGKILL is asynchronous; never wipe runtime state while a worker lives.
+  for _ in {1..20}; do
+    alive=0
+    for pid in "${pids[@]}"; do kill -0 "$pid" 2>/dev/null && alive=1; done
+    [[ "$alive" == 0 ]] && break
+    sleep 0.1
+  done
+  if [[ "$alive" != 0 ]]; then
+    echo "Old Gwen processes have not exited; refusing to reset runtime state." >&2
+    exit 1
+  fi
 fi
 
 lock="$root/.next/dev/lock"
-if [[ -f "$lock" ]]; then
+if [[ -n "$PORTS" && -f "$lock" ]]; then
   lock_pid=""
   if command -v python3 >/dev/null 2>&1; then
     lock_pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pid") or "")' "$lock" 2>/dev/null || true)"
@@ -124,4 +161,4 @@ for port in $PORTS; do
     exit 1
   fi
 done
-echo "ports clear: $PORTS"
+if [[ -n "$PORTS" ]]; then echo "ports clear: $PORTS"; fi

@@ -227,7 +227,7 @@ async def test_agent_error_returns_error_result() -> None:
 @pytest.mark.asyncio
 async def test_tools_filter_the_rebuilt_parent_registry() -> None:
     """Official use_agent rule: named tools come from the parent's registry
-    (what the orchestrator loaded onto itself); omitted inherits all."""
+    (what the orchestrator loaded onto itself). Omit tools and it gets none."""
     from strands import Agent
 
     from load_tool import STRANDS_TOOLS_DIR
@@ -266,7 +266,7 @@ async def test_tools_filter_the_rebuilt_parent_registry() -> None:
         with patch("use_agent_activity.Agent", side_effect=capture):
             result = await use_agent_activity(prompt="p", system_prompt="s")
     assert result["status"] == "success"
-    assert set(built[-1].tool_registry.registry) == {"calculator"}
+    assert set(built[-1].tool_registry.registry) == set()
 
 
 def _write_skill(root: Path, name: str) -> None:
@@ -324,7 +324,9 @@ async def test_skills_assign_a_scoped_agent_skills_plugin(monkeypatch, tmp_path:
 
 
 @pytest.mark.asyncio
-async def test_unknown_assigned_skill_is_a_tool_error(monkeypatch, tmp_path: Path) -> None:
+async def test_unknown_assigned_skill_raises_non_retryable(monkeypatch, tmp_path: Path) -> None:
+    """A plugin-construction failure must raise, not return: activity_as_tool
+    would report a returned error dict to the model as a SUCCESS tool result."""
     import skills_config
 
     _write_skill(tmp_path, "helper-a")
@@ -335,11 +337,12 @@ async def test_unknown_assigned_skill_is_a_tool_error(monkeypatch, tmp_path: Pat
     a, b, c = patches(model, stream)
     try:
         with a, b, c:
-            result = await use_agent_activity(prompt="p", system_prompt="s", skills=["nope"])
+            with pytest.raises(ApplicationError) as err:
+                await use_agent_activity(prompt="p", system_prompt="s", skills=["nope"])
     finally:
         skills_config.catalog_skills.cache_clear()
-    assert result["status"] == "error"
-    assert "nope" in result["content"][0]["text"]
+    assert err.value.non_retryable
+    assert "nope" in str(err.value)
 
 
 def test_activity_as_tool_spec_is_flat_and_valid() -> None:
@@ -350,7 +353,7 @@ def test_activity_as_tool_spec_is_flat_and_valid() -> None:
     for name, prop in props.items():
         assert prop.get("description"), f"{name} lacks a description"
     from perplexity_model import _ensure_object_properties
-    from perplexity_operations import _validate_tools
+    from agent_api_tools import _validate_tools
 
     _validate_tools(
         [
@@ -362,3 +365,32 @@ def test_activity_as_tool_spec_is_flat_and_valid() -> None:
             }
         ]
     )
+
+
+@pytest.mark.asyncio
+async def test_native_agent_tool_reports_missing_result() -> None:
+    from strands import Agent
+
+    async def empty_stream(self, prompt):
+        yield {"data": "partial"}
+
+    stream = FakeStreamClient()
+    a, b, c = patches(ScriptedModel(), stream)
+    with a, b, c, patch.object(Agent, "stream_async", empty_stream):
+        result = await use_agent_activity(prompt="p", system_prompt="s")
+    assert result["status"] == "error"
+    assert "did not produce a result" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_native_agent_tool_streams_without_custom_result_conversion() -> None:
+    from strands import Agent
+
+    stream = FakeStreamClient()
+    a, b, c = patches(ScriptedModel("native response"), stream)
+    original = Agent.as_tool
+    with a, b, c, patch.object(Agent, "as_tool", autospec=True, side_effect=original) as native:
+        result = await use_agent_activity(prompt="p", system_prompt="s")
+    native.assert_called_once()
+    assert native.call_args.kwargs == {"name": "use_agent"}
+    assert result["content"] == [{"text": "native response\n"}]

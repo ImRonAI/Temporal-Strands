@@ -20,12 +20,15 @@ reach the agent as ``{}`` (``missing a required argument: 'path'``).
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import copy
 import inspect
+import io
 import json
 import logging
 import re
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
@@ -33,15 +36,18 @@ from typing import Any
 import httpx
 from openai.resources.responses import AsyncResponses
 from openai import APIError
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 from strands.models.openai_responses import OpenAIResponsesModel
+from strands.types.exceptions import ContextWindowOverflowException, ModelThrottledException
 from strands.types.streaming import StreamEvent
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 import agent_api_tools
 from config import (
-    NATIVE_OUTPUT_ITEM_TYPES, PERMANENT_API_ERROR_TYPES, PERMANENT_HTTP_STATUSES,
-    PERPLEXITY_API_BASE, PERPLEXITY_AUTO_TOOL_CHOICE_MODELS,
+    DOCUMENT_INLINE_MAX_CHARS, NATIVE_OUTPUT_ITEM_TYPES, PERMANENT_API_ERROR_TYPES,
+    PERMANENT_HTTP_STATUSES, PERPLEXITY_API_BASE, REASONING_EFFORTS,
 )
 from desktop_observation import latest_observation, resolve_observation
 from workspace_state import StateConflict
@@ -71,6 +77,7 @@ class _Invocation:
     queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     arguments: dict[str, str] = field(default_factory=dict)
     effort: str | None = None
+    progressed: bool = False
 
 
 def _error(message: str, *, non_retryable: bool) -> ApplicationError:
@@ -113,6 +120,129 @@ def _ensure_object_properties(schema: Any) -> Any:
     return schema
 
 
+def source_bytes(data: Any) -> bytes:
+    """Raw bytes for a media block's ``source.bytes`` after a Temporal hop.
+
+    The workflow carries attachments as base64 text (JSON has no bytes type);
+    in-activity blocks such as the desktop screenshot are already ``bytes``.
+    A non-base64 ``str`` is a legacy history whose UTF-8 bytes the pydantic
+    converter decoded to text, so it is re-encoded rather than rejected.
+    """
+    if isinstance(data, (bytes, bytearray)):
+        return bytes(data)
+    if isinstance(data, str):
+        try:
+            return base64.b64decode(data, validate=True)
+        except binascii.Error:
+            return data.encode("utf-8")
+    raise TypeError("media source bytes must be bytes or base64 text")
+
+
+def _with_media_bytes(content: Any) -> Any:
+    """``content`` with every image/document/video ``source.bytes`` as bytes.
+
+    Recurses into ``toolResult.content``, which the parent formats the same way.
+    """
+    if not isinstance(content, dict):
+        return content
+    for kind in ("image", "document", "video"):
+        block = content.get(kind)
+        if isinstance(block, dict) and isinstance(source := block.get("source"), dict) and "bytes" in source:
+            return {**content, kind: {**block, "source": {**source, "bytes": source_bytes(source["bytes"])}}}
+    if isinstance(result := content.get("toolResult"), dict) and isinstance(items := result.get("content"), list):
+        return {**content, "toolResult": {**result, "content": [_with_media_bytes(c) for c in items]}}
+    return content
+
+
+def _messages_with_media_bytes(messages: Any) -> Any:
+    """A copy of ``messages`` whose media blocks carry raw bytes (input untouched)."""
+    if not isinstance(messages, list):
+        return messages
+    return [
+        {**m, "content": [_with_media_bytes(c) for c in m["content"]]}
+        if isinstance(m, dict) and isinstance(m.get("content"), list) else m
+        for m in messages
+    ]
+
+
+# Document formats that are plain text under the hood. Together with ``pdf``
+# (parsed to its text layer below) this covers every member of workflow.py's
+# _SUPPORTED_DOCUMENT_FORMATS.
+_TEXT_DOCUMENT_FORMATS = frozenset({"txt", "html", "csv", "md", "json"})
+
+
+def _extract_pdf_text(raw: bytes) -> str:
+    """All page text of a PDF; empty when it has no text layer (scans)."""
+    return "\n\n".join(
+        page.extract_text() or "" for page in PdfReader(io.BytesIO(raw)).pages
+    ).strip()
+
+
+async def _pdf_text(raw: bytes) -> str:
+    """A PDF's text layer, or a non-retryable error naming why there is none."""
+    try:
+        text = await asyncio.to_thread(_extract_pdf_text, raw)
+    except (PdfReadError, ValueError, OSError) as error:
+        raise _error(
+            f"The attached PDF is not readable ({error}). Attach a valid PDF.",
+            non_retryable=True,
+        ) from error
+    if not text:
+        raise _error(
+            "The attached PDF has no extractable text — it looks like a scan. "
+            "Attach a text format (txt, md, csv, json, html) instead, or switch to a "
+            "Google AI Studio model, which reads scanned documents natively.",
+            non_retryable=True,
+        )
+    return text
+
+
+async def _document_as_text(content: Any) -> Any:
+    """A ``document`` block replaced by its text, inlined for the Agent API.
+
+    The API's request validator accepts a fixed content-part union that
+    excludes OpenAI's ``input_file`` (live 400: ``invalid type "input_file"``),
+    so documents go in as plain text: text formats decode as UTF-8, PDFs are
+    parsed to their text layer. Any other format has no valid representation
+    and fails here, before the request, with the reason.
+    """
+    if not isinstance(content, dict):
+        return content
+    block = content.get("document")
+    if isinstance(block, dict) and isinstance(source := block.get("source"), dict) and "bytes" in source:
+        fmt = str(block.get("format", "")).lower()
+        raw = source_bytes(source["bytes"])
+        if fmt == "pdf":
+            text = await _pdf_text(raw)
+        elif fmt in _TEXT_DOCUMENT_FORMATS:
+            text = raw.decode("utf-8", errors="replace")
+        else:
+            raise _error(
+                f"The Perplexity Agent API cannot read {fmt or 'this'} document attachments. "
+                "Attach a text format (txt, md, csv, json, html) or PDF instead, or switch to "
+                "a Google AI Studio model, which reads documents natively.",
+                non_retryable=True,
+            )
+        if (total := len(text)) > DOCUMENT_INLINE_MAX_CHARS:
+            text = (f"{text[:DOCUMENT_INLINE_MAX_CHARS]}\n\n"
+                    f"[truncated: kept the first {DOCUMENT_INLINE_MAX_CHARS} of {total} characters]")
+        return {"text": f"Attached document (format: {fmt}):\n\n{text}"}
+    if isinstance(result := content.get("toolResult"), dict) and isinstance(items := result.get("content"), list):
+        return {**content, "toolResult": {**result, "content": [await _document_as_text(c) for c in items]}}
+    return content
+
+
+async def _messages_with_document_text(messages: Any) -> Any:
+    """A copy of ``messages`` whose document blocks are inlined text (input untouched)."""
+    if not isinstance(messages, list):
+        return messages
+    return [
+        {**m, "content": [await _document_as_text(c) for c in m["content"]]}
+        if isinstance(m, dict) and isinstance(m.get("content"), list) else m
+        for m in messages
+    ]
+
+
 def _is_native(payload: Any) -> bool:
     """Whether an SSE payload is a Perplexity-only server-side tool event."""
     if not isinstance(payload, dict) or not isinstance(kind := payload.get("type"), str):
@@ -148,6 +278,7 @@ def _enqueue_native(
     queue: asyncio.Queue[dict[str, Any]],
     raw: bytes,
     arguments: dict[str, str] | None = None,
+    state: _Invocation | None = None,
 ) -> None:
     """Queue one ``data:`` line iff it carries a Perplexity-only event.
 
@@ -163,7 +294,20 @@ def _enqueue_native(
     try:
         payload = json.loads(line[len(b"data:") :])
     except (ValueError, UnicodeDecodeError):
+        if state is not None:
+            state.progressed = True
         return
+    if state is not None and not (
+        isinstance(payload, dict) and (
+            payload.get("error")
+            or (payload.get("type") in {"response.created", "response.in_progress"}
+                and isinstance(payload.get("response"), dict)
+                and not payload["response"].get("output"))
+        )
+    ):
+        # The parent buffers function calls and skips native tool events. Fence
+        # retries at the wire boundary, including progress it never yields.
+        state.progressed = True
     if _is_native(payload):
         queue.put_nowait(payload)
     if arguments is not None and (item := _function_call_item(payload)) is not None:
@@ -200,11 +344,13 @@ class PerplexityModel(OpenAIResponsesModel):
 
     def __init__(
         self, *, model_id: str, params: dict[str, Any] | None = None, api_key: str | None = None,
-        transport: httpx.AsyncBaseTransport | None = None, **model_config: Any,
+        transport: httpx.AsyncBaseTransport | None = None,
+        stream_callback: Callable[[StreamEvent], None] | None = None, **model_config: Any,
     ) -> None:
         params = copy.deepcopy(params or {})
         self._validate_config(model_id, params)
         self._api_key, self._transport = api_key, transport
+        self._stream_callback = stream_callback
         # Temporal caches model instances. Request recovery and stream state
         # must not leak across concurrent sessions using the same model.
         self._invocation: ContextVar[_Invocation | None] = ContextVar("perplexity_invocation", default=None)
@@ -261,7 +407,7 @@ class PerplexityModel(OpenAIResponsesModel):
                 # SDK still receives the original bytes for decoding.
                 *lines, buffer = re.split(b"\r\n|\r|\n", buffer + chunk)
                 for line in lines:
-                    _enqueue_native(queue, line, arguments)
+                    _enqueue_native(queue, line, arguments, state)
                 yield chunk
 
         response.aiter_bytes = tapped  # type: ignore[method-assign]
@@ -279,19 +425,14 @@ class PerplexityModel(OpenAIResponsesModel):
             for t in request.get("tools", [])]
         state = self._invocation.get()
         if state and (effort := state.effort) is not None:
-            request["reasoning"] = {**(request.get("reasoning") or {}), "effort": effort}
-        if self.config["model_id"] in PERPLEXITY_AUTO_TOOL_CHOICE_MODELS:
-            choice = request.get("tool_choice")
-            if isinstance(choice, dict) and choice.get("type") == "function":
-                # Use the provider's supported native selection mode. The
-                # workflow hook still validates Think first; the model keeps
-                # ownership of its effort and cycle_count arguments.
-                request["tool_choice"] = "auto"
-                request["instructions"] = (
-                    (request.get("instructions") or "")
-                    + f"\n\nBefore responding or calling any other tool, call {choice['name']} first. "
-                    "Choose its arguments yourself."
+            if effort not in REASONING_EFFORTS:
+                # Fail before the API call: an effort outside the Agent API's
+                # enum would be a permanent 400, never worth a Temporal retry.
+                raise _error(
+                    f"reasoning effort must be one of {sorted(REASONING_EFFORTS)}",
+                    non_retryable=True,
                 )
+            request["reasoning"] = {**(request.get("reasoning") or {}), "effort": effort}
         if extra := {k: request.pop(k) for k in list(request) if k not in _OPENAI_FIELDS}:
             request["extra_body"] = extra
         return request
@@ -303,8 +444,6 @@ class PerplexityModel(OpenAIResponsesModel):
         # tool arguments.
         state = _Invocation(effort=(kwargs.get("invocation_state") or {}).get("reasoning_effort"))
         token = self._invocation.set(state)
-        if (kwargs.get("invocation_state") or {}).get("require_think"):
-            kwargs["tool_choice"] = {"tool": {"name": "think"}}
         current_tool_use: str | None = None
         try:
             messages = args[0] if args else kwargs.get("messages", [])
@@ -320,6 +459,14 @@ class PerplexityModel(OpenAIResponsesModel):
                     )
             except (OSError, ValueError, StateConflict, RuntimeError) as error:
                 raise _error("Desktop observation unavailable; obtain a fresh screenshot", non_retryable=True) from error
+            # Documents cannot ride as ``input_file`` parts (the API 400s on
+            # them), so they inline as text first: text formats decode as
+            # UTF-8, PDFs are parsed to their text layer.
+            messages = await _messages_with_document_text(messages)
+            # Temporal's pydantic JSON converter carries attachment bytes as
+            # base64 text (see workflow.turn_content_blocks); the parent's
+            # data-URL encoder requires real bytes.
+            messages = _messages_with_media_bytes(messages)
             if observation:
                 # Image bytes exist only in this activity's outgoing request, not
                 # in Temporal messages. Perplexity function outputs stay strings.
@@ -327,23 +474,38 @@ class PerplexityModel(OpenAIResponsesModel):
                     {"text": f"Desktop screenshot from tool call {call_id}"},
                     {"image": {"format": "png", "source": {"bytes": png}}},
                 ]}]
-                if args:
-                    args = (messages, *args[1:])
-                else:
-                    kwargs = {**kwargs, "messages": messages}
+            if args:
+                args = (messages, *args[1:])
+            else:
+                kwargs = {**kwargs, "messages": messages}
             try:
                 async for chunk in super().stream(*args, **kwargs):
                     for native in self._drain():
+                        if self._stream_callback:
+                            self._stream_callback(native)
                         yield native
                     chunk, current_tool_use = _fill_tool_arguments(chunk, state.arguments, current_tool_use)
+                    if self._stream_callback:
+                        self._stream_callback(chunk)
                     yield chunk
             except APIError as error:
-                # Client errors are permanent: Temporal must not retry them.
-                # Throttling/overflow were already translated by the parent.
-                if _is_permanent(error):
-                    raise _error(str(error), non_retryable=True) from error
+                # Only an explicit rejection before progress is safe to replay.
+                # SDK retries stay disabled; TemporalAgent owns the backoff.
+                retryable = (
+                    not state.progressed
+                    and not _is_permanent(error)
+                    and error.message == "upstream model is overloaded, please try again later"
+                )
+                raise _error(str(error), non_retryable=not retryable) from error
+            except (ContextWindowOverflowException, ModelThrottledException):
+                # Preserve Strands' native classification; the model activity
+                # policy excludes these from automatic retries.
                 raise
+            except Exception as error:
+                raise _error(str(error), non_retryable=True) from error
             for native in self._drain():
+                if self._stream_callback:
+                    self._stream_callback(native)
                 yield native
         finally:
             self._invocation.reset(token)

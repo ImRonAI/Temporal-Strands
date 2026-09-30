@@ -21,9 +21,10 @@ Request path: `app/page.tsx` (`AgentChat` → `useChat` → `/api/orchestrator`)
 - `components/v0/` — app UI that **composes** those primitives (`agent-chat`, `composer`, `agent-activity`, `model-picker`, `compare-view`, `computer-use-`*, `graph-`*).
 - `components/ui/` — shadcn/base-ui primitives (`Button`/`Select` use `@base-ui/react`, not Radix `asChild`; `components.json` style `base-nova`).
 - `lib/perplexity.ts` — model listing helpers only (reads the orchestrator `/health` payload); all inference goes through the orchestrator. Session default is `preset:high`.
-- `orchestrator/` — Python stack (`requirements.txt`, local `.venv`). Agent identity and system prompt live in `agent.json`; registered agent definitions in `agents/`.
+- `orchestrator/` — Python stack (`requirements.txt`, local `.venv`). Agent identity and system prompt live in `agent.json` (name `Orchestrator`; tools are described in the prompt, not a `tools` array); per-provider prompt overrides in `agents/perplexity.json` and `agents/gemini.json`. Active MCP servers come only from `orchestrator/mcp.json` (`shell` stdio, `datacommons`, `pophive`).
 - `orchestrator/graph_tool.py` — vendored formation graph (agent/skill_agent/swarm/graph/workflow/parallel); exposed via `graph_activity.py` and `activity_as_tool`.
-- `orchestrator/strands-tools` — a **tracked symlink** into the venv's installed `strands_tools` package (`.venv/lib/python3.13/site-packages/strands_tools`), which carries the community tools and the ~700-entry Agent Skills catalog (`strands-tools/skills`). Excluded from vitest, ESLint, and tsconfig — it is not app source. Separately, `requirements.txt` installs the graph package (`strands-heterogeneous-graph-tool`) from a sibling checkout at `../../strands-tools` outside the repo — the desktop contract flags this full-host dependency as a known gap.
+- `orchestrator/strands-tools` — a **tracked symlink** into the venv's installed `strands_tools` package (`.venv/lib/python3.13/site-packages/strands_tools`), which carries the community tools and the ~700-entry Agent Skills catalog (`strands-tools/skills`, 699 on disk). Excluded from vitest, ESLint, and tsconfig — it is not app source. The graph implementation is in-repo (`graph_tool.py`); `requirements.txt` line 3 records that no sibling checkout is needed any more.
+- `orchestrator/integrations/` — **staging lanes, not runtime**: `google-tools/`, `fun-tools/`, `mcp/`, `openapi/` each hold their own `.venv`/`venvs/`, manifests, probes, and lane tests. Nothing here is imported or auto-loaded by the worker; promotion means hand-merging a fragment into `orchestrator/mcp.json`. Fragments contain absolute `/Users/tims-stuff/...` paths. Never run pytest recursively over `orchestrator/` (lane tests need lane venvs) — `pytest tests` only.
 - `scripts/` — dev orchestration (`free-ports.sh`, `run-desktop.sh`, `worker_supervisor.py`, `start-all.sh`, `gce-startup.sh`) and the desktop guard tooling (`desktop-guard.mjs`, `framework-contracts.mjs`, `check_desktop_python.py`, `validate_desktop_release.py`) with their node/unittest suites.
 
 **Hard rule:** every AI Elements surface must use native subcomponents, props, and animations (`Conversation` scroll, `MessageResponse`/Streamdown, `PromptInput`* submit/attachments, `ChainOfThought`*). Do not reimplement those in `components/v0/`. Model ids are never hardcoded lists; pickers use `/api/models`. Models switch per turn: the picker stays live mid-conversation, each turn body carries the selected model, and the orchestrator rebuilds the session's agent on the new model without ending the session.
@@ -56,7 +57,7 @@ Site `cato-labs.atlassian.net` (usable directly as `cloudId`), project key **GWE
 
 ## Build, Test, and Development Commands
 
-Use **pnpm** (lockfile present). Root `.env.local` holds `PERPLEXITY_API_KEY`, `DATACOMMONS_MCP_URL`, `DC_API_KEY`, and `POPHIVE_MCP_URL`; it is a protected path — never read or edit it. Next routes reach the orchestrator through `ORCHESTRATOR_URL`, defaulting to `http://localhost:8787` (`app/api/orchestrator/route.ts:15`).
+Use **pnpm** (lockfile present). Root `.env.local` holds `PERPLEXITY_API_KEY`, `DATACOMMONS_MCP_URL`, `DC_API_KEY`, and `POPHIVE_MCP_URL`; it is a protected path — never read or edit it. Next routes reach the orchestrator through `ORCHESTRATOR_URL`, defaulting to `http://localhost:8787` (`app/api/orchestrator/route.ts:32`; each sibling route repeats the same default inline).
 
 ```bash
 pnpm install
@@ -68,7 +69,7 @@ pnpm build && pnpm start
 pnpm lint
 ```
 
-Individual services: `pnpm dev:temporal` (dev server, needs the `temporal` CLI on PATH), `pnpm dev:worker`, `pnpm dev:api`, `pnpm dev:desktop`, `pnpm dev:web`. Every `pnpm dev:all` run resets first (`pnpm dev:clean`, then `start-all.sh` resets again before image prepare) — including a `gwen-desktop` container left over from a killed run (`run-desktop.sh` itself never stops or removes containers; only `free-ports.sh` does, and only that exact name in `DESKTOP_DOCKER_CONTEXT`, default `colima`). Do not kill unrelated servers (port 3000 is often another app, e.g. Electron; this checkout's Next is permanently :3001). `pnpm test:dev-scripts` covers both startup scripts with a mocked `docker`.
+Individual services: `pnpm dev:temporal` (dev server, needs the `temporal` CLI on PATH), `pnpm dev:worker`, `pnpm dev:api`, `pnpm dev:desktop`, `pnpm dev:web`. `pnpm dev:all` enters `start-all.sh` once: ensure Docker is available, stop the previous checkout-owned process tree and exact `gwen-desktop` container, clear allowlisted transient state via `reset-dev-state.mjs`, reconcile JS/Python dependencies, prepare the source-hashed desktop image, then launch fresh processes. Temporal is in-memory, so this deliberately discards local test sessions/history. Cleared state is the selected `.next` cache, runtime Python bytecode, legacy browser observations, and desktop ownership/locks/screenshots; source `.models` providers, dependencies, credentials, journals and generated reports are preserved. `dev:all` pins local service endpoints; individual service commands retain environment overrides. Concurrently uses bounded shutdown and a desktop-only teardown through `free-ports.sh`; `run-desktop.sh` never stops or removes containers. Do not kill unrelated servers or nested worktree services (port 3000 is often another app; this checkout's Next is permanently :3001). `pnpm test:dev-scripts` covers cleanup, startup order, cache safety, image preparation, and real subprocess supervisor shutdown.
 
 Desktop guard tooling (see `orchestrator/desktop/AGENTS.md` for scope and limits):
 
@@ -101,7 +102,16 @@ Verification before claiming work complete: `npx tsc --noEmit`, `pnpm lint`, sco
 
 ## Coding Style & Naming Conventions
 
-TypeScript **strict** (`tsconfig.json`), path alias `@/`*. `next.config.mjs` sets `typescript.ignoreBuildErrors: true`, so `pnpm build` is not a type gate — run `npx tsc --noEmit` for that. It also pins the Turbopack workspace root to this directory (a stray lockfile in `$HOME` otherwise hijacks resolution), allows LAN dev origins, supports `NEXT_DIST_DIR` for concurrent acceptance servers (`.next-desktop-acceptance/`), and disables image optimization. Lint is flat-config ESLint (`eslint.config.mjs`: `eslint-config-next` core-web-vitals + typescript, ignoring `.next/`, `.next-desktop-acceptance/`, `orchestrator/.venv/`, `next-env.d.ts`); there is no Prettier config, so match surrounding style. Prefer existing composition patterns in `components/v0/`*.
+### Binding Strands tools to Temporal (mandatory)
+
+- Deterministic, I/O-free helpers may use `@tool` in workflow context. Installed ecosystem tools that perform I/O or invoke agents must use **thin `@activity.defn` → `activity_as_tool(...)` → worker activity registration**. Async alone does not make an ecosystem tool workflow-safe.
+- The activity imports and calls the installed tool's public callable. Do not copy its agent/cycle loop, access private tool internals, add compatibility frameworks, or inject a replacement parent agent into workflow invocation state.
+- Bind activities with explicit `start_to_close_timeout` and applicable heartbeat/retry options from `/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/config.py`. Register the callable on the worker polling its queue; desktop tools remain on the desktop worker.
+- Think is the documented exception: installed `strands_tools.think` (`orchestrator/strands-tools/think.py`, unmodified) is on the session `TemporalAgent`; the Orchestrator is always the parent `agent=` for nested cycles (full registry minus think). No worker stand-in. Never restore `_think_context` injection.
+- Before changing bindings, read Pattern 2 in `/Applications/strands-temporal/references/strands_temporal_agent_guide.md` and the installed SDK source at `/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/workflow.py`. Verify activity dispatch, installed-tool delegation, selected-model inheritance, and worker registration in tests. See also https://docs.temporal.io/develop/python/integrations/strands-agents.
+- Replay is a separate gate: a retained/deprecated patch marker does not make a changed activity-command sequence compatible. Runs that already executed the removed workflow-side Think must finish on their original worker before deploying this binding to their queue, or be explicitly migrated. Never silently reset/end user sessions or claim replay coverage without evidence.
+
+TypeScript **strict** (`tsconfig.json`), path alias `@/`*. `next.config.mjs` sets `typescript.ignoreBuildErrors: true`, so `pnpm build` is not a type gate — run `npx tsc --noEmit` for that. It also pins the Turbopack workspace root to this directory (a stray lockfile in `$HOME` otherwise hijacks resolution), allows LAN dev origins, supports `NEXT_DIST_DIR` for concurrent acceptance servers (`.next-desktop-acceptance/`, `.next-obsidian-inspect/`), and disables image optimization. Lint is flat-config ESLint (`eslint.config.mjs`: `eslint-config-next` core-web-vitals + typescript, ignoring `.next*/`, `**/.worktrees/**`, `**/.kilo/worktrees/**`, `orchestrator/.venv/`, `orchestrator/strands-tools/`, `next-env.d.ts`); there is no Prettier or `.editorconfig`, so match surrounding style. Tailwind v4 is CSS-first (`postcss.config.mjs` only, no `tailwind.config`). There is no `hooks/` directory — React hooks live beside their feature in `components/v0/use-*.ts`. Prefer existing composition patterns in `components/v0/`*.
 
 Orchestrator code must stay on Temporal's official Strands integration (`TemporalAgent` + model factories on the worker); do not pass live `Model` instances into workflow `__init__`. Stream topics (`events`, `thinking`, `approval`, `handoff`, `tool_results`, `agent_runs`) are a shared contract between `workflow.py`, `server.py`, and the frontend route — renaming one without the others breaks the UI silently.
 
@@ -111,4 +121,55 @@ Python targets 3.13, uses 4-space indent and `snake_case` modules, and keeps mod
 
 Subjects are capitalized, imperative, and unprefixed ("Implement durable orchestrator foundation", "Plan coding agent product reset"); a `feat:` prefix appears in history but is not required. Keep that form and commit once per completed task. PRs should note frontend vs orchestrator impact and any env/Temporal process requirements for reviewers.
 
-Protected paths bind regardless of committing: `.env*`, `orchestrator/graph_tool.py`, and the route files under `app/api/**` (`orchestrator/route.ts`, `orchestrator/end`, `orchestrator/approval`, `orchestrator/file`, `orchestrator/handoff`, `orchestrator/desktop-image`, `compare`, `models`). Change a route only when a failing compatibility test proves the backend cannot satisfy an existing contract. The former `.opencode/` ledger/guard system is retired; scope and sequencing now live in Jira (`docs/jira-backlog.md` is the migration source).
+Protected paths bind regardless of committing: `.env*`, `orchestrator/graph_tool.py`, and the seven route files under `app/api/**` (`orchestrator/route.ts`, `orchestrator/end`, `orchestrator/approval`, `orchestrator/file`, `orchestrator/handoff`, `orchestrator/desktop-image`, `models`; `app/api/compare/` holds only a compatibility test — there is no `compare/route.ts`). Change a route only when a failing compatibility test proves the backend cannot satisfy an existing contract. The former `.opencode/` ledger/guard system is retired; scope and sequencing now live in Jira (`docs/jira-backlog.md` is the migration source).
+
+## Where To Look
+
+| Task | Location | Notes |
+|------|----------|-------|
+| Change turn streaming / SSE → UI parts | `app/api/orchestrator/route.ts` (`POST` :376) ↔ `orchestrator/server.py` (`turn_stream` :416) | Protected; lockstep pair. Part types listed in `app/api/AGENTS.md` |
+| Workflow state, signals, updates, queries | `orchestrator/workflow.py` (`ChatWorkflow` :943) | Handler index in `orchestrator/AGENTS.md` |
+| Register a model / provider / activity | `orchestrator/run_worker.py` (`assemble_model_factories` :280, `WORKER_ACTIVITIES` :404) + `config.py` | The only provider extension point |
+| Perplexity Agent API native tools / catalog | `orchestrator/agent_api_tools.py` (`native_tools`, `_validate_tools`), `orchestrator/catalog_workflow.py` (`model_catalog`) | Sub-agent preset tools were removed; delegation runs through `use_agent` / graph nodes on registered model factories |
+| Timeouts, queues, batch intervals, provider ids | `orchestrator/config.py` | `timedelta(` anywhere else fails the adherence gate |
+| Desktop / browser / computer-use | `orchestrator/desktop_worker.py`, `browser_activity.py`, `computer_use_activity.py`, `desktop_observation.py`, `workspace_state.py` | Read `orchestrator/desktop/AGENTS.md` first — binding contract |
+| Human takeover / handoff | `server.py` `handoff` :741 → `ChatWorkflow.desktop_control` :1399 → `components/v0/computer-use-preview.tsx` | Order: agent → stopping → human → relinquishing → steering → resuming |
+| Chat UI, composer, activity timeline | `components/v0/agent-chat.tsx` (:151), `composer.tsx`, `agent-activity.tsx` (`AgentActivity` :1585) | Feature→file map in `components/v0/AGENTS.md` |
+| Model picker / per-turn switching | `components/v0/model-picker.tsx`, `use-models.ts`, `app/api/models/route.ts`, `lib/perplexity.ts` | Only `DEFAULT_MODEL = "preset:high"` may be a literal id |
+| Graph formations | `orchestrator/graph_tool.py` (protected) → `graph_activity.py` → `components/v0/graph-run.ts` → `graph-canvas.tsx` | Raw `multiagent_*` events fold into one `data-graph-run` part |
+| Skills catalog / `use_skill` / `use_agent` | `orchestrator/skills_config.py`, `use_skill_activity.py`, `use_agent_activity.py`, `subagent_support.py` | Skills are the pinned `strands_agentskills` git commit |
+| Dev stack lifecycle | `scripts/free-ports.sh` → `start-all.sh` → `run-desktop.sh` → `wait-for-stack.mjs` | Only `free-ports.sh` ever stops the `gwen-desktop` container |
+| Production VM deploy | `scripts/gce-startup.sh`, `validate_desktop_release.py` | systemd units `gwen-*`; web on :3000 there, :3001 locally |
+| Product requirements / backlog | `docs/superpowers/plans/*.md`, `docs/jira-backlog.md`, `docs/evidence/<issue>/` | Plans in `.omo/plans/`, `.kilo/plans/` are context, not completion evidence |
+
+## Code Map
+
+Centrality from CodeGraph (LSP daemon was unavailable at generation time). Refs = distinct call sites.
+
+| Symbol | Type | Location | Refs | Role |
+|--------|------|----------|------|------|
+| `ChatWorkflow` | Temporal workflow | `orchestrator/workflow.py:943` | ~198 / 15 files | Owns a session: turn update, approval/handoff signals, model rebuild, Continue-As-New |
+| `TurnInput` | dataclass | `orchestrator/workflow.py:421` | ~54 | Prompt + images/documents/videos per turn |
+| `lifespan` | FastAPI lifespan | `orchestrator/server.py:266` | ~243 (tests) | Temporal client + `StrandsPlugin` on the **client** |
+| `turn_stream` | endpoint | `orchestrator/server.py:416` | — | Subscribes to topics before starting the update; cancels the consumer, never the update |
+| `set_catalog` / `model_catalog` | fn / `@activity.defn` | `orchestrator/catalog_workflow.py:36,47` | — | The worker's provider-declaring model registry; the `<agent_api_models>` prompt block reads it |
+| `graph_activity` | `@activity.defn` | `orchestrator/graph_activity.py:328` | ~49 | Streams formation runs onto `thinking` as `{tool_use, data}` |
+| `StateConflict` / `ScopeUnavailable` | exceptions | `orchestrator/workspace_state.py:75,79` | ~83 / ~49 | 409 / 404 for desktop ownership transitions |
+| `POST` | route handler | `app/api/orchestrator/route.ts:376` | ~220 (tests) | Folds SSE frames into `text-*`, `reasoning-*`, `tool-*`, `data-*` parts |
+| `AgentChat` | component | `components/v0/agent-chat.tsx:151` | 6 callers | `useChat` → `/api/orchestrator`; hosts composer, picker, IDE sheet |
+| `AgentActivity` | component | `components/v0/agent-activity.tsx:1585` | ~29 | Dispatches `reasoning`, `dynamic-tool`, `data-native-tool`, `data-agent-run`, `data-skill-run`, `data-retry`, computer-use segments |
+| `projectIdePreview` | fn | `components/v0/project-ide.ts:348` | ~55 | Projects shell tool history into file tree + terminal + preview URL |
+| `foldGraphEvent` | fn | `components/v0/graph-run.ts:288` | ~22 | Reconciles graph frames into React-Flow nodes/edges |
+| `parseDataObservation` | fn | `components/v0/data-observation.ts:424` | ~27 | Turns tabular MCP results into chart series |
+
+**Turn flow:** `AgentChat` (`useChat`) → `POST /api/orchestrator` → `POST /sessions` (first turn only, emits `data-session`) → `POST /sessions/{id}/turns/stream` (body carries `model_id`, `reasoning_effort`) → `server.py` subscribes to `events`/`thinking`/`approval`/`handoff`/`tool_results`/`agent_runs` then starts `ChatWorkflow.turn` update → host worker on `perplexity-orchestrator` runs `TemporalAgent`; desktop tools hop to `desktop-browser` → frames flushed as durable signals (200 ms outer, 500 ms Think, 2 s nested/graph/agent_runs) → SSE → `route.ts` → UI parts. Closing the tab never aborts the turn; `pagehide` beacons `/api/orchestrator/end`.
+
+## Anti-Patterns (This Project)
+
+Enforced by `app/framework-adherence.test.ts`, `orchestrator/tests/test_framework_adherence.py`, `test_graph_tool_adherence.py`, and `scripts/desktop-guard.mjs` / `check_desktop_python.py`:
+
+- Frontend: no `new ReadableStream(` / `TextEncoder` / `.getReader(` / `EventSource` — use AI SDK stream helpers; no hardcoded model ids except `lib/perplexity.ts` `DEFAULT_MODEL`; no `asChild=` on `@base-ui/react`; no local `reasoning.tsx`; no `as any` / `@ts-ignore`.
+- Orchestrator: no bare `strands.models.Model` subclass (`PerplexityModel` extends `OpenAIResponsesModel`, `perplexity_model.py:245`); no hand-rolled `_format_chunk`; `think_activity` imports installed `strands_tools.think`; hooks never call `workflow.execute_activity` (use `activity_as_hook`); no `._tool_func`; no `except: pass`; no live `Model` in workflow `__init__`; `StrandsPlugin` on Client not Worker.
+- Desktop: no `headless=True` / `STRANDS_BROWSER_HEADLESS=1` / `--no-sandbox`; no `Browser`/`LocalChromiumBrowser`/`TemporalAgent`/`TemporalActivityTool` subclasses; no desktop activities on the host worker; no CDP screencast player (`computer-use-live.html`, `Page.startScreencast`) — noVNC in `WebPreviewBody` only; Dockerfile never `COPY . .`; Continue-As-New must carry `session_id`, `messages`, `stream_state`, `resume_prompt`.
+- Streaming: never lower batch intervals (200 ms outer hit Temporal's 50 MB / 51,200-event history cap on long runs); never iterate a turn stream to exhaustion in `server.py`; never retry computer-use actions after an ambiguous disconnect.
+- Repo hygiene: root-level `*.png`, `compute.json`, `gwen-*.json`, `fair-expanse-*.json`, `--full-page` are local debris/credentials — never read, commit, or reference them. `.playwright-mcp/`, `.playwright-cli/`, `.firecrawl/`, `output/`, `orchestrator/.runtime/` are tool output, not source.

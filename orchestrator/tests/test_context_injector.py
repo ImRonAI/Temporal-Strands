@@ -1,4 +1,4 @@
-"""Official ContextInjector: live Agent API catalog folded into one model call.
+"""Official ContextInjector: the worker's model registry folded into one model call.
 
 https://strandsagents.com/docs/user-guide/concepts/plugins/context-injector/
 """
@@ -13,7 +13,8 @@ from strands import Agent
 from strands.models.model import Model
 from strands.vended_plugins.context_injector import ContextInjector
 
-import perplexity_operations
+from catalog_workflow import model_catalog
+from config import PROVIDER_PERPLEXITY_AGENT_API, RegisteredModel
 from workflow import _format_agent_api_models, render_agent_api_models
 
 
@@ -53,16 +54,16 @@ class CaptureModel(Model):
         yield {"messageStop": {"stopReason": "end_turn"}}
 
 
-def test_format_agent_api_models_uses_official_list_shape() -> None:
+def _catalog(*ids: str) -> list[RegisteredModel]:
+    return [
+        RegisteredModel(id=model_id, provider=PROVIDER_PERPLEXITY_AGENT_API, label=model_id)
+        for model_id in ids
+    ]
+
+
+def test_format_agent_api_models_uses_registered_model_ids() -> None:
     text = _format_agent_api_models(
-        {
-            "object": "list",
-            "data": [
-                {"id": "openai/gpt-5.6-sol", "object": "model", "created": 1, "owned_by": "openai"},
-                {"id": "anthropic/claude-opus-5", "object": "model", "created": 2, "owned_by": "anthropic"},
-                {"object": "model"},
-            ],
-        }
+        _catalog("openai/gpt-5.6-sol", "anthropic/claude-opus-5")
     )
     assert text is not None
     assert text.startswith("<agent_api_models>")
@@ -72,20 +73,15 @@ def test_format_agent_api_models_uses_official_list_shape() -> None:
 
 
 def test_format_agent_api_models_skips_empty_catalog() -> None:
-    assert _format_agent_api_models({"object": "list", "data": []}) is None
-    assert _format_agent_api_models({"object": "list"}) is None
+    assert _format_agent_api_models([]) is None
     assert _format_agent_api_models(None) is None
 
 
 @pytest.mark.asyncio
-async def test_render_agent_api_models_calls_list_activity() -> None:
-    catalog = {
-        "object": "list",
-        "data": [{"id": "openai/gpt-5.6-sol", "object": "model", "created": 1, "owned_by": "openai"}],
-    }
-    executor = RecordingExecutor(catalog)
+async def test_render_agent_api_models_calls_catalog_activity() -> None:
+    executor = RecordingExecutor(_catalog("openai/gpt-5.6-sol"))
     text = await render_agent_api_models(None, executor=executor)
-    assert executor.calls[0]["activity_fn"] is perplexity_operations.list_agent_models
+    assert executor.calls[0]["activity_fn"] is model_catalog
     assert "openai/gpt-5.6-sol" in (text or "")
 
 

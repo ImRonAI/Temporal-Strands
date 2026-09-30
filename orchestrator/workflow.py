@@ -32,9 +32,17 @@ protected route ``app/api/orchestrator/route.ts``:
                      with native ``multiagent_*`` events) published from
                      ``graph_activity``.
 
-Think uses the async adaptation in ``think_activity.py``. The model makes a
-mandatory first tool call; each cycle inherits the parent model and tools.
-The original activity/hook are retained only for pre-migration workflow replay.
+Think is the installed ``strands_tools.think`` tool, unmodified, exposed to
+the session ``TemporalAgent`` through ``think_activity.think`` — a thin
+``@activity.defn`` wrapper (Pattern 2 surface 3). The workflow cannot run it:
+it is synchronous (Strands runs sync tools via ``asyncio.to_thread``, which
+Temporal's workflow loop blocks) and its nested ``agent(prompt)`` cycles need
+a real event loop. Agent objects cannot cross the activity boundary, so the
+nested cycles resolve their model through the tool's own custom-provider
+path (``orchestrator/.models/perplexity.py``) — the same Perplexity Agent API
+model with native server-side tools the session uses. The model decides when
+to think and for how many cycles (``cycle_count`` 1-10); no hook gates tool
+order.
 """
 
 from __future__ import annotations
@@ -42,6 +50,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
@@ -49,9 +59,7 @@ from typing import Any
 
 from strands.hooks import HookProvider, HookRegistry
 from strands.hooks.events import (
-    AfterModelCallEvent,
     AfterToolCallEvent,
-    BeforeInvocationEvent,
     BeforeModelCallEvent,
     BeforeToolCallEvent,
     MessageAddedEvent,
@@ -60,25 +68,22 @@ from strands.types.content import Messages
 from strands.types.exceptions import EventLoopException
 from strands.types.interrupt import InterruptResponseContent
 from strands.tools.executors import SequentialToolExecutor
-from strands import tool
-from strands.types.tools import ToolContext
 from temporalio import workflow
 from temporalio.exceptions import ActivityError, ApplicationError
 from temporalio.contrib.strands import TemporalAgent, TemporalMCPClient
-from temporalio.contrib.strands.workflow import activity_as_hook, activity_as_tool
+from temporalio.contrib.strands.workflow import activity_as_tool
 from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamState
-from temporalio.contrib.workflow_streams._types import _decode_payload
 
 from config import (
-    AGENT_CREATE_RETRY_POLICY,
-    AGENT_OPERATION_HEARTBEAT,
-    AGENT_OPERATION_RETRY_POLICY,
-    AGENT_OPERATION_START_TO_CLOSE,
     BROWSER_RETRY_POLICY,
+    CATALOG_ACTIVITY_TIMEOUT,
+    CONTEXT_OFFLOAD_MAX_RESULT_TOKENS,
+    CONTEXT_OFFLOAD_PREVIEW_TOKENS,
     DESKTOP_BROWSER_TASK_QUEUE,
     DESKTOP_JOB_HEARTBEAT_TIMEOUT,
     DESKTOP_MUTATION_RETRY_POLICY,
     DESKTOP_TASK_TIMEOUT,
+    DESKTOP_HANDOFF_START_TO_CLOSE,
     DESKTOP_HANDOFF_TIMEOUT,
     GRAPH_HEARTBEAT_TIMEOUT,
     GRAPH_RETRY_POLICY,
@@ -91,6 +96,7 @@ from config import (
     MODEL_RETRY_POLICY,
     MODEL_START_TO_CLOSE,
     MODEL_STREAM_BATCH_INTERVAL,
+    PERPLEXITY_MODEL_RETRY_POLICY,
     STREAM_CAN_DRAIN_OVERLAP,
     THINK_HEARTBEAT_TIMEOUT,
     THINK_RETRY_POLICY,
@@ -98,10 +104,10 @@ from config import (
 )
 
 with workflow.unsafe.imports_passed_through():
-    import perplexity_operations
     import think_activity
     from browser_activity import browser_activity, release_desktop
     from browser_activity import desktop_control as desktop_control_activity
+    from catalog_workflow import model_catalog
     from computer_use_activity import COMPUTER_USE_ACTIVITIES, COMPUTER_USE_TOOL_NAMES
     from graph_activity import graph_activity
     from load_tool import (
@@ -110,12 +116,12 @@ with workflow.unsafe.imports_passed_through():
         register_community_tool,
         tool_file_path,
     )
-    from think_activity import ThinkInput
     from use_agent_activity import use_agent_activity
     from use_skill_activity import use_skill_activity
 
     from strands.tools.mcp import MCPClient
     from strands.vended_plugins.context_injector import ContextInjector
+    from strands.vended_plugins.context_offloader import ContextOffloader, InMemoryStorage
     from strands_tools import stop as native_stop
 
 # MCP tool activities: start-to-close from the installed Strands guide
@@ -174,21 +180,21 @@ PERMANENT_COMMUNITY_TOOLS = (
     activity_as_tool(load_tool_activity, **_MCP_ACTIVITY_OPTIONS),
     # Stock strands browser, executed only by the desktop worker: Temporal
     # routes this activity to the desktop task queue natively.
-    activity_as_tool(
-        browser_activity,
-        **_DESKTOP_ACTIVITY_OPTIONS,
-    ),
+    # desktop_action() heartbeats while the stock tool blocks on the GUI, so
+    # the browser shares the computer-use heartbeat envelope.
+    activity_as_tool(browser_activity, **_DESKTOP_ACTIVITY_OPTIONS),
     activity_as_tool(mcp_client_activity, **_MCP_ACTIVITY_OPTIONS),
     activity_as_tool(graph_activity, **_GRAPH_ACTIVITY_OPTIONS),
     activity_as_tool(use_agent_activity, **_USE_AGENT_ACTIVITY_OPTIONS),
     activity_as_tool(use_skill_activity, **_MCP_ACTIVITY_OPTIONS),
 )
 
-# The think activity streams nested-agent cycles on THINKING_TOPIC and
-# heartbeats per chunk. The envelope lives in config.py: one attempt (a
-# failed thought is re-thought by the orchestrator, not blindly replayed),
-# 10 minutes per attempt, and a heartbeat window generous enough for slow
-# model chunks.
+# think_activity.think is the thin Pattern-2 surface-3 wrapper that runs the
+# installed strands_tools.think callable (unmodified) inside an activity —
+# the only place a synchronous, nested-agent ecosystem tool can execute
+# (workflow loops block threads; agent objects cannot cross the activity
+# boundary). One automatic attempt: a replayed think is a duplicate
+# inference, so a failed one is re-driven by the model, not blindly retried.
 THINK_TOOL = activity_as_tool(
     think_activity.think,
     start_to_close_timeout=THINK_START_TO_CLOSE,
@@ -196,61 +202,11 @@ THINK_TOOL = activity_as_tool(
     retry_policy=THINK_RETRY_POLICY,
 )
 
-# Perplexity Agent API sub-agent operations (perplexity_operations.py).
-# Background preset runs can research for many minutes; the AGENT_OPERATION_*
-# envelope from config.py is the generous-stream envelope. Creates get exactly
-# one automatic attempt (no idempotency key on POST /v1/responses — see
-# config.AGENT_CREATE_RETRY_POLICY); retrieve/list/download are read-only and
-# retry normally.
-_AGENT_OPERATION_OPTIONS = dict(
-    start_to_close_timeout=AGENT_OPERATION_START_TO_CLOSE,
-    heartbeat_timeout=AGENT_OPERATION_HEARTBEAT,
-)
-
-_AGENT_CREATE_ACTIVITIES = (
-    perplexity_operations.create_fast_agent_response,
-    perplexity_operations.create_low_agent_response,
-    perplexity_operations.create_medium_agent_response,
-    perplexity_operations.create_high_agent_response,
-    perplexity_operations.create_xhigh_agent_response,
-    perplexity_operations.create_wide_research_agent_response,
-)
-
-_AGENT_READ_ACTIVITIES = (
-    perplexity_operations.retrieve_agent_response,
-    perplexity_operations.list_agent_response_files,
-    perplexity_operations.download_agent_response_file,
-    perplexity_operations.list_agent_models,
-    perplexity_operations.cancel_agent_response,
-)
-
-AGENT_API_TOOLS = (
-    *(
-        activity_as_tool(
-            activity_fn,
-            retry_policy=AGENT_CREATE_RETRY_POLICY,
-            **_AGENT_OPERATION_OPTIONS,
-        )
-        for activity_fn in _AGENT_CREATE_ACTIVITIES
-    ),
-    *(
-        activity_as_tool(
-            activity_fn,
-            retry_policy=AGENT_OPERATION_RETRY_POLICY,
-            **_AGENT_OPERATION_OPTIONS,
-        )
-        for activity_fn in _AGENT_READ_ACTIVITIES
-    ),
-)
-
 def _format_agent_api_models(catalog: Any) -> str | None:
-    entries = catalog.get("data") if isinstance(catalog, dict) else None
-    if not isinstance(entries, list):
-        return None
     ids = [
-        entry["id"]
-        for entry in entries
-        if isinstance(entry, dict) and isinstance(entry.get("id"), str) and entry["id"]
+        entry.id
+        for entry in catalog or []
+        if isinstance(getattr(entry, "id", None), str) and entry.id
     ]
     if not ids:
         return None
@@ -262,36 +218,21 @@ async def render_agent_api_models(
     *,
     executor: Callable[..., Any] | None = None,
 ) -> str | None:
+    """The worker's registered model ids for the ``<agent_api_models>`` prompt block.
+
+    Read from the worker's own ``model_catalog`` activity: the ids a graph node
+    or ``use_agent`` ``model_id`` may name are exactly the registered factories.
+    """
     del context
     execute = executor or workflow.execute_activity
     catalog = await execute(
-        perplexity_operations.list_agent_models,
-        retry_policy=AGENT_OPERATION_RETRY_POLICY,
-        **_AGENT_OPERATION_OPTIONS,
+        model_catalog,
+        start_to_close_timeout=CATALOG_ACTIVITY_TIMEOUT,
     )
     return _format_agent_api_models(catalog)
 
 _MCP_CONFIG_PATH = Path(__file__).resolve().parent / "mcp.json"
 _SHELL_MCP = Path(__file__).resolve().parent / ".venv/bin/strands-shell"
-_AGENT_IDENTITY_PATH = Path(__file__).resolve().parent / "agent.json"
-
-
-def think_prompts() -> tuple[str, str | None]:
-    """The think persona and methodology prompts from agent.json's ``think``
-    key. The activity owns no prompt text; these are its arguments. A missing
-    key degrades to the caller's own system prompt + upstream's default
-    thinking instructions (telemetry.py's graceful-degradation convention).
-    """
-    identity = json.loads(_AGENT_IDENTITY_PATH.read_text()).get("think") or {}
-    persona = identity.get("system_prompt")
-    methodology = identity.get("thinking_system_prompt")
-    return (
-        persona if isinstance(persona, str) and persona.strip() else "",
-        methodology if isinstance(methodology, str) and methodology.strip() else None,
-    )
-
-
-THINK_SYSTEM_PROMPT, THINK_METHODOLOGY_PROMPT = think_prompts()
 
 
 def _eager_mcp_server_names() -> frozenset[str]:
@@ -300,6 +241,20 @@ def _eager_mcp_server_names() -> frozenset[str]:
     return frozenset(
         name for name, cfg in servers.items() if not cfg.get("continue_on_error")
     )
+
+
+_ENV_REF = re.compile(r"\$\{(?:env:)?([^}]+)\}")
+
+
+def _server_env_missing(cfg: dict[str, Any]) -> bool:
+    blobs: list[str] = []
+    env = cfg.get("env")
+    if isinstance(env, dict):
+        blobs.extend(str(value) for value in env.values())
+    for key in ("command", "url"):
+        if isinstance(cfg.get(key), str):
+            blobs.append(cfg[key])
+    return any(not os.environ.get(name) for blob in blobs for name in _ENV_REF.findall(blob))
 
 
 def mcp_client_factories() -> dict[str, Callable[[], MCPClient]]:
@@ -313,6 +268,27 @@ def mcp_client_factories() -> dict[str, Callable[[], MCPClient]]:
     https://github.com/temporalio/sdk-python/blob/main/temporalio/contrib/strands/README.md
     """
     raw = json.loads(_MCP_CONFIG_PATH.read_text())
+    servers = raw.get("mcpServers", {})
+    root = _MCP_CONFIG_PATH.parent
+    for name, cfg in list(servers.items()):
+        if not isinstance(cfg, dict):
+            continue
+        if _server_env_missing(cfg):
+            del servers[name]
+            continue
+        args = cfg.get("args")
+        if not isinstance(args, list):
+            continue
+        rewritten: list[str] = []
+        for index, item in enumerate(args):
+            text = str(item)
+            previous = str(args[index - 1]) if index else ""
+            candidate = root / "strands-tools" / text
+            if previous == "--from" and candidate.exists():
+                rewritten.append(str(candidate.resolve()))
+            else:
+                rewritten.append(text)
+        cfg["args"] = rewritten
     if _SHELL_MCP.is_file():
         raw["mcpServers"]["shell"]["command"] = str(_SHELL_MCP.resolve())
     eager = _eager_mcp_server_names()
@@ -340,6 +316,42 @@ THINKING_TOPIC = "thinking"
 APPROVAL_TOPIC = "approval"
 HANDOFF_TOPIC = "handoff"
 
+# Subscribed by server.py alongside the others; nothing publishes on it since
+# the Agent API sub-agent operations were removed. Kept so the SSE frame
+# contract with the protected route stays intact.
+AGENT_RUNS_TOPIC = "agent_runs"
+
+
+def _clamp_result_content(content: list[Any]) -> list[Any]:
+    """Drop screenshot/image bytes from a toolResult content list.
+
+    Text is preserved; JSON text blobs lose only their screenshot/mediaType
+    keys. Used for carried message history (continue-as-new) and for
+    ``tool_results`` publishes, so image bytes never enter durable history.
+    """
+    clamped: list[Any] = []
+    for item in content:
+        if not isinstance(item, dict):
+            clamped.append(item)
+            continue
+        if "image" in item:
+            continue
+        text = item.get("text")
+        if isinstance(text, str) and text.lstrip().startswith("{"):
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                # Preserve ordinary tool text that only resembles JSON.
+                clamped.append(item)
+                continue
+            if isinstance(data, dict) and "screenshot" in data:
+                data.pop("screenshot", None)
+                data.pop("mediaType", None)
+                clamped.append({**item, "text": json.dumps(data)})
+                continue
+        clamped.append(item)
+    return clamped
+
 
 def _clamp_tool_results(messages: Messages) -> Messages:
     """Drop Computer Use screenshot bytes before continue-as-new.
@@ -357,28 +369,7 @@ def _clamp_tool_results(messages: Messages) -> Messages:
         for block in content:
             result = block.get("toolResult") if isinstance(block, dict) else None
             if result and isinstance(result.get("content"), list):
-                new_result_content = []
-                for item in result["content"]:
-                    if not isinstance(item, dict):
-                        new_result_content.append(item)
-                        continue
-                    if "image" in item:
-                        continue
-                    text = item.get("text")
-                    if isinstance(text, str) and text.lstrip().startswith("{"):
-                        try:
-                            data = json.loads(text)
-                            if isinstance(data, dict) and "screenshot" in data:
-                                data.pop("screenshot", None)
-                                data.pop("mediaType", None)
-                                item = {**item, "text": json.dumps(data)}
-                                text = item["text"]
-                        except json.JSONDecodeError:
-                            # Preserve ordinary tool text that only resembles JSON.
-                            new_result_content.append(item)
-                            continue
-                    new_result_content.append(item)
-                block = {**block, "toolResult": {**result, "content": new_result_content}}
+                block = {**block, "toolResult": {**result, "content": _clamp_result_content(result["content"])}}
             new_content.append(block)
         clamped.append({**message, "content": new_content})
     return clamped
@@ -484,6 +475,14 @@ def turn_content_blocks(turn: TurnInput) -> list[dict[str, Any]]:
     """Strands ContentBlocks for one turn (pure; safe to unit-test).
 
     Shapes match the Strands Gemini multimodal docs: image, document, video.
+
+    ``source.bytes`` holds the route's base64 text, not raw ``bytes``: these
+    blocks become agent messages and so the ``invoke_model_streaming``
+    activity input, which StrandsPlugin's pydantic JSON converter serializes.
+    JSON has no bytes type -- UTF-8 bytes arrive in the activity as ``str``
+    (Strands' ``b64encode`` then raises TypeError) and binary bytes fail to
+    serialize at all. Provider adapters decode at the request boundary
+    (``perplexity_model.source_bytes``).
     """
     blocks: list[dict[str, Any]] = []
     if turn.prompt:
@@ -491,36 +490,15 @@ def turn_content_blocks(turn: TurnInput) -> list[dict[str, Any]]:
     for image in turn.images:
         if image.format not in _SUPPORTED_IMAGE_FORMATS:
             continue
-        blocks.append(
-            {
-                "image": {
-                    "format": image.format,
-                    "source": {"bytes": base64.b64decode(image.data)},
-                }
-            }
-        )
+        blocks.append({"image": {"format": image.format, "source": {"bytes": image.data}}})
     for document in turn.documents:
         if document.format not in _SUPPORTED_DOCUMENT_FORMATS:
             continue
-        blocks.append(
-            {
-                "document": {
-                    "format": document.format,
-                    "source": {"bytes": base64.b64decode(document.data)},
-                }
-            }
-        )
+        blocks.append({"document": {"format": document.format, "source": {"bytes": document.data}}})
     for video in turn.videos:
         if video.format not in _SUPPORTED_VIDEO_FORMATS:
             continue
-        blocks.append(
-            {
-                "video": {
-                    "format": video.format,
-                    "source": {"bytes": base64.b64decode(video.data)},
-                }
-            }
-        )
+        blocks.append({"video": {"format": video.format, "source": {"bytes": video.data}}})
     return blocks
 
 
@@ -568,7 +546,7 @@ class _ToolResultHook(HookProvider):
             if result and result["toolUseId"] not in self._recorded:
                 self._publish({"tool_use_id": result["toolUseId"],
                                "status": result.get("status", "error"),
-                               "content": result.get("content", [])})
+                               "content": _clamp_result_content(result.get("content", []))})
         self._recorded.clear()
 
     def _bind_skill_activity(self, event: BeforeToolCallEvent) -> None:
@@ -593,7 +571,10 @@ class _ToolResultHook(HookProvider):
             {
                 "tool_use_id": result.get("toolUseId", event.tool_use["toolUseId"]),
                 "status": result.get("status", "success"),
-                "content": result.get("content", []),
+                # Clamped: published frames are durable workflow history, so
+                # screenshot bytes must never ride them (the model keeps the
+                # full result; only the publish is stripped).
+                "content": _clamp_result_content(result.get("content", [])),
             }
         )
 
@@ -659,14 +640,22 @@ class _HotLoadHook(HookProvider):
         inp = event.tool_use.get("input") or {}
         name = event.tool_use.get("name")
         if name == "load_tool":
-            path = inp.get("path")
-            tool_name = inp.get("name")
-            # The activity tool's success envelope is serialized to text by
-            # TemporalActivityTool, so the official load_tool result lives
-            # inside the ToolResult content blocks, not on the event result.
+            action = inp.get("action") or "load"
             result = result if result.get("status") == "success" else (
                 _tool_result_payload(result) or {}
             )
+            if action == "unload":
+                tool_name = inp.get("name")
+                if result.get("status") == "success" and tool_name:
+                    self._loaded_tools[:] = [
+                        rec for rec in self._loaded_tools if rec.name != tool_name
+                    ]
+                    event.agent.tool_registry.registry.pop(tool_name, None)
+                return
+            if action != "load":
+                return
+            path = inp.get("path")
+            tool_name = inp.get("name")
             if result.get("status") != "success" or not path or not tool_name:
                 return
             path = tool_file_path(path)
@@ -699,174 +688,6 @@ class _HotLoadHook(HookProvider):
                 self._connected_mcp.remove(connection_id)
             if connection_id in self._extra_mcp:
                 self._extra_mcp.remove(connection_id)
-
-
-def _prompt_text_from_message(message: Any) -> str | None:
-    """The joined text of a plain user message, or None if not think-eligible.
-
-    Eligible means: a dict message with role == "user" whose content list has
-    at least one text block and no interruptResponse blocks (the HITL resume
-    path re-fires BeforeInvocationEvent with interruptResponse content).
-    """
-    if not isinstance(message, dict) or message.get("role") != "user":
-        return None
-    content = message.get("content")
-    if not isinstance(content, list):
-        return None
-    texts: list[str] = []
-    for block in content:
-        if not isinstance(block, dict):
-            continue
-        if "interruptResponse" in block:
-            return None
-        text = block.get("text")
-        if isinstance(text, str):
-            texts.append(text)
-    joined = "\n".join(texts).strip()
-    return joined or None
-
-
-class _ThinkFirstHook(HookProvider):
-    """Require the model's first tool call to be Think, not a fixed pre-turn cycle.
-
-    The BeforeInvocation activity hook below remains for pre-patch replay only.
-
-    Two callbacks, both deterministic apart from the dispatched activity:
-
-    - ``BeforeInvocationEvent`` → ``activity_as_hook(think_activity.think,
-      ...)``: the new user message is ``event.messages[-1]`` (not yet appended
-      to ``agent.messages``), so the think dispatch receives its text as a
-      ``ThinkInput``. The hook carries no ``workflow.execute_activity`` call of
-      its own; ``activity_as_hook`` owns dispatch. The activity publishes its
-      final notes as one ``{"think_notes": ...}`` frame on THINKING_TOPIC
-      before returning.
-    - ``BeforeModelCallEvent`` → ``_fold_think_notes``: reads the durable
-      stream state, takes the LAST ``think_notes`` frame at or after this
-      turn's start offset, and appends it as a ``<think_notes>`` text block to
-      the conversation's last user message — exactly what the model will see.
-
-    Guards:
-    - Skips interruptResponse resumes and any non-user/non-text message.
-    - Applies at most once per turn (``begin_turn`` resets the guard; the
-      applied offset doubles as a stale-frame guard on cancel/replay).
-    - A think activity returning ``status: "error"`` publishes no notes, so
-      the model proceeds with the bare prompt; infra errors propagate like
-      any other activity failure.
-    """
-
-    def __init__(self, system_prompt: str, stream: WorkflowStream, *, model_chosen: bool = False) -> None:
-        # Optional agent.json think.system_prompt only. An empty value leaves
-        # strands_tools.think's default persona in place.
-        # Empty persona uses strands_tools.think's default analytical prompt.
-        # Do not fall back to the session prompt — that is the choreography
-        # that turns Think into an orchestrator memo.
-        self._system_prompt = THINK_SYSTEM_PROMPT or ""
-        self._stream = stream
-        self._applied_offset: int | None = None
-        self._turn_start_offset: int | None = None
-        self._model_chosen = model_chosen
-        self._called = False
-
-    def begin_turn(self, turn_start_offset: int) -> None:
-        """Reset the once-per-turn guard; called at the start of ``turn``."""
-        self._applied_offset = None
-        self._turn_start_offset = turn_start_offset
-        self._called = False
-
-    def register_hooks(self, registry: HookRegistry, **kwargs: object) -> None:
-        if self._model_chosen:
-            registry.add_callback(BeforeModelCallEvent, self._require_think)
-            registry.add_callback(AfterModelCallEvent, self._verify_first_call)
-            registry.add_callback(BeforeToolCallEvent, self._record_call)
-            return
-        registry.add_callback(
-            BeforeInvocationEvent,
-            activity_as_hook(
-                think_activity.think,
-                activity_input=self._input,
-                start_to_close_timeout=THINK_START_TO_CLOSE,
-                heartbeat_timeout=THINK_HEARTBEAT_TIMEOUT,
-                retry_policy=THINK_RETRY_POLICY,
-            ),
-        )
-        registry.add_callback(BeforeModelCallEvent, self._fold_think_notes)
-
-    def _require_think(self, event: BeforeModelCallEvent) -> None:
-        # Select only the required tool name; never decide effort/cycles in code.
-        event.invocation_state["require_think"] = not self._called
-
-    def _verify_first_call(self, event: AfterModelCallEvent) -> None:
-        if self._called or event.stop_response is None:
-            return
-        if event.stop_response.stop_reason not in ("tool_use", "end_turn", "stop_sequence"):
-            # Cancellation/interrupt is not a final response that bypassed Think.
-            return
-        uses = [block["toolUse"] for block in event.stop_response.message.get("content", []) if "toolUse" in block]
-        if not uses or uses[0]["name"] != "think":
-            raise ApplicationError("The first tool call of this turn must be think", non_retryable=True)
-
-    def _record_call(self, event: BeforeToolCallEvent) -> None:
-        if event.tool_use["name"] == "think":
-            self._called = True
-            event.invocation_state["require_think"] = False
-        elif not self._called:
-            event.cancel_tool = "Call think first and choose its effort and cycle_count"
-
-    def _input(self, event: BeforeInvocationEvent) -> ThinkInput | None:
-        """The think activity input for a fresh user prompt, or None to skip."""
-        messages = event.messages
-        if not messages:  # None on some invocation paths, or empty
-            return None
-        prompt = _prompt_text_from_message(messages[-1])
-        if prompt is None:
-            return None
-        return ThinkInput(
-            thought=prompt,
-            cycle_count=1,
-            system_prompt=self._system_prompt,
-        )
-
-    def _fold_think_notes(self, event: BeforeModelCallEvent) -> None:
-        """Fold the turn's published think notes into the last user message."""
-        messages = getattr(event.agent, "messages", None)
-        if not messages:
-            return
-        last = messages[-1]
-        if _prompt_text_from_message(last) is None:
-            return
-        if self._turn_start_offset is None:
-            return
-        notes: str | None = None
-        offset = self._turn_start_offset
-        state = self._stream.get_state()
-        for index in range(len(state.log) - 1, -1, -1):
-            item = state.log[index]
-            frame_offset = state.base_offset + index
-            if frame_offset < self._turn_start_offset:
-                break
-            if item.topic != THINKING_TOPIC:
-                continue
-            data = item.data
-            if isinstance(data, str):  # wire form: base64 proto Payload
-                try:
-                    data = workflow.payload_converter().from_payload(
-                        _decode_payload(data)
-                    )
-                except Exception:  # noqa: BLE001 - a foreign frame, not ours
-                    continue
-            if isinstance(data, dict) and isinstance(data.get("think_notes"), str):
-                notes, offset = data["think_notes"], frame_offset
-                break
-        if notes is None or not notes.strip():
-            return
-        if self._applied_offset is not None and self._applied_offset >= offset:
-            return
-        content = last.get("content")
-        if isinstance(content, list):
-            content.append(
-                {"text": "\n\n<think_notes>\n" + notes + "\n</think_notes>"}
-            )
-            self._applied_offset = offset
 
 
 class _ComputerUseSafetyHook(HookProvider):
@@ -996,12 +817,8 @@ class ChatWorkflow:
         self._desktop_used = input.desktop_used or input.human_control or input.handoff_requested or bool(input.handoff_run_id)
         self._pending_reason: str | None = None
         self._resume_prompt = input.resume_prompt
-        self._model_chosen_think = False
-        self._active_thinker: TemporalAgent | None = None
         self._handoff_run_id = input.handoff_run_id
         self._handoff_rollover = False
-        # Installed by _build_agent; turn() resets its once-per-turn flag.
-        self._think_hook: _ThinkFirstHook | None = None
 
     def _stream_offset(self) -> int:
         """Current global stream offset: base_offset + log length.
@@ -1029,56 +846,17 @@ class ChatWorkflow:
             ),
             *([_ComputerUseSafetyHook()] if is_gemini else []),
         ]
-        self._think_hook = _ThinkFirstHook(
-            self._system_prompt, self._stream,
-            model_chosen=getattr(self, "_model_chosen_think", False),
-        )
-        tools = [*PERMANENT_COMMUNITY_TOOLS, THINK_TOOL, *AGENT_API_TOOLS,
-                 *catalog, *extras, *COMPUTER_USE_TOOLS]
-        if getattr(self, "_model_chosen_think", False):
-            @tool(name="think", context=True)
-            async def think(thought: str, cycle_count: int, system_prompt: str,
-                            tool_context: ToolContext,
-                            tools: list[str] | None = None,
-                            thinking_system_prompt: str | None = None):
-                """Recursive thinking tool. Each cycle is a nested agent that can
-                interleave reasoning with tool calls. Streaming adapts
-                strands_tools.think. Tools inherit from the
-                parent the native way (omit ``tools``). Cycles run on the
-                session's worker-registered model, so upstream's
-                model_provider/model_settings are not offered.
+        tool_results_hook = _ToolResultHook(self._tool_results.publish)
 
-                Args:
-                    thought: The thought, question, or problem to process.
-                    cycle_count: Number of thinking cycles. Each cycle
-                        builds on the previous cycle's conclusion.
-                    system_prompt: Custom system prompt for the nested thinker.
-                    thinking_system_prompt: Optional HOW-it-thinks instructions.
-                        Omit to use the community tool's default ("use other
-                        available tools as needed").
-                    tools: Parent tool names to include; omit to inherit all except think.
-                """
-                async for event in think_activity.think_async(
-                    thought, cycle_count, system_prompt, agent=tool_context.agent,
-                    tools=tools, model_name=self._model_id,
-                    thinking_system_prompt=thinking_system_prompt,
-                    invocation_state=tool_context.invocation_state,
-                    hooks=[_ToolResultHook(self._tool_results.publish),
-                           _HumanControlHook(self._human_control, self._handoff_requested, self._handoffs.publish),
-                           *([_ComputerUseSafetyHook()] if is_gemini else []),
-                           _HotLoadHook(self._loaded_tools, self._extra_mcp_servers, self._connected_mcp_servers)],
-                    on_agent=self._set_thinker, resolve_interrupts=self._think_approval,
-                ):
-                    yield event
-            tools = [binding for binding in tools if getattr(binding, "tool_name", None) != "think"]
-            tools.insert(0, think)
+        tools = [*PERMANENT_COMMUNITY_TOOLS, THINK_TOOL,
+                 *catalog, *extras, *COMPUTER_USE_TOOLS]
         agent = TemporalAgent(
             # A registered factory NAME from run_worker.py's models= mapping,
             # never a Model instance (guide R1).
             model=self._model_id,
             start_to_close_timeout=MODEL_START_TO_CLOSE,
             heartbeat_timeout=MODEL_HEARTBEAT,
-            retry_policy=MODEL_RETRY_POLICY,
+            retry_policy=MODEL_RETRY_POLICY if is_gemini else PERPLEXITY_MODEL_RETRY_POLICY,
             # Every batch is a durable Signal appended to workflow history,
             # so this is a history-pressure dial, not a latency dial: at 25 ms
             # a single turn produced 5,158 signals and 24,953 history events,
@@ -1107,11 +885,26 @@ class ChatWorkflow:
                     render_agent_api_models,
                     name="agent-api-models",
                 ),
+                # Strands' own large-tool-result handling, the same plugin
+                # Agent(context_manager="auto") installs. Oversized results
+                # (uncapped browser get_text bodies, ~111 KB each) are
+                # replaced in ``agent.messages`` by a preview plus a
+                # ``retrieve_offloaded_content`` reference, so they stop
+                # riding in every later model activity input (live:
+                # chat-d6d70dc8b3ee69f8, ~20 MB of messages + ~22 MB
+                # invocation_state duplicate → Temporal 50 MB history
+                # termination mid-turn). A fresh InMemoryStorage per agent:
+                # the plugin binds it to one agent id and the session's
+                # agent is rebuilt per model switch and continue-as-new.
+                ContextOffloader(
+                    storage=InMemoryStorage(),
+                    max_result_tokens=CONTEXT_OFFLOAD_MAX_RESULT_TOKENS,
+                    preview_tokens=CONTEXT_OFFLOAD_PREVIEW_TOKENS,
+                ),
             ],
             tools=tools,
             hooks=[
-                self._think_hook,
-                _ToolResultHook(self._tool_results.publish),
+                tool_results_hook,
                 *computer_use_hooks,
                 _HotLoadHook(
                     self._loaded_tools,
@@ -1126,25 +919,6 @@ class ChatWorkflow:
                 workflow.logger.warning("load_tool %s not restored: %s", rec.name, registered)
         self._agent_extra_mcp = tuple(self._extra_mcp_servers)
         return agent
-
-    def _set_thinker(self, agent: Any) -> None:
-        self._active_thinker = agent
-
-    async def _think_approval(self, interrupts: list[Any]) -> list[InterruptResponseContent]:
-        responses = []
-        try:
-            for pending in interrupts:
-                if not self._human_control[0]:
-                    self._pending_reason = pending.reason
-                    self._approvals.publish({"reason": pending.reason})
-                    await workflow.wait_condition(lambda: self._approval is not None or self._human_control[0])
-                responses.append({"interruptResponse": {"interruptId": pending.id,
-                                  "response": "deny" if self._human_control[0] else self._approval}})
-                self._approval = None
-            return responses
-        finally:
-            self._pending_reason = None
-            self._approvals.publish({"reason": None})
 
     def _content_blocks(self, turn: TurnInput) -> list[dict[str, Any]]:
         """Strands ContentBlocks for one turn.
@@ -1192,18 +966,22 @@ class ChatWorkflow:
             turn_start_offset = self._stream_offset()
             self._turn_start_offset = turn_start_offset
 
-            # New turn: the think-first hook folds this turn's notes once,
-            # keyed to frames at or after this offset — never re-applied on
-            # HITL interrupt resumes below.
-            if self._think_hook is not None:
-                self._think_hook.begin_turn(turn_start_offset)
-
             if self._resume_prompt:
                 turn.prompt = self._resume_prompt
                 self._resume_prompt = ""
                 # Native activity and tool-result content give the new run a
                 # fresh physical view of human changes before its first model call.
-                capture = next(t for t in agent.tool_registry.registry.values() if t.tool_name == "take_screenshot")
+                capture = next(
+                    (t for t in agent.tool_registry.registry.values() if t.tool_name == "take_screenshot"),
+                    None,
+                )
+                if capture is None:
+                    # A bare StopIteration here would poison the workflow task
+                    # into a permanent retry loop; fail the turn update instead.
+                    raise ApplicationError(
+                        "take_screenshot tool is not registered on this agent",
+                        non_retryable=True,
+                    )
                 tool_use = {"toolUseId": f"resume-{workflow.info().run_id}",
                             "name": "take_screenshot", "input": {}}
                 agent.messages.append({"role": "assistant", "content": [{"toolUse": tool_use}]})
@@ -1358,8 +1136,6 @@ class ChatWorkflow:
         self._handoff_requested[0] = True
         if self._agent is not None:
             self._agent.cancel()
-        if self._active_thinker is not None:
-            self._active_thinker.cancel()
         self._handoffs.publish(
             {
                 "active": True,
@@ -1398,7 +1174,7 @@ class ChatWorkflow:
                 raise ApplicationError("Desktop control requires claimed human ownership", non_retryable=True)
         options = dict(
             task_queue=DESKTOP_BROWSER_TASK_QUEUE,
-            start_to_close_timeout=2 * DESKTOP_HANDOFF_TIMEOUT,
+            start_to_close_timeout=DESKTOP_HANDOFF_START_TO_CLOSE,
             schedule_to_start_timeout=DESKTOP_HANDOFF_TIMEOUT,
             schedule_to_close_timeout=DESKTOP_TASK_TIMEOUT,
             retry_policy=DESKTOP_MUTATION_RETRY_POLICY,
@@ -1487,7 +1263,9 @@ class ChatWorkflow:
     async def run(self, input: ChatInput) -> None:
         # Rebuilt here, not in __init__, so a continued run resumes from the
         # messages the previous run carried over (guide Pattern 9).
-        self._model_chosen_think = workflow.patched("think-model-chosen-astra-v1")
+        # Retire pre-Orchestrator-parent think paths (activity hook / stand-in agent).
+        workflow.deprecate_patch("think-model-chosen-astra-v1")
+        workflow.deprecate_patch("think-native-tool-v1")
         self._agent = self._build_agent(input.messages)
 
         # The test-only threshold ORs with the SDK's own suggestion, never
@@ -1562,7 +1340,7 @@ class ChatWorkflow:
                 await workflow.execute_activity(
                     release_desktop,
                     task_queue=DESKTOP_BROWSER_TASK_QUEUE,
-                    start_to_close_timeout=2 * DESKTOP_HANDOFF_TIMEOUT,
+                    start_to_close_timeout=DESKTOP_HANDOFF_START_TO_CLOSE,
                     schedule_to_start_timeout=DESKTOP_HANDOFF_TIMEOUT,
                     schedule_to_close_timeout=DESKTOP_TASK_TIMEOUT,
                     retry_policy=DESKTOP_MUTATION_RETRY_POLICY,

@@ -17,9 +17,8 @@ One place for the three things every nested-agent activity needs:
    activity boundary (skill Pattern 2). :func:`parent_agent` rebuilds a plain
    ``Agent`` so ``graph_tool._select_tools`` can read ``parent.tool_registry``.
 
-``think_activity`` deliberately keeps its own copy of the model registry — it
-predates this module and its behavior is pinned by tests; do not fold it in
-opportunistically.
+Think does not use this module; it runs on the session ``TemporalAgent`` in
+``workflow.py`` with the Orchestrator as parent ``agent=``.
 """
 
 from __future__ import annotations
@@ -127,8 +126,25 @@ _MAX_DEPTH = 24
 _REPR_LIMIT = 300
 
 
-def publishable(value: Any, depth: int = 0) -> Any:
+def publishable(value: Any, depth: int = 0, *, agent_event: bool = False) -> Any:
     """JSON-safe copy of one native event for the Temporal payload converter."""
+    if agent_event and isinstance(value, dict):
+        # Agent.stream_async emits raw model fragments AND derived callback
+        # events. The latter include invocation state and cumulative tool input.
+        # Keep the native IDs; raw fragments + the final message carry input
+        # losslessly without persisting its growing prefix once per token.
+        value = {key: item for key, item in value.items() if key not in {
+            "request_state", "event_loop_cycle_id", "event_loop_cycle_trace",
+            "event_loop_cycle_span", "event_loop_parent_cycle_id",
+            "messages", "system_prompt", "tool_config",
+        }}
+        if value.get("type") == "tool_use_stream":
+            current = value.get("current_tool_use")
+            if isinstance(current, dict):
+                value["current_tool_use"] = {key: current[key] for key in ("toolUseId", "name") if key in current}
+            value.pop("delta", None)
+        elif "data" in value or "reasoningText" in value or "citation" in value:
+            value.pop("delta", None)
     if depth > _MAX_DEPTH:
         return None
     if value is None or isinstance(value, (bool, int, float, str)):
@@ -194,10 +210,10 @@ def sanitize_stream_payload(raw: Any, name_key: str = "skill_name") -> dict[str,
     if isinstance(inner, dict):
         delta = inner.get("data")
         if isinstance(delta, str):
-            return {name_key: label, "text": delta, "event": publishable(inner)}
+            return {name_key: label, "text": delta, "event": publishable(inner, agent_event=True)}
     return {
         name_key: label,
-        "event": json_safe(inner),
+        "event": publishable(inner, agent_event=True),
         "text": raw.get("text"),
     }
 

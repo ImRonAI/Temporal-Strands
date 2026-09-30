@@ -76,6 +76,19 @@ class HangingModel(ScriptedModel):
         yield {}
 
 
+@pytest.mark.asyncio
+async def test_graph_tool_without_terminal_result_fails() -> None:
+    from strands import Agent
+
+    async def empty_stream(*args):
+        if False:
+            yield
+
+    with patch.object(ga.sibling_graph, "stream", empty_stream):
+        with pytest.raises(ApplicationError, match="produced no tool result"):
+            await ga._run_sibling({}, Agent(model=ScriptedModel(), tools=[]), "empty")
+
+
 class FakeTopic:
     def __init__(self) -> None:
         self.published: list[Any] = []
@@ -684,32 +697,55 @@ def test_skill_agent_node_tools_come_from_parent_registry(monkeypatch) -> None:
         ensure_skills_configured(None)
 
 
-def test_agent_node_ignores_skills_like_official_create_agent_with_model() -> None:
-    """Official ``create_agent_with_model`` has no node ``skills`` field.
-
-    Catalog work is ``skill_agent`` / ``_create_skill_agent``. An agent node's
-    ``skills`` list must not inject an inline skill tool — that is how
-    Agent API names such as ``pplx_sdk`` became ``SkillNotFoundError``.
-    """
+def test_agent_node_unknown_skill_fails(monkeypatch, tmp_path) -> None:
+    """An Agent API name such as pplx_sdk is not a catalog skill."""
     from strands import Agent
 
     import graph_tool
+    import skills_config
 
+    monkeypatch.setenv("SKILLS_DIR", str(tmp_path))
+    skills_config.catalog_skills.cache_clear()
     parent = Agent(model=ScriptedModel(), tools=[], callback_handler=None)
-    agent = graph_tool._build_agent(
-        {"id": "coder", "system_prompt": "Code.", "skills": ["pplx_sdk"]},
-        parent, None, None,
+    try:
+        with pytest.raises(LookupError, match="pplx_sdk"):
+            graph_tool._build_agent(
+                {"id": "coder", "system_prompt": "Code.", "skills": ["pplx_sdk"]},
+                parent, None, None,
+            )
+    finally:
+        skills_config.catalog_skills.cache_clear()
+
+
+def test_agent_node_assigned_skills_become_the_skills_tool(monkeypatch, tmp_path) -> None:
+    """A node's skills list scopes the official AgentSkills tool to those names."""
+    from strands import Agent
+
+    import graph_tool
+    import skills_config
+
+    directory = tmp_path / "helper"
+    directory.mkdir()
+    (directory / "SKILL.md").write_text(
+        "---\nname: helper\ndescription: Help.\n---\n# helper\n"
     )
-    assert "skill" not in set(agent.tool_registry.registry)
-    assert agent.system_prompt == "Code."
+    monkeypatch.setenv("SKILLS_DIR", str(tmp_path))
+    skills_config.catalog_skills.cache_clear()
+    parent = Agent(model=ScriptedModel(), tools=[], callback_handler=None)
+    try:
+        agent = graph_tool._build_agent(
+            {"id": "coder", "system_prompt": "Code.", "skills": ["helper"]},
+            parent, None, None,
+        )
+    finally:
+        skills_config.catalog_skills.cache_clear()
+    assert "skills" in set(agent.tool_registry.registry)
 
 
 @pytest.mark.asyncio
-async def test_node_tools_inherit_what_the_orchestrator_loaded() -> None:
-    """A node may name a tool the orchestrator load_tool-ed onto itself even
-    when the formation-wide ``tools`` default omits it: the parent is rebuilt
-    from the workflow's loaded_tools query, and the official per-node filter
-    finds the name there."""
+async def test_node_tools_are_only_the_names_it_lists() -> None:
+    """A node may name a tool the orchestrator load_tool-ed onto itself.
+    A node that omits ``tools`` gets none of them."""
     from load_tool import STRANDS_TOOLS_DIR
 
     import graph_tool
@@ -746,7 +782,7 @@ async def test_node_tools_inherit_what_the_orchestrator_loaded() -> None:
         )
     assert result["status"] == "success"
     assert seen[0] == {"calculator"}
-    assert seen[1] == {"calculator"}
+    assert seen[1] == set()
 
 
 # --- management actions (process-local) --------------------------------------
@@ -790,7 +826,9 @@ def test_activity_as_tool_spec_is_flat_and_documented() -> None:
     assert set(topology["properties"]) == {"nodes", "edges", "entry_points"}
     assert topology["required"] == ["nodes"]
     node = schema["$defs"]["GraphNode"]
-    assert set(node["properties"]) == {"id", "role", "system_prompt", "model_settings", "tools"}
+    assert set(node["properties"]) == {
+        "id", "role", "system_prompt", "model_settings", "tools", "skills",
+    }
     settings = schema["$defs"]["GraphModelSettings"]["properties"]
     assert set(settings) == {"model_id"}
     import json as _json
@@ -812,7 +850,7 @@ def test_activity_as_tool_spec_is_flat_and_documented() -> None:
 
     assert bare_objects(schema) == []
     # The outbound conversion (verbatim schema) passes the Agent API validator.
-    from perplexity_operations import _validate_tools
+    from agent_api_tools import _validate_tools
 
     _validate_tools([{
         "type": "function",

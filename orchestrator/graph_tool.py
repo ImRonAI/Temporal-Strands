@@ -191,15 +191,14 @@ def _tool_name(tool_obj: Any) -> str:
 def _select_tools(
     parent_agent: Optional[Agent], tools: Optional[List[str]]
 ) -> List[Any]:
-    """Official ``create_agent_with_model``: named subset, or the whole registry.
+    """Named tools from the parent registry. An omitted or empty list selects nothing.
 
-    Unknown names log the official warning. They are not imported.
+    The parent hot-loads discoverable tools, then passes those registry names.
+    Unknown names log a warning and are skipped. They are not imported.
     """
-    if not parent_agent or not parent_agent.tool_registry:
+    if not parent_agent or not parent_agent.tool_registry or not tools:
         return []
     registry = parent_agent.tool_registry.registry
-    if not tools:
-        return list(registry.values())
     selected = []
     for name in tools:
         if name in registry:
@@ -232,11 +231,9 @@ def _build_agent(
     """Official ``GraphManager.create_graph`` agent branch.
 
     A node is an agent: ``id``, ``role``, ``system_prompt``, optional ``tools``,
-    optional ``model_settings.model_id``. When ``model_settings`` or
-    ``model_provider`` is set, ``create_agent_with_model`` filters
-    ``parent.tool_registry`` by the tool names. Otherwise the node inherits
-    ``parent.model`` and every parent-registry tool, and a node ``tools`` list
-    is not applied.
+    optional ``model_settings.model_id``. ``tools`` is the registry names the
+    parent assigns. Omit it and the node gets no tools. The model still
+    inherits the parent when ``model_settings`` is omitted.
     """
     kind = node_def.get("type", "agent")
     if kind != "agent":
@@ -246,20 +243,21 @@ def _build_agent(
         )
     settings = node_def.get("model_settings") or {}
     has_model = bool(node_def.get("model_provider") or settings or model_id)
+    assigned = node_def.get("tools") if "tools" in node_def else tools
+    selected = _select_tools(parent_agent, assigned)
     if has_model:
-        selected = _select_tools(parent_agent, node_def.get("tools") or tools)
         resolved = resolve_model(_node_model_id(node_def, model_id), parent_agent)
     else:
-        selected = (
-            list(parent_agent.tool_registry.registry.values())
-            if parent_agent and parent_agent.tool_registry
-            else []
-        )
         resolved = resolve_model(None, parent_agent)
     extra: Dict[str, Any] = {}
     if parent_agent:
         extra["callback_handler"] = parent_agent.callback_handler
         extra["trace_attributes"] = parent_agent.trace_attributes
+    skill_names = node_def.get("skills") or None
+    if skill_names:
+        from skills_config import agent_skills_plugin
+
+        extra["plugins"] = [agent_skills_plugin(list(skill_names))]
     agent = Agent(
         system_prompt=node_def["system_prompt"],
         model=resolved,

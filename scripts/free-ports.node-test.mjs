@@ -48,9 +48,9 @@ process.exit(99)
 `, { mode: 0o755 })
   const log = join(root, "docker.jsonl")
   const state = join(root, "container-state")
-  function run(overrides = {}) {
+  function run(overrides = {}, args = []) {
     writeFileSync(log, "")
-    const result = spawnSync("bash", [join(root, "free-ports.sh")], {
+    const result = spawnSync("bash", [join(root, "free-ports.sh"), ...args], {
       encoding: "utf8",
       timeout: 10_000,
       env: {
@@ -78,7 +78,8 @@ function commands(result) {
 test("pnpm dev:all resets the stack before preparing or starting desktop", () => {
   const { scripts } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
   assert.equal(scripts["dev:clean"], "bash scripts/free-ports.sh")
-  assert.equal(scripts["dev:all"], "pnpm dev:clean && bash scripts/start-all.sh")
+  assert.equal(scripts["clean"], "bash scripts/free-ports.sh")
+  assert.equal(scripts["dev:all"], "bash scripts/start-all.sh")
   const startAll = readFileSync(new URL("./start-all.sh", import.meta.url), "utf8")
   const firstClean = startAll.indexOf("scripts/free-ports.sh")
   const prepare = startAll.indexOf("run-desktop.sh prepare")
@@ -92,9 +93,9 @@ test("concurrently color flag is still this checkout's stack", () => {
   const f = fixture()
   const pid = "987654321"
   const command = "node ./node_modules/.bin/../concurrently/dist/bin/index.js --kill-others --names temporal,worker,api,desktop,web -c magenta,yellow,cyan,blue,green pnpm dev:temporal"
-  writeFileSync(join(f.root, "bin/pgrep"), "#!/usr/bin/env bash\nprintf '%s\\n' 987654321\n", { mode: 0o755 })
+  writeFileSync(join(f.root, "bin/pgrep"), "#!/usr/bin/env bash\n[[ \"$1\" == -f ]] && printf '%s\\n' 987654321\nexit 0\n", { mode: 0o755 })
   writeFileSync(join(f.root, "bin/ps"), `#!/usr/bin/env bash
-if [[ "$1" == "-p" && "$2" == "${pid}" ]]; then printf '%s\\n' '${command}'; exit 0; fi
+if [[ "$1" == "-p" && "$2" == "${pid}" && "$4" == "command=" ]]; then printf '%s\\n' '${command}'; exit 0; fi
 exit 1
 `, { mode: 0o755 })
   writeFileSync(join(f.root, "bin/lsof"), `#!/usr/bin/env bash
@@ -104,6 +105,24 @@ exit 1
   const result = f.run({ GWEN_PROJECT_ROOT: f.root })
   assert.equal(result.status, 0, result.stderr)
   assert.match(result.stdout, /stopping services owned by this checkout: 987654321/)
+})
+
+test("a host-run desktop worker is reset like any other worker", () => {
+  const f = fixture()
+  const pid = "987654322"
+  const command = ".venv/bin/python -u desktop_worker.py"
+  writeFileSync(join(f.root, "bin/pgrep"), "#!/usr/bin/env bash\n[[ \"$1\" == -f ]] && printf '%s\\n' 987654322\nexit 0\n", { mode: 0o755 })
+  writeFileSync(join(f.root, "bin/ps"), `#!/usr/bin/env bash
+if [[ "$1" == "-p" && "$2" == "${pid}" && "$4" == "command=" ]]; then printf '%s\\n' '${command}'; exit 0; fi
+exit 1
+`, { mode: 0o755 })
+  writeFileSync(join(f.root, "bin/lsof"), `#!/usr/bin/env bash
+if [[ "$*" == *"-d cwd"* ]]; then printf 'n%s\\n' "${f.root}"; exit 0; fi
+exit 1
+`, { mode: 0o755 })
+  const result = f.run({ GWEN_PROJECT_ROOT: f.root })
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /stopping services owned by this checkout: 987654322/)
 })
 
 test("no desktop container: inspect only, nothing stopped or removed", () => {
@@ -149,4 +168,73 @@ test("an unreachable Docker daemon is skipped without failing the cleanup", () =
   assert.equal(result.status, 0, result.stderr)
   assert.deepEqual(commands(result), ["info"])
   assert.match(result.stdout, /ports clear/)
+})
+
+test("cleanup never kills a matching launcher ancestor", () => {
+  const f = fixture()
+  // This test runner is an ancestor of cleanup, not an old stack. If ancestry
+  // filtering regresses, use an impossible PID for signalling via the ps seam.
+  writeFileSync(join(f.root, "bin/ps"), `#!/bin/bash
+if [[ "$4" == ppid= ]]; then
+  if [[ "$2" == 987654321 ]]; then printf '1\\n'; else printf '987654321\\n'; fi
+else printf 'node concurrently pnpm dev:worker\\n'; fi
+`, { mode: 0o755 })
+  writeFileSync(join(f.root, "bin/pgrep"), '#!/bin/bash\n[[ "$1" == -f ]] && printf "987654321\\n"\nexit 0\n', { mode: 0o755 })
+  writeFileSync(join(f.root, "bin/lsof"), `#!/bin/bash
+[[ "$*" == *"-d cwd"* ]] && printf 'n%s\\n' '${f.root}'
+exit 1
+`, { mode: 0o755 })
+  const result = f.run({ GWEN_PROJECT_ROOT: f.root })
+  assert.equal(result.status, 0, result.stderr)
+  assert.doesNotMatch(result.stdout, /stopping services/)
+})
+
+test("nested worktree services are not part of this checkout's cleanup", () => {
+  const f = fixture()
+  writeFileSync(join(f.root, "bin/pgrep"), '#!/bin/bash\n[[ "$1" == -f ]] && printf "987654321\\n"\nexit 0\n', { mode: 0o755 })
+  writeFileSync(join(f.root, "bin/ps"), '#!/bin/bash\n[[ "$4" == command= ]] && printf "python run_worker.py\\n"\nexit 0\n', { mode: 0o755 })
+  writeFileSync(join(f.root, "bin/lsof"), `#!/bin/bash
+if [[ "$*" == *"-d cwd"* ]]; then printf 'n%s\\n' '${f.root}/.kilo/worktrees/other/orchestrator'; exit 0; fi
+exit 1
+`, { mode: 0o755 })
+  const result = f.run({ GWEN_PROJECT_ROOT: f.root })
+  assert.equal(result.status, 0, result.stderr)
+  assert.doesNotMatch(result.stdout, /stopping services/)
+})
+
+test("MCP descendants are captured before their worker parent is stopped", () => {
+  const f = fixture()
+  writeFileSync(join(f.root, "bin/pgrep"), `#!/bin/bash
+if [[ "$1" == -f ]]; then printf '987654321\\n'; fi
+if [[ "$1 $2" == '-P 987654321' ]]; then printf '987654322\\n'; fi
+exit 0
+`, { mode: 0o755 })
+  writeFileSync(join(f.root, "bin/ps"), '#!/bin/bash\n[[ "$4" == command= ]] && printf "python run_worker.py\\n"\nexit 0\n', { mode: 0o755 })
+  writeFileSync(join(f.root, "bin/lsof"), `#!/bin/bash
+if [[ "$*" == *"-d cwd"* ]]; then printf 'n%s\\n' '${f.root}/orchestrator'; exit 0; fi
+exit 1
+`, { mode: 0o755 })
+  const result = f.run({ GWEN_PROJECT_ROOT: f.root })
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /stopping services owned by this checkout: 987654321 987654322/)
+})
+
+test("unrelated listener aborts before stopping services or Docker", () => {
+  const f = fixture()
+  writeFileSync(join(f.root, "bin/lsof"), '#!/bin/bash\nprintf "987654321\\n"\n', { mode: 0o755 })
+  writeFileSync(join(f.root, "bin/ps"), '#!/bin/bash\n[[ "$4" == command= ]] && printf "unrelated-app\\n"\nexit 0\n', { mode: 0o755 })
+  const result = f.run()
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /belongs to another process/)
+  assert.deepEqual(result.calls, [])
+})
+
+test("concurrently teardown only removes desktop, never sweeps the new host launcher", () => {
+  const f = fixture()
+  writeFileSync(f.state, "running")
+  writeFileSync(join(f.root, "bin/lsof"), '#!/bin/bash\nprintf "987654321\\n"\n', { mode: 0o755 })
+  const result = f.run({}, ["--desktop-only"])
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(commands(result), ["info", "container", "stop", "rm", "container"])
+  assert.doesNotMatch(result.stdout, /stopping services/)
 })

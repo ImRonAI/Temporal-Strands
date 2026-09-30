@@ -4,7 +4,7 @@ import { useChat } from "@ai-sdk/react"
 import { isFileUIPart, isTextUIPart, DefaultChatTransport } from "ai"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useEffect, useImperativeHandle, useRef, useState } from "react"
-import type { ReactNode, Ref } from "react"
+import type { CSSProperties, ReactNode, Ref } from "react"
 import type { ChatStatus } from "ai"
 
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input"
@@ -30,7 +30,7 @@ import { AgentActivity } from "@/components/v0/agent-activity"
 import { computerUseTextIndices } from "@/components/v0/computer-use-activity"
 import { BlurpleBackground } from "@/components/v0/blurple-background"
 import { GraphActivity } from "@/components/v0/graph-activity"
-import { computerUsePreview } from "@/components/v0/computer-use"
+import { computerUsePreview, desktopAspectRatio } from "@/components/v0/computer-use"
 import { ComputerUsePreviewPanel } from "@/components/v0/computer-use-preview"
 import { Composer } from "@/components/v0/composer"
 import { SentPastedPrompt } from "@/components/v0/pasted-prompt-attachment"
@@ -40,6 +40,22 @@ import { projectIdePreview } from "@/components/v0/project-ide"
 import { ProjectIdePanel } from "@/components/v0/project-ide-panel"
 
 const LINK_SAFETY = { enabled: false } as const
+
+/** Height of the desktop panel's single toolbar (h-10) in rem. The fitted
+ *  viewer box adds it on top of the framebuffer's aspect-ratio height. */
+const DESKTOP_TOOLBAR_REM = 2.5
+
+/** Largest box with the remote framebuffer's proportions (plus the toolbar
+ *  strip) that fits the desktop slot. Width binds when the slot is tall,
+ *  height binds when it is wide; `cq*` units read the slot's own size, so the
+ *  fit is correct whether the chat is beside, above, or hidden. */
+export function desktopFitStyle(aspect: number): CSSProperties {
+  const toolbar = `${DESKTOP_TOOLBAR_REM}rem`
+  return {
+    width: `min(100cqw, calc((100cqh - ${toolbar}) * ${aspect}))`,
+    height: `min(100cqh, calc(100cqw / ${aspect} + ${toolbar}))`,
+  }
+}
 
 // One curve for the whole surface: fast attack, long silk tail. Every
 // entrance below uses it, which is what makes the page feel single-authored.
@@ -194,7 +210,7 @@ export function AgentChat({
   // The orchestrator route reports the durable session as a `data-session`
   // part. It is message data, so derive it during render instead of mirroring
   // it into component state with an Effect.
-  const sessionId = (() => {
+  const streamedSessionId = (() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       for (const part of messages[i].parts) {
         if (part.type === "data-session") {
@@ -205,26 +221,44 @@ export function AgentChat({
     return undefined
   })()
 
-  // A ChatWorkflow execution runs until it is signalled to end, so a session
-  // the browser walks away from would otherwise stay live in Temporal for
-  // good. `pagehide` is the reliable teardown event (unlike `beforeunload` it
-  // also fires on mobile/bfcache navigations), and sendBeacon survives the
-  // page going away where a plain fetch does not. /sessions/{id}/end is
-  // idempotent, so firing it for an already-finished session is harmless.
-  useEffect(() => {
-    if (!sessionId) return
-    const end = () => {
-      navigator.sendBeacon(
-        "/api/orchestrator/end",
-        new Blob([JSON.stringify({ sessionId })], { type: "application/json" }),
-      )
+  // The durable ChatWorkflow deliberately outlives this tab. Closing the
+  // laptop, losing Wi-Fi, or navigating away must never end a deployed
+  // session, so nothing here beacons /api/orchestrator/end on `pagehide` or
+  // unmount. Ending is the explicit action below; once it is acknowledged the
+  // next turn starts a fresh session instead of addressing the finished one.
+  // Reattaching this UI to a still-running session after a reload is not
+  // implemented yet (the client forgets the id with the page).
+  const [endedSessionId, setEndedSessionId] = useState<string | null>(null)
+  const [endConfirm, setEndConfirm] = useState(false)
+  const [endPending, setEndPending] = useState(false)
+  const [endError, setEndError] = useState("")
+  const sessionEnded = Boolean(streamedSessionId) && streamedSessionId === endedSessionId
+  const sessionId = sessionEnded ? undefined : streamedSessionId
+
+  async function endSession() {
+    if (!streamedSessionId || endPending) return
+    setEndPending(true)
+    setEndError("")
+    try {
+      if (status === "streaming" || status === "submitted") await stop()
+      const response = await fetch("/api/orchestrator/end", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: streamedSessionId }),
+      })
+      if (!response.ok) throw new Error(`End request failed (${response.status})`)
+      setEndedSessionId(streamedSessionId)
+      setEndConfirm(false)
+      // The desktop belonged to the ended session; the next session's first
+      // browser action (a new tool call id) reopens the viewer.
+      setDismissedPreview(browserPreview.sessionId)
+      setBrowserExpanded(false)
+    } catch (error) {
+      setEndError(error instanceof Error && error.message ? error.message : "Could not end the session.")
+    } finally {
+      setEndPending(false)
     }
-    window.addEventListener("pagehide", end)
-    return () => {
-      window.removeEventListener("pagehide", end)
-      end()
-    }
-  }, [sessionId])
+  }
 
   // A turn can park on a gated tool waiting for a human. The workflow PUSHES
   // that prompt down the same stream as everything else, so it arrives as a
@@ -277,6 +311,10 @@ export function AgentChat({
   // only swaps layout classes: the chat column hides, the IDE takes the whole
   // chat area. Restore returns to the normal split.
   const [ideFullscreen, setIdeFullscreen] = useState(false)
+  // Same idea for the live desktop: expanding hides the chat column so the
+  // noVNC framebuffer owns the whole row. The chat stays mounted and
+  // streaming; the panel's own toolbar carries the collapse action.
+  const [browserExpanded, setBrowserExpanded] = useState(false)
   // Auto-close: 10s after the last IDE tool activity the panel closes on its
   // own — unless the user has the Preview tab selected (an explicit choice to
   // keep the preview up) or an operation is still running. Project state is
@@ -295,6 +333,11 @@ export function AgentChat({
     dismissedIde !== (projectIde.activityId ?? "closed") &&
     (previewRequested || projectIde.open)
   const splitPreview = showBrowserPreview || showProjectIde
+  const chatHidden =
+    (showProjectIde && ideFullscreen) || (showBrowserPreview && browserExpanded)
+  // Remote framebuffer proportions: a verified screenshot is the true display
+  // size; otherwise the configured X geometry.
+  const desktopAspect = desktopAspectRatio(browserPreview.observation)
 
   // The timestamp advances on every new project operation (activityId), so
   // the idle window is measured from the agent's most recent IDE work. A ref
@@ -381,7 +424,11 @@ export function AgentChat({
             key="chat"
             className={cn(
               "flex min-h-0 w-full flex-1 overflow-hidden",
-              splitPreview && "flex-row"
+              // Below 64rem the desktop split stacks: chat on top, desktop
+              // below. Wide viewports put them side by side.
+              showBrowserPreview
+                ? "flex-col @min-[64rem]/chat:flex-row"
+                : splitPreview && "flex-row"
             )}
             initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -391,15 +438,19 @@ export function AgentChat({
             <div
               className={cn(
                 "flex min-h-0 flex-col",
-                // Fullscreen IDE: the chat column hides (CSS only — the chat
-                // stays mounted, streaming, and fully stateful) and the IDE
-                // takes the entire chat area until Restore.
-                showProjectIde && ideFullscreen
+                // Fullscreen IDE / expanded desktop: the chat column hides
+                // (CSS only — the chat stays mounted, streaming, and fully
+                // stateful) and the panel takes the entire chat area until
+                // Restore / Show chat.
+                chatHidden
                   ? "hidden"
-                  : splitPreview
-                    ? "order-1 flex h-full min-h-0 w-1/3 min-w-0 shrink-0 flex-col border-r border-border"
-                    : "mx-auto min-h-0 w-full max-w-3xl flex-1 px-4 pb-6"
+                  : showBrowserPreview
+                    ? "order-1 flex h-2/5 min-h-0 w-full min-w-0 shrink-0 flex-col border-b border-border @min-[64rem]/chat:h-full @min-[64rem]/chat:w-1/3 @min-[64rem]/chat:border-b-0 @min-[64rem]/chat:border-r"
+                    : splitPreview
+                      ? "order-1 flex h-full min-h-0 w-1/3 min-w-0 shrink-0 flex-col border-r border-border"
+                      : "mx-auto min-h-0 w-full max-w-3xl flex-1 px-4 pb-6"
               )}
+              data-testid="chat-column"
             >
             <div className={cn("flex min-h-0 flex-1 flex-col", splitPreview && "px-4 pb-4 pt-3")}>
             <Conversation className="h-0 min-h-0 flex-1">
@@ -420,6 +471,13 @@ export function AgentChat({
                     if (isTextUIPart(part)) return true
                     return isFileUIPart(part) && pastedPromptText(part) == null
                   })
+                  const isLiveAssistant =
+                    message.role === "assistant" &&
+                    (status === "streaming" || status === "submitted") &&
+                    messageIndex === messages.length - 1
+                  const absorbedTextIndices = message.role === "assistant"
+                    ? computerUseTextIndices(message.parts, isLiveAssistant)
+                    : new Set<number>()
                   return (
                   <MessageShell key={message.id} reduce={reduce}>
                     <Message from={message.role}>
@@ -446,10 +504,7 @@ export function AgentChat({
                           <AgentActivity
                             parts={message.parts}
                             sessionId={sessionId}
-                            isThinking={
-                              (status === "streaming" || status === "submitted") &&
-                              messageIndex === messages.length - 1
-                            }
+                            isThinking={isLiveAssistant}
                           />
                         )}
                         {/* Formation graph canvas: renders only for messages
@@ -459,9 +514,7 @@ export function AgentChat({
                         )}
                         {message.parts.map((part, i) => {
                           if (isTextUIPart(part)) {
-                            if (message.role === "assistant" && computerUseTextIndices(message.parts,
-                              (status === "streaming" || status === "submitted") && messageIndex === messages.length - 1
-                            ).has(i)) return null
+                            if (message.role === "assistant" && absorbedTextIndices.has(i)) return null
                             return (
                               // isAnimating drives Streamdown's own streaming
                               // affordances — token fade-in and the caret. It
@@ -590,6 +643,63 @@ export function AgentChat({
                   Open IDE
                 </Button>
               )}
+              {/* Sessions are never ended implicitly (see the note above
+                  `endSession`). This is the one explicit release: it stops
+                  the live turn if any, signals end_chat, and frees the
+                  desktop for the next chat. Two clicks, so a stray tap on a
+                  laptop trackpad cannot kill deployed work. */}
+              {streamedSessionId && !sessionEnded ? (
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-xs" data-testid="session-controls">
+                  {endConfirm ? (
+                    <>
+                      <span className="text-muted-foreground">End this session and release the desktop?</span>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        className="h-7 px-2.5 text-[11px]"
+                        data-testid="end-session-confirm"
+                        disabled={endPending}
+                        onClick={endSession}
+                      >
+                        {endPending ? "Ending…" : "End session"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2.5 text-[11px]"
+                        data-testid="end-session-cancel"
+                        disabled={endPending}
+                        onClick={() => { setEndConfirm(false); setEndError("") }}
+                      >
+                        Keep running
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2.5 text-[11px] text-muted-foreground hover:text-foreground"
+                      data-testid="end-session"
+                      onClick={() => setEndConfirm(true)}
+                    >
+                      End session
+                    </Button>
+                  )}
+                  {endError ? (
+                    <span className="text-destructive" data-testid="end-session-error" role="alert">
+                      {endError}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+              {sessionEnded ? (
+                <p className="mb-2 text-xs text-muted-foreground" data-testid="session-ended">
+                  Session ended. Your next message starts a new one.
+                </p>
+              ) : null}
               <motion.div
                 initial={reduce ? false : { opacity: 0, y: 24 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -624,27 +734,46 @@ export function AgentChat({
 
             <AnimatePresence>
               {showBrowserPreview ? (
+                // The desktop slot takes every pixel the chat leaves. Inside
+                // it the panel is fitted to the remote framebuffer's aspect
+                // ratio (toolbar height added on top) and centered, so noVNC's
+                // `resize=scale` fills the iframe edge-to-edge instead of
+                // painting letterbox bars around a 16:10 screen in an
+                // arbitrary-shaped hole. Any leftover space is the app's own
+                // graphite, not dead viewer canvas.
                 <motion.div
                   key={browserPreview.sessionId}
-                  className="order-1 flex min-h-96 min-w-0 flex-1 shrink-0 flex-col @min-[64rem]/chat:order-2 @min-[64rem]/chat:min-h-0"
+                  className="@container/desktop order-2 flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center overflow-hidden bg-[oklch(0.12_0.007_285)] p-2 @min-[64rem]/chat:p-3"
+                  data-testid="desktop-slot"
                   initial={reduce ? false : { opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 12 }}
                   transition={{ duration: 0.45, ease: EASE }}
                 >
-                  <ComputerUsePreviewPanel
-                    preview={browserPreview}
-                    sessionId={sessionId}
-                    isStreaming={status === "streaming"}
-                    status={status}
-                    pendingApproval={pendingApproval}
-                    onApprove={() => answerApproval("approve")}
-                    onDeny={() => answerApproval("deny")}
-                    onClose={() => setDismissedPreview(browserPreview.sessionId)}
-                    onTakeControl={takeControl}
-                    onReleaseControl={() => handoff("release")}
-                    onGiveControl={giveControl}
-                  />
+                  <div
+                    className="flex min-h-0 max-w-full flex-col"
+                    data-testid="desktop-fit"
+                    style={desktopFitStyle(desktopAspect)}
+                  >
+                    <ComputerUsePreviewPanel
+                      preview={browserPreview}
+                      sessionId={sessionId}
+                      isStreaming={status === "streaming"}
+                      status={status}
+                      pendingApproval={pendingApproval}
+                      onApprove={() => answerApproval("approve")}
+                      onDeny={() => answerApproval("deny")}
+                      onClose={() => {
+                        setDismissedPreview(browserPreview.sessionId)
+                        setBrowserExpanded(false)
+                      }}
+                      onTakeControl={takeControl}
+                      onReleaseControl={() => handoff("release")}
+                      onGiveControl={giveControl}
+                      expanded={browserExpanded}
+                      onExpandedChange={setBrowserExpanded}
+                    />
+                  </div>
                 </motion.div>
               ) : showProjectIde ? (
                 // Full-height right column. The slot is a width track: it

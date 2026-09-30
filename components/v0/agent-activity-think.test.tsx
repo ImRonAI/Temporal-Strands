@@ -3,7 +3,7 @@ import type { DynamicToolUIPart, UIMessage } from "ai"
 import { describe, expect, it } from "vitest"
 import { AgentActivity } from "./agent-activity"
 import { ComputerUseActivity } from "./computer-use-activity"
-import { toolPresentation } from "./computer-use"
+import { toolPresentation, unstreamedThinkOutput } from "./computer-use"
 
 function think(output: unknown): DynamicToolUIPart {
   return { type: "dynamic-tool", toolName: "think", toolCallId: "think-1", state: "output-available", input: { cycle_count: 1 }, output }
@@ -39,8 +39,34 @@ for (const [name, render] of Object.entries(displays)) {
       const summary = think({ status: "success", content: [{ text: "Cycle 1/1:\nThe page is ready." }] })
       const streamed: UIMessage["parts"] = [{ type: "reasoning", text: "The page is ready.", state: "done" }, summary]
       expect(render(streamed).match(/The page is ready\./g)).toHaveLength(1)
+      expect(render(streamed)).not.toContain("Cycle 1/1")
       expect(render([summary])).toContain("The page is ready.")
+      expect(render([summary])).toContain("Thinking result")
       expect(render([{ type: "reasoning", text: "An earlier thought.", state: "done" }, summary])).toContain("The page is ready.")
+    })
+
+    it("renders the Think output the runtime returned when nothing streamed", () => {
+      // chat-47deb9dc4491c804: Think returned success with one cycle and no reasoning-delta frames.
+      const html = render([think({ status: "success", content: [{ text: "Cycle 1/1:\nThe login form has two fields and a submit button." }] })])
+      expect(html).toContain("Thinking result")
+      expect(html).toContain("The login form has two fields and a submit button.")
+      expect(html).not.toContain("Cycle 1/1")
+    })
+
+    it("keeps only the missing tail when the live stream was cut short", () => {
+      const summary = think({ status: "success", content: [{ text: "Cycle 1/1:\nThe page has loaded fully and the form is visible. Next I will fill in the email field." }] })
+      const html = render([{ type: "reasoning", text: "The page has loaded fully and the form is visible.", state: "done" }, summary])
+      expect(html.match(/The page has loaded fully and the form is visible\./g)).toHaveLength(1)
+      expect(html).toContain("Next I will fill in the email field.")
+    })
+
+    it("hides fully streamed cycles and keeps unstreamed ones with their headers", () => {
+      const summary = think({ status: "success", content: [{ text: "Cycle 1/2:\nFirst pass over the evidence.\n\nCycle 2/2:\nSecond pass reaches a conclusion." }] })
+      const html = render([{ type: "reasoning", text: "First pass over the evidence.", state: "done" }, summary])
+      expect(html.match(/First pass over the evidence\./g)).toHaveLength(1)
+      expect(html).toContain("Second pass reaches a conclusion.")
+      expect(html).toContain("Cycle 2/2:")
+      expect(html).not.toContain("Cycle 1/2:")
     })
 
     it("does not invent output for zero-cycle Think", () => {
@@ -50,8 +76,42 @@ for (const [name, render] of Object.entries(displays)) {
     it("preserves a summary alongside native tool evidence arrays", () => {
       expect(render([think(["Unstreamed conclusion", { messages: [] }])])).toContain("Unstreamed conclusion")
     })
+
+    it("reports an interrupted Think honestly instead of completion", () => {
+      const pending: DynamicToolUIPart = { type: "dynamic-tool", toolName: "think", toolCallId: "cut", state: "input-available", input: { thought: "Inspect" } }
+      const html = render([pending])
+      expect(html).toContain("Stream ended before Think returned a result.")
+      expect(html).toContain('data-activity-status="pending"')
+      expect(html).not.toContain("Thinking result")
+    })
   })
 }
+
+describe("unstreamedThinkOutput", () => {
+  const reasoning = (text: string): UIMessage["parts"][number] => ({ type: "reasoning", text, state: "done" })
+  it("returns everything when nothing streamed and strips a lone cycle header", () => {
+    expect(unstreamedThinkOutput("Cycle 1/1:\nOnly conclusion.", [])).toBe("Only conclusion.")
+    expect(unstreamedThinkOutput("Plain conclusion.", [])).toBe("Plain conclusion.")
+  })
+  it("returns nothing for a full duplicate, ignoring whitespace and headers", () => {
+    expect(unstreamedThinkOutput("Cycle 1/1:\nThe   page\nis ready.", [reasoning("The page is ready.")])).toBe("")
+    expect(unstreamedThinkOutput("The page is ready.", [reasoning("Earlier."), reasoning("The page is ready.")])).toBe("")
+  })
+  it("returns only the missing tail of a partially streamed cycle", () => {
+    const text = "Cycle 1/1:\nThe page has loaded fully and the form is visible. Next I will fill in the email field."
+    expect(unstreamedThinkOutput(text, [reasoning("The page has loaded fully and the form is visible.")]))
+      .toBe("Next I will fill in the email field.")
+  })
+  it("does not treat a short incidental prefix match as streamed", () => {
+    expect(unstreamedThinkOutput("The page is ready for input.", [reasoning("The page")])).toBe("The page is ready for input.")
+  })
+  it("keeps cycle headers only when more than one cycle remains distinguishable", () => {
+    const text = "Cycle 1/2:\nFirst.\n\nCycle 2/2:\nSecond."
+    expect(unstreamedThinkOutput(text, [reasoning("First.")])).toBe("Cycle 2/2:\nSecond.")
+    expect(unstreamedThinkOutput(text, [])).toBe("Cycle 1/2:\nFirst.\n\nCycle 2/2:\nSecond.")
+    expect(unstreamedThinkOutput(text, [reasoning("First. Second.")])).toBe("")
+  })
+})
 
 describe("native result presentation", () => {
   it("retains multi-block errors and structured evidence", () => {

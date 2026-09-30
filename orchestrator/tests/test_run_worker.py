@@ -48,11 +48,6 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch):
     ):
         monkeypatch.delenv(name, raising=False)
     yield
-    # assemble_model_factories installs a client factory on success paths;
-    # clear it so no other suite inherits a test key.
-    import perplexity_operations
-
-    perplexity_operations.configure(None)
 
 
 def _patch_catalog(monkeypatch: pytest.MonkeyPatch, ids: list[str]) -> None:
@@ -210,6 +205,10 @@ def test_mcp_tools_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert tools["pophive"]["server_url"] == "https://pophive.example/mcp"
     assert "headers" not in tools["pophive"]
     assert "allowed_tools" not in tools["pophive"]
+    # Agent API "Defer tool definitions": schemas leave the initial context
+    # and the per-request mcp_list_tools item stops carrying them.
+    assert tools["datacommons"]["defer_loading"] is True
+    assert tools["pophive"]["defer_loading"] is True
 
 
 # --- connectors -----------------------------------------------------------------

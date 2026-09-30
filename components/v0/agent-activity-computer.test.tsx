@@ -67,6 +67,26 @@ describe("native browser computer-use timeline", () => {
     expect(html).toContain("Think")
     expect(html).toContain("2/2 actions finished")
   })
+
+  it("keeps active status separate from real Think output during quiet periods", () => {
+    const pending: DynamicToolUIPart = { type: "dynamic-tool", toolName: "think", toolCallId: "thinking",
+      state: "input-available", input: { thought: "Inspect" } }
+    const parts: UIMessage["parts"] = [pending, { type: "reasoning", text: "Looking at evidence.", state: "streaming" }]
+    const active = renderToStaticMarkup(<AgentActivity parts={parts} isThinking />)
+    expect(active).toContain("Looking at evidence.")
+    expect(active).toContain("Still working")
+    expect(active).not.toContain("Cycle 1/1")
+    const ended = renderToStaticMarkup(<AgentActivity parts={parts} isThinking={false} />)
+    expect(ended).not.toContain("Still working")
+  })
+
+  it("keeps working status visible after a prior tool while waiting for Think's first event", () => {
+    const pending: DynamicToolUIPart = { type: "dynamic-tool", toolName: "think", toolCallId: "thinking",
+      state: "input-available", input: { thought: "Inspect" } }
+    const html = renderToStaticMarkup(<AgentActivity parts={[action("graph", "done"), pending]} isThinking />)
+    expect(html).toContain("Still working")
+    expect(html).not.toContain("Thinking result")
+  })
   const observation = {
     artifact_id: "879a4f76-2f47-4039-b5ca-30c8bba286bf", generation: "1", sha256: "a".repeat(64),
     width: 1280, height: 720, mime_type: "image/png",

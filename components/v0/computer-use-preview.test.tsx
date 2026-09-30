@@ -95,7 +95,11 @@ vi.mock("@/components/ai-elements/artifact", () => ({
 
 vi.mock("@/components/ai-elements/web-preview", () => ({
   WebPreview: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
-  WebPreviewNavigation: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  // The real primitive spreads div props; keep data attributes so tests can
+  // locate the toolbar.
+  WebPreviewNavigation: ({ children, ...rest }: { children?: React.ReactNode; [key: string]: unknown }) => (
+    <div data-testid={rest["data-testid"] as string | undefined}>{children}</div>
+  ),
   WebPreviewNavigationButton: ({
     children,
     disabled,
@@ -112,7 +116,8 @@ vi.mock("@/components/ai-elements/web-preview", () => ({
     if (typeof rest["data-testid"] === "string") h.buttons.set(rest["data-testid"], { onClick, disabled })
     return (
     <button
-      aria-label={tooltip}
+      aria-label={(rest["aria-label"] as string | undefined) ?? tooltip}
+      aria-pressed={rest["aria-pressed"] as boolean | undefined}
       data-testid={(rest["data-testid"] as string) ?? tooltip}
       disabled={disabled}
       onClick={onClick}
@@ -280,6 +285,94 @@ describe("ComputerUsePreviewPanel", () => {
     const interrupted = await renderPanel({ isStreaming: false, status: "error" })
     expect(interrupted).toContain("Stream interrupted")
     expect(interrupted).not.toContain("Desktop ready")
+  })
+
+  it("renders one compact toolbar and no second Artifact header around the desktop", async () => {
+    const html = await renderPanel()
+    expect(html.match(/data-testid="desktop-toolbar"/g)).toHaveLength(1)
+    // Every control lives in that strip; the badge is text beside a dot, not
+    // a pill, and the old duplicated title/close row is gone.
+    const toolbarStart = html.indexOf('data-testid="desktop-toolbar"')
+    const iframeStart = html.indexOf('data-testid="browser-iframe"')
+    expect(toolbarStart).toBeGreaterThan(-1)
+    expect(iframeStart).toBeGreaterThan(toolbarStart)
+    const toolbar = html.slice(toolbarStart, iframeStart)
+    for (const id of ["browser-control-badge", "viewer-reconnect", "take-control", "browser-fullscreen", "browser-close"]) {
+      expect(toolbar).toContain(`data-testid="${id}"`)
+    }
+    expect(html).not.toContain("rounded-full border px-2.5")
+    // The explanatory footer strips under the iframe are gone: the desktop
+    // is the last child of the viewer area in agent mode.
+    expect(html).not.toContain("Desktop viewer via noVNC.")
+    expect(html).not.toContain("Click Relinquish when")
+  })
+
+  it("keeps the intent readout as an overlay chip that never shrinks the desktop", async () => {
+    const html = await renderPanel()
+    const chip = html.match(/<p[^>]*data-testid="desktop-intent"[^>]*>/)?.[0] ?? ""
+    expect(chip).toContain("absolute")
+    expect(chip).toContain("pointer-events-none")
+    expect(html).toContain("open the page")
+    expect(await renderPanel({ preview: preview({ intent: "" }) })).not.toContain('data-testid="desktop-intent"')
+  })
+
+  it("floats approvals and failures over the desktop instead of stacking above it", async () => {
+    const openingTag = (html: string, id: string) => {
+      const at = html.indexOf(`data-testid="${id}"`)
+      expect(at).toBeGreaterThan(-1)
+      return html.slice(html.lastIndexOf("<", at), html.indexOf(">", at))
+    }
+    const approval = await renderPanel({ pendingApproval: "navigate to bank.example" })
+    expect(openingTag(approval, "computer-use-approval")).toContain("absolute")
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 503 })))
+    const failure = await renderPanel()
+    expect(openingTag(failure, "browser-handoff-error")).toContain("absolute")
+    expect(failure).toContain("Could not verify desktop control")
+  })
+
+  it("exposes an in-app expand toggle only when the parent can reclaim the chat width", async () => {
+    const collapsed = await renderPanel()
+    expect(collapsed).not.toContain('data-testid="browser-expand"')
+
+    const onExpandedChange = vi.fn()
+    const panel = panelHandlers({ expanded: false, onExpandedChange })
+    await panel.flushEffects()
+    let html = panel.render()
+    expect(html).toMatch(/data-testid="browser-expand"[^>]*aria-label="Hide chat"/)
+    expect(h.buttons.get("browser-expand")?.disabled).toBeUndefined()
+    click("browser-expand")
+    expect(onExpandedChange).toHaveBeenCalledExactlyOnceWith(true)
+
+    html = panel.render({ expanded: true })
+    // A clear collapse action is always present while expanded.
+    expect(html).toMatch(/data-testid="browser-expand"[^>]*aria-label="Show chat"/)
+    click("browser-expand")
+    expect(onExpandedChange).toHaveBeenLastCalledWith(false)
+    // Native fullscreen stays available alongside in-app expansion.
+    expect(html).toContain('data-testid="browser-fullscreen"')
+  })
+
+  it("marks human control with a green inset ring and drops it when the agent resumes", async () => {
+    h.serverMode = "human"
+    const panel = panelHandlers()
+    await panel.flushEffects()
+    let html = panel.render()
+    expect(html).toContain('data-testid="human-control-ring"')
+    expect(html).toContain("You have control")
+    h.serverMode = "agent"
+    await click("viewer-reconnect")
+    html = panel.render()
+    expect(html).not.toContain('data-testid="human-control-ring"')
+  })
+
+  it("renders the unavailable-viewer state inside the desktop canvas with no iframe", async () => {
+    const html = await renderPanel({ preview: preview({ livePreviewUrl: "" }) })
+    expect(h.iframeProps).toHaveLength(0)
+    expect(html).toMatch(/role="status"/)
+    expect(html).toContain("Desktop viewer unavailable")
+    // Controls remain reachable so the operator can reconnect or close.
+    expect(html).toContain('data-testid="viewer-reconnect"')
+    expect(html).toContain('data-testid="browser-close"')
   })
 
 })

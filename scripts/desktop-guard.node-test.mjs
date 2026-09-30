@@ -11,8 +11,9 @@ DESKTOP_BROWSER_TASK_QUEUE = "desktop-browser"
 BROWSER_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
 `
 const workflow = `
+import think_activity
 browser = activity_as_tool(browser_activity, **{"task_queue": DESKTOP_BROWSER_TASK_QUEUE, "retry_policy": BROWSER_RETRY_POLICY})
-THINK_TOOL = activity_as_tool(think_activity.think)
+THINK_TOOL = activity_as_tool(think_activity.think, start_to_close_timeout=THINK_START_TO_CLOSE)
 tools = [THINK_TOOL]
 stream.continue_as_new(lambda state: [ChatInput(session_id=self._session_id, messages=messages, stream_state=state, resume_prompt=self._resume_prompt)])
 `
@@ -20,7 +21,7 @@ const worker = `Worker(client, task_queue=DESKTOP_BROWSER_TASK_QUEUE, activity_e
 const fixture = {
   "orchestrator/config.py": config,
   "orchestrator/workflow.py": workflow,
-  "orchestrator/run_worker.py": "WORKER_ACTIVITIES = [think_activity.think]",
+  "orchestrator/run_worker.py": "WORKER_ACTIVITIES = [load_tool_activity]",
   "orchestrator/desktop_worker.py": worker,
 }
 const rules = files => checkSources(files, python, []).map(item => item.rule)
@@ -48,6 +49,7 @@ test("automatic mutation retries and missing native executor fail", () => {
 
 test("Think removal and lost continuation context fail", () => {
   assert.ok(rules({ ...fixture, "orchestrator/workflow.py": workflow.replace("tools = [THINK_TOOL]", "tools = []") }).includes("preserve-think"))
+  assert.ok(rules({ ...fixture, "orchestrator/workflow.py": workflow.replace("THINK_TOOL = activity_as_tool(think_activity.think, start_to_close_timeout=THINK_START_TO_CLOSE)", "from strands_tools.think import think as native_think\nTHINK_TOOL = native_think") }).includes("preserve-think"))
   for (const loss of ["session_id=self._session_id", "messages=messages", "stream_state=state", "resume_prompt=self._resume_prompt"]) {
     const changed = workflow.replace(loss, "discarded=None")
     assert.ok(rules({ ...fixture, "orchestrator/workflow.py": changed }).includes("continue-context"), loss)

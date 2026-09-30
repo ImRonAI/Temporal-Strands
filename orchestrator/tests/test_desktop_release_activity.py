@@ -4,9 +4,8 @@ import asyncio
 import fcntl
 import json
 import subprocess
-from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from temporalio import activity
@@ -36,14 +35,24 @@ def desktop(monkeypatch, tmp_path):
     with browser.desktop_state() as state:
         state.update(owner=owner, mode="human", session_name="shared-browser-session", epoch=123)
     sessions = {}
+    handles = []
     for name in ("shared-browser-session", "second-owned-session"):
         native = MagicMock()
         native.is_connected.return_value = True
-        native.close = AsyncMock(side_effect=lambda native=native: setattr(native.is_connected, "return_value", False))
         sessions[name] = SimpleNamespace(browser=native, context=None)
-    playwright = SimpleNamespace(stop=AsyncMock())
-    stock = SimpleNamespace(_sessions=dict(sessions), _playwright=playwright,
-                            _started=True, _execute_async=asyncio.run)
+        handles.append(native)
+    stock = MagicMock()
+    stock._sessions = dict(sessions)
+    stock._started = True
+
+    def close(*, browser_input):
+        # The stock close action closes every session's native browser.
+        assert browser_input.action.type == "close"
+        for native in handles:
+            native.is_connected.return_value = False
+        return {"status": "success", "content": [{"text": "Browser closed"}]}
+
+    stock.browser.side_effect = close
     monkeypatch.setattr(browser, "_browser", stock)
     answers = [
         "ans=viewonly:1,aro=client_count:0,aro=pointer_mask:0x0\n",
@@ -52,7 +61,7 @@ def desktop(monkeypatch, tmp_path):
     run = MagicMock(side_effect=[SimpleNamespace(returncode=0, stdout=value) for value in answers])
     monkeypatch.setattr(subprocess, "run", run)
     return SimpleNamespace(root=tmp_path, info=info, owner=owner, stock=stock,
-                           sessions=sessions, playwright=playwright, run=run)
+                           sessions=sessions, handles=handles, run=run)
 
 
 def read_state():
@@ -99,13 +108,15 @@ def test_release_cleans_all_owned_sessions_in_any_mode_and_preserves_artifacts(d
     assert "session_name" not in state
     assert state["unrelated_metadata"] == "preserved"
     assert image.read_bytes() == b"immutable evidence"
+    # Release ran the stock close action once and verified every native handle.
+    desktop.stock.browser.assert_called_once()
+    request = desktop.stock.browser.call_args.kwargs["browser_input"]
+    assert request.action.type == "close"
     for session in desktop.sessions.values():
-        session.browser.close.assert_awaited_once_with()
         assert not session.browser.is_connected()
-    desktop.playwright.stop.assert_awaited_once_with()
-    assert desktop.stock._sessions == {}
-    assert desktop.stock._playwright is None
-    assert desktop.stock._started is False
+    # The closed tool was discarded; the next action gets a fresh stock instance.
+    assert browser._browser is not desktop.stock
+    assert type(browser._browser) is browser.LocalChromiumBrowser
 
     first, second = desktop.run.call_args_list
     assert first.args[0][:4] == ["x11vnc", "-display", ":99", "-R"]
@@ -143,7 +154,7 @@ def test_release_never_touches_an_unowned_or_foreign_desktop(desktop, owner):
     browser.release_desktop()
     assert read_state() == before
     desktop.run.assert_not_called()
-    desktop.playwright.stop.assert_not_called()
+    desktop.stock.browser.assert_not_called()
     assert desktop.stock._sessions == desktop.sessions
 
 
@@ -168,7 +179,7 @@ def test_release_requires_all_native_revocation_receipts(desktop, answer):
         browser.release_desktop()
     assert caught.value.non_retryable
     assert_recovery(desktop)
-    desktop.playwright.stop.assert_not_called()
+    desktop.stock.browser.assert_not_called()
     assert desktop.stock._sessions == desktop.sessions
 
 
@@ -181,27 +192,29 @@ def test_native_process_failure_retains_owner_and_requires_recovery(desktop, fai
     assert_recovery(desktop)
 
 
-@pytest.mark.parametrize("failure", ["close", "still_connected", "playwright", "timeout"])
-def test_browser_cleanup_failure_is_not_hidden_or_released(desktop, monkeypatch, failure):
-    first = next(iter(desktop.sessions.values())).browser
-    if failure == "close":
-        first.close.side_effect = RuntimeError("native close failed")
-    elif failure == "still_connected":
-        first.close.side_effect = None
-    elif failure == "playwright":
-        desktop.playwright.stop.side_effect = RuntimeError("driver stop failed")
+@pytest.mark.parametrize("failure", ["close_error", "close_raise", "still_connected"])
+def test_browser_cleanup_failure_is_not_hidden_or_released(desktop, failure):
+    # The stock close action swallows per-session errors (browser.py:961-967,
+    # 980-982), so release verifies the native handles through the public
+    # Playwright is_connected() after invoking it.
+    if failure == "close_error":
+        desktop.stock.browser.side_effect = lambda *, browser_input: {
+            "status": "error", "content": [{"text": "Error: native close failed"}]}
+    elif failure == "close_raise":
+        desktop.stock.browser.side_effect = RuntimeError("native close failed")
     else:
-        async def hang():
-            await asyncio.Event().wait()
-        first.close.side_effect = hang
-        monkeypatch.setattr(browser, "DESKTOP_HANDOFF_TIMEOUT", timedelta(milliseconds=200))
+        def partial(*, browser_input):
+            desktop.sessions["second-owned-session"].browser.is_connected.return_value = False
+            return {"status": "success", "content": [{"text": "Browser closed"}]}
+
+        desktop.stock.browser.side_effect = partial
     with pytest.raises(ApplicationError):
         browser.release_desktop()
     assert_recovery(desktop)
     assert desktop.run.call_count == 1  # Do not admit even view-only clients on failure.
     assert desktop.stock._sessions == desktop.sessions
-    if failure in {"close", "still_connected"}:
-        desktop.sessions["second-owned-session"].browser.close.assert_awaited_once_with()
+    # The unverified tool is retained so a later release can retry its close.
+    assert browser._browser is desktop.stock
 
 
 @pytest.mark.parametrize("lock_name", ["action.lock", "handoff.lock"])
@@ -250,10 +263,13 @@ def test_release_holds_both_locks_until_cleanup_and_viewer_reset_finish(desktop)
 
 def test_cleanup_does_not_initialize_a_browser_for_computer_only_owner(desktop):
     desktop.stock._sessions.clear()
-    desktop.stock._playwright = None
     desktop.stock._started = False
     browser.release_desktop()
+    # No sessions and a never-started stock tool: the close action would
+    # auto-start the platform (browser.py:127-129), so it is never invoked.
+    desktop.stock.browser.assert_not_called()
     browser.LocalChromiumBrowser.browser.assert_not_called()
+    assert browser._browser is desktop.stock
     assert read_state()["owner"] is None
 
 
@@ -314,7 +330,9 @@ def test_viewer_reset_must_be_verified_before_releasing_owner(desktop, answer):
     with pytest.raises(ApplicationError):
         browser.release_desktop()
     assert_recovery(desktop)
-    assert desktop.stock._sessions == {}
+    # The verified browser close already ran; its tool was discarded.
+    desktop.stock.browser.assert_called_once()
+    assert browser._browser is not desktop.stock
 
 
 def test_late_success_cannot_clear_owner_after_cleanup_deadline(desktop, monkeypatch):
@@ -336,27 +354,22 @@ def test_missing_native_session_handle_is_not_cleanup_evidence(desktop):
     with pytest.raises(ApplicationError):
         browser.release_desktop()
     assert_recovery(desktop)
-    desktop.playwright.stop.assert_not_called()
+    desktop.stock.browser.assert_not_called()
 
 
 def test_cancelled_native_cleanup_retains_owner_and_releases_locks(desktop):
-    desktop.playwright.stop.side_effect = asyncio.CancelledError()
+    desktop.stock.browser.side_effect = asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
         browser.release_desktop()
     assert_recovery(desktop)
 
 
-def test_release_uses_stock_event_loop_without_starting_new_platform(desktop, monkeypatch):
-    stock = browser.LocalChromiumBrowser(launch_options={"headless": False, "chromium_sandbox": True})
-    stock._sessions = desktop.stock._sessions
-    stock._playwright = desktop.stock._playwright
-    stock._started = True
-    monkeypatch.setattr(browser, "_browser", stock)
-    try:
-        browser.release_desktop()
-        assert stock._sessions == {}
-        assert stock._playwright is None
-        assert stock._started is False
-    finally:
-        stock._started = False
-        stock._loop.close()
+def test_release_replaces_the_closed_tool_with_a_fresh_stock_instance(desktop):
+    """The stock close leaves the instance unable to restart (browser.py:940-946
+    nulls Playwright without resetting `_started`), so release discards it."""
+    browser.release_desktop()
+    assert browser._browser is not desktop.stock
+    assert type(browser._browser) is browser.LocalChromiumBrowser
+    assert browser._browser._launch_options == {"headless": False, "chromium_sandbox": True}
+    # The fresh instance is inert until its first stock action.
+    browser.LocalChromiumBrowser.browser.assert_not_called()

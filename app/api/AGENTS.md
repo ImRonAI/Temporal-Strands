@@ -1,17 +1,25 @@
 # app/api — Agent Notes
 
-All six route files here are **PROTECTED**: `orchestrator/route.ts`, `orchestrator/end/route.ts`, `orchestrator/approval/route.ts`, `orchestrator/file/route.ts`, `compare/route.ts`, `models/route.ts`. Change a route only when a failing compatibility test proves the backend cannot satisfy an existing contract. Read the root `AGENTS.md` first; this file only adds route-local detail.
+All seven route files here are **PROTECTED**: `orchestrator/route.ts`, `orchestrator/end/route.ts`, `orchestrator/approval/route.ts`, `orchestrator/file/route.ts`, `orchestrator/handoff/route.ts`, `orchestrator/desktop-image/route.ts`, `models/route.ts`. `compare/` holds only `route.test.ts` (multi-pane transport compatibility against `orchestrator/route.ts`) — there is no `compare/route.ts`. Change a route only when a failing compatibility test proves the backend cannot satisfy an existing contract. Read the root `AGENTS.md` first; this file only adds route-local detail.
 
-## orchestrator/route.ts (SSE bridge, 526 lines)
+| Route | Method | Upstream (`orchestrator/server.py`) | Test |
+|-------|--------|------------------------------------|------|
+| `orchestrator/route.ts` | POST | `POST /sessions` (first turn), `POST /sessions/{id}/turns/stream` | `route.test.ts` (1329 lines) |
+| `orchestrator/approval/route.ts` | POST | `POST /sessions/{id}/approve` → `ChatWorkflow.approve` signal | via `route.test.ts` |
+| `orchestrator/handoff/route.ts` | GET, POST | `GET /sessions/{id}/desktop-control`, `POST /sessions/{id}/handoff` (`take`/`release`/`give`, zod-validated) | `handoff/route.test.ts` |
+| `orchestrator/desktop-image/route.ts` | GET | `GET /sessions/{id}/desktop-images/{artifact_id}` (PNG proxy) | `desktop-image/route.test.ts` |
+| `orchestrator/end/route.ts` | POST | `POST /sessions/{id}/end` (`sendBeacon` from `pagehide`, always 204) | — |
+| `orchestrator/file/route.ts` | GET | `GET /responses/{response_id}/files/{file_id}/content` | — |
+| `models/route.ts` | GET | `GET /health` via `lib/perplexity.ts` `listModels` | `lib/perplexity.test.ts` |
 
-- Reaches the FastAPI bridge via `ORCHESTRATOR_URL` (default `http://localhost:8787`, line 15).
-- Line ~78 mirrors the backend SSE protocol; keep it in lockstep with `orchestrator/server.py`.
-- Conversion map (~lines 318-521) translates backend events into AI SDK UI-message parts:
-  - native tool ids: `sandbox-{call_id}`, `mcp-{id}`, `file-{call_id}`
-  - `share_file` URLs are rewritten to `/api/orchestrator/file?path=...` (~line 354)
-  - reasoning deltas handled at ~lines 231-262
-- Session continuity: a `data-session` part is emitted and scanned by `app/page.tsx`.
-- Per-turn model switching (2026-09-04): the turn POST body forwards the useChat body's `model` as `model_id`, so the orchestrator can rebuild the session's agent on a new model mid-conversation (change proven by the "POST per-turn model switching" compatibility test in `route.test.ts`).
+## orchestrator/route.ts (SSE bridge, 1047 lines)
+
+- Reaches the FastAPI bridge via `ORCHESTRATOR_URL` (default `http://localhost:8787`, line 32); sibling routes inline the same default.
+- `ORCHESTRATOR_EVENT_SCHEMA` mirrors the backend SSE protocol; keep it in lockstep with `orchestrator/server.py`. Frames are read with the AI SDK's `parseJsonEventStream` (never a hand-rolled reader).
+- `POST` (:376) folds topics into UI-message parts: `data-session` (:484); `data-skill-run` (:567, `thinking` + `tool_use.name == "use_skill"`); `use_agent` frames become labelled `reasoning-delta`s (:621); `data-graph-run` (:649, `thinking` + `graph`); `data-agent-run` (:745, `agent_runs` topic, deduped by `(response_id, sequence_number)`); `data-native-tool` (:767/:806 — `sandbox_results`, `mcp_call`, `mcp_list_tools`, `share_file`, `google_search`, `google_maps`); `tool-output-available`/`-error` (:822/:831, `tool_results`); `data-approval` (:853); `data-retry` (:904, a `messageStart` on an already-open topic = activity retry, rotates the text id); `reasoning-*`, `text-*`, `tool-input-*`, `error` (:1027).
+- Native tool ids: `sandbox-{call_id}`, `mcp-{id}`, `file-{call_id}`; `share_file` URLs rewrite to `/api/orchestrator/file?path=...`.
+- A placeholder `reasoning-start` (`turn-pending`) is written before any orchestrator I/O so `useChat` flips to `streaming` immediately; every real part closes it. Each contiguous reasoning run gets a fresh id so Chain of Thought interleaves correctly with tools.
+- Session continuity: `data-session` is emitted on the first turn and reused by `AgentChat`; the turn body forwards `model` as `model_id` plus `reasoning_effort` for per-turn switching ("POST per-turn model switching" compatibility test).
 
 ## Graph contract (implemented 2026-08-12)
 

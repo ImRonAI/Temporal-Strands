@@ -77,17 +77,19 @@ from config import (
     DESKTOP_VNC_GRANT_COMMAND,
     DESKTOP_VNC_COMMAND_TIMEOUT,
     DESKTOP_HANDOFF_TIMEOUT,
+    HANDOFF_ROLLOVER_RETRY_BACKOFF,
     PROVIDER_DISPLAY_NAMES,
     READINESS_POLLER_CACHE,
     READINESS_POLLER_RPC_TIMEOUT,
+    SERVER_HTTP_TIMEOUT,
     TASK_QUEUE,
 )
-from perplexity_operations import AGENT_RUNS_TOPIC
 from browser_activity import artifact_root
 from run_worker import agent_identity, assemble_model_factories
 from workspace_api import WorkspaceRequestBoundary, router as workspace_router, workspace_lifespan
 from workflow import (
     THINKING_TOPIC,
+    AGENT_RUNS_TOPIC,
     APPROVAL_TOPIC,
     HANDOFF_TOPIC,
     EVENTS_TOPIC,
@@ -112,9 +114,10 @@ logger = logging.getLogger(__name__)
 MAX_COMPARE_MODELS = 4
 
 
-# AGENT_RUNS_TOPIC is live again: perplexity_operations.py publishes every
-# nested Agent API run event on it (imported above so the two sides can never
-# drift). The protected route's agent_runs branch consumes these frames.
+# AGENT_RUNS_TOPIC stays in the subscription set (defined in workflow.py with
+# the other topics) so the SSE frame contract with the protected route never
+# drifts; nothing publishes on it since the Agent API sub-agent operations
+# were removed.
 
 CHAT_TOPICS = [
     EVENTS_TOPIC,
@@ -279,7 +282,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as error:  # noqa: BLE001 - API stays up so /health can report
         logger.warning("Temporal unavailable at startup: %s", error)
         _state["client"] = None
-    async with httpx.AsyncClient(timeout=60) as http, workspace_lifespan(app):
+    async with httpx.AsyncClient(timeout=SERVER_HTTP_TIMEOUT.total_seconds()) as http, workspace_lifespan(app):
         _state["http"] = http
         yield
 
@@ -729,9 +732,12 @@ async def desktop_control_status(session_id: str, response: Response) -> dict:
     current = await asyncio.to_thread(_desktop_mode, session_id)
     # GET readiness means native availability, not an idle turn. Take Control
     # must remain usable while workflow.control_status.ready is false during work.
-    available = runtime_available and current == state and state["mode"] != "recovery"
-    return {**workflow_state, "ready": available,
-            "mode": current["mode"] if runtime_available else "recovery", "epoch": str(current["epoch"])}
+    transitioning = current != state
+    available = runtime_available and not transitioning and state["mode"] != "recovery"
+    # A transfer that moved the native state between the two reads explains a
+    # mismatched VNC receipt; report the in-flight mode, never a false recovery.
+    mode = current["mode"] if runtime_available or transitioning else "recovery"
+    return {**workflow_state, "ready": available, "mode": mode, "epoch": str(current["epoch"])}
 
 
 @app.post("/sessions/{session_id}/handoff", status_code=204)
@@ -755,7 +761,7 @@ async def handoff(session_id: str, body: HandoffRequest) -> None:
                     except WorkflowUpdateFailedError as error:
                         if getattr(error.cause, "type", None) != "SessionRollingOver":
                             raise
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(HANDOFF_ROLLOVER_RETRY_BACKOFF.total_seconds())
             if body.action != "give":
                 return
             while True:
@@ -767,7 +773,7 @@ async def handoff(session_id: str, body: HandoffRequest) -> None:
                     except WorkflowUpdateFailedError as error:
                         if getattr(error.cause, "type", None) != "SessionRollingOver":
                             raise
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(HANDOFF_ROLLOVER_RETRY_BACKOFF.total_seconds())
     except (TimeoutError, WorkflowUpdateRPCTimeoutOrCancelledError) as error:
         task = asyncio.current_task()
         if isinstance(error, WorkflowUpdateRPCTimeoutOrCancelledError) and task is not None and task.cancelling():

@@ -17,17 +17,18 @@ from __future__ import annotations
 
 import asyncio
 import json
-import copy
 import os
 import platform
 import time
 import unittest.mock
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from typing import Any, AsyncGenerator, Callable
 
 import pytest
 import pytest_asyncio
+import httpx
 from strands.models.model import Model
 from temporalio.client import (
     Client,
@@ -40,20 +41,20 @@ from temporalio.exceptions import ApplicationError
 from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
-from config import DESKTOP_BROWSER_TASK_QUEUE, THINK_MODEL_ID
+from config import DESKTOP_BROWSER_TASK_QUEUE
 
-import think_activity
 from load_tool import mcp_client_activity, run_loaded_tool
 from workflow import ChatInput, ChatWorkflow, TurnInput, mcp_client_factories
 from browser_activity import browser_activity
+from perplexity_model import PerplexityModel
 
 TASK_QUEUE = "test-chat-workflow"
 
 
-@activity.defn(name="list_agent_models")
-async def stub_list_agent_models() -> dict[str, Any]:
+@activity.defn(name="model_catalog")
+async def stub_model_catalog() -> list:
     CATALOG_CALLS.append(activity.info().workflow_id)
-    return {"object": "list", "data": []}
+    return []
 
 
 @activity.defn(name="take_screenshot")
@@ -88,11 +89,23 @@ async def stub_failing_graph(
 # under the workflow lock, so call order is deterministic within a test.
 SCRIPTS: deque[list[dict[str, Any]]] = deque()
 REASONING_STATES: list[dict[str, Any]] = []
-THINK_REQUESTS: deque[dict[str, Any]] = deque()
-THINK_SCRIPTS: deque[list[dict[str, Any]]] = deque()
+# Inputs the stub think activity received, in call order.
 THINK_CALLS: list[dict[str, Any]] = []
 CATALOG_CALLS: list[str] = []
 MODEL_REQUESTS: list[dict[str, Any]] = []
+PERPLEXITY_RESPONSES: deque[list[dict[str, Any]]] = deque()
+PERPLEXITY_ATTEMPTS: list[int] = []
+
+
+async def perplexity_response(request: httpx.Request) -> httpx.Response:
+    PERPLEXITY_ATTEMPTS.append(activity.info().attempt)
+    events = PERPLEXITY_RESPONSES.popleft()
+    if not events:
+        await asyncio.sleep(5)  # Simulate an accepted request that stops responding.
+    return httpx.Response(
+        200, headers={"content-type": "text/event-stream"},
+        content="".join(f"data: {json.dumps(event)}\n\n" for event in events).encode(),
+    )
 
 
 class Tracker:
@@ -153,21 +166,6 @@ class ScriptedModel(Model):
     async def stream(
         self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
-        # Think inherits this exact registered model. Its native prompt marks a
-        # fresh cycle; no separate Think model factory is used by new workflows.
-        if messages and "Current Cycle:" in str(messages[0]):
-            async for event in ThinkModel().stream(
-                messages, tool_specs, system_prompt, _test_model_name="fake/text", **kwargs,
-            ):
-                yield event
-            return
-        if (kwargs.get("invocation_state") or {}).get("require_think"):
-            arguments = THINK_REQUESTS.popleft() if THINK_REQUESTS else {
-                "thought": "Analyze the user request", "cycle_count": 1, "system_prompt": "",
-            }
-            for event in tool_call_events("think", "initial-think", arguments):
-                yield event
-            return
         TRACKER.active += 1
         REASONING_STATES.append(dict(kwargs.get("invocation_state") or {}))
         MODEL_REQUESTS.append({"system_prompt": system_prompt,
@@ -198,19 +196,6 @@ class AltScriptedModel(ScriptedModel):
     async def stream(
         self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
-        if messages and "Current Cycle:" in str(messages[0]):
-            async for event in ThinkModel().stream(
-                messages, tool_specs, system_prompt, _test_model_name="fake/alt", **kwargs,
-            ):
-                yield event
-            return
-        if (kwargs.get("invocation_state") or {}).get("require_think"):
-            arguments = THINK_REQUESTS.popleft() if THINK_REQUESTS else {
-                "thought": "Analyze the user request", "cycle_count": 0, "system_prompt": "",
-            }
-            for event in tool_call_events("think", "alt-initial-think", arguments):
-                yield event
-            return
         if not ALT_SCRIPTS:
             raise ApplicationError(
                 "alt test script exhausted: a model call arrived with no scripted reply",
@@ -230,37 +215,32 @@ class BrokenModel(ScriptedModel):
         yield  # unreachable; makes this an async generator
 
 
-THINK_NOTES = "scripted think notes"
-
-
-class ThinkModel(Model):
-    """The nested think-cycle model: a fixed reply, independent of SCRIPTS.
-
-    The think-first hook runs the think activity before EVERY turn's model
-    call; keeping its model outside the SCRIPTS deque means existing tests'
-    script accounting is untouched.
-    """
-
-    def update_config(self, **model_config: Any) -> None:  # pragma: no cover
-        pass
-
-    def get_config(self) -> Any:  # pragma: no cover
-        return {}
-
-    async def structured_output(
-        self, output_model: Any, prompt: Any, system_prompt: Any = None, **kwargs: Any
-    ) -> AsyncGenerator[dict[str, Any], None]:  # pragma: no cover
-        raise NotImplementedError
-        yield
-
-    async def stream(
-        self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
-    ) -> AsyncGenerator[dict[str, Any], None]:
-        THINK_CALLS.append({"messages": copy.deepcopy(messages), "tools": copy.deepcopy(tool_specs),
-                            "model_name": kwargs.get("_test_model_name"),
-                            "invocation_state": dict(kwargs.get("invocation_state") or {})})
-        for event in THINK_SCRIPTS.popleft() if THINK_SCRIPTS else text_events(THINK_NOTES):
-            yield event
+@activity.defn(name="think")
+async def stub_think(
+    thought: str,
+    cycle_count: int = 1,
+    system_prompt: str = "",
+    tools: Any = None,
+    model_provider: Any = None,
+    model_settings: Any = None,
+    thinking_system_prompt: Any = None,
+) -> dict[str, Any]:
+    """Stands in for the think activity: records its input and returns the
+    official tool's result shape. A "FAIL:<message>" thought exercises the
+    failure path."""
+    THINK_CALLS.append({
+        "thought": thought,
+        "cycle_count": cycle_count,
+        "system_prompt": system_prompt,
+        "tools": tools,
+        "model_provider": model_provider,
+        "model_settings": model_settings,
+        "thinking_system_prompt": thinking_system_prompt,
+        "workflow_id": activity.info().workflow_id,
+    })
+    if thought.startswith("FAIL:"):
+        raise ApplicationError(thought.removeprefix("FAIL:"), non_retryable=True)
+    return {"status": "success", "content": [{"text": f"notes on: {thought}"}]}
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
@@ -269,7 +249,10 @@ async def client() -> AsyncGenerator[Client, None]:
         "fake/text": lambda: ScriptedModel(),
         "fake/alt": lambda: AltScriptedModel(),
         "fake/broken": lambda: BrokenModel(),
-        THINK_MODEL_ID: lambda: ThinkModel(),
+        "fake/perplexity": lambda: PerplexityModel(
+            model_id="fake/perplexity", api_key="test-key",
+            transport=httpx.MockTransport(perplexity_response),
+        ),
     }
     env = await WorkflowEnvironment.start_local(
         plugins=[
@@ -279,36 +262,27 @@ async def client() -> AsyncGenerator[Client, None]:
             )
         ]
     )
-    # The think-first hook runs the think activity before every turn; its
-    # nested agent resolves the session model id through configure(), exactly
-    # as run_worker.py does. ThinkModel keeps it independent of SCRIPTS.
-    think_activity.configure(
-        {model_id: (lambda: ThinkModel()) for model_id in model_factories}
+    worker = Worker(
+        env.client,
+        task_queue=TASK_QUEUE,
+        workflows=[ChatWorkflow],
+        activities=[
+            mcp_client_activity,
+            run_loaded_tool,
+            stub_think,
+            stub_model_catalog,
+            stub_failing_graph,
+        ],
+        workflow_runner=UnsandboxedWorkflowRunner(),
+        activity_executor=ThreadPoolExecutor(max_workers=1),
     )
-    try:
-        worker = Worker(
-            env.client,
-            task_queue=TASK_QUEUE,
-            workflows=[ChatWorkflow],
-            activities=[
-                mcp_client_activity,
-                run_loaded_tool,
-                think_activity.think,
-                stub_list_agent_models,
-                stub_failing_graph,
-            ],
-            workflow_runner=UnsandboxedWorkflowRunner(),
-            activity_executor=ThreadPoolExecutor(max_workers=1),
-        )
-        async with worker, Worker(
-            env.client, task_queue=DESKTOP_BROWSER_TASK_QUEUE,
-            activities=[stub_desktop_screenshot, stub_release_desktop, browser_activity],
-            activity_executor=ThreadPoolExecutor(max_workers=1),
-        ):
-            yield env.client
-    finally:
-        think_activity.configure({})
-        await env.shutdown()
+    async with worker, Worker(
+        env.client, task_queue=DESKTOP_BROWSER_TASK_QUEUE,
+        activities=[stub_desktop_screenshot, stub_release_desktop, browser_activity],
+        activity_executor=ThreadPoolExecutor(max_workers=1),
+    ):
+        yield env.client
+    await env.shutdown()
 
 
 @pytest.fixture(autouse=True)
@@ -316,11 +290,11 @@ def reset_scripts() -> None:
     DESKTOP_RELEASES.clear()
     SCRIPTS.clear()
     ALT_SCRIPTS.clear()
-    THINK_REQUESTS.clear()
-    THINK_SCRIPTS.clear()
     THINK_CALLS.clear()
     CATALOG_CALLS.clear()
     MODEL_REQUESTS.clear()
+    PERPLEXITY_RESPONSES.clear()
+    PERPLEXITY_ATTEMPTS.clear()
     TRACKER.reset()
 
 
@@ -365,6 +339,16 @@ def assistant_texts(messages: list[dict[str, Any]]) -> list[str]:
     return texts
 
 
+async def activity_names(handle: Any) -> list[str]:
+    """Names of every activity the workflow scheduled, in order."""
+    history = await handle.fetch_history()
+    return [
+        event.activity_task_scheduled_event_attributes.activity_type.name
+        for event in history.events
+        if event.HasField("activity_task_scheduled_event_attributes")
+    ]
+
+
 @pytest.mark.asyncio(loop_scope="module")
 async def test_turn_replies_and_history_is_queryable(client: Client) -> None:
     """A turn returns its reply; the model is fixed; history is queryable."""
@@ -376,14 +360,8 @@ async def test_turn_replies_and_history_is_queryable(client: Client) -> None:
     assert reply == "first reply"
     assert await handle.query(ChatWorkflow.model_id) == "fake/text"
     messages = await handle.query(ChatWorkflow.messages)
-    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"]
+    assert [m["role"] for m in messages] == ["user", "assistant"]
     assert "first reply" in assistant_texts(messages)
-
-    # The model chooses a mandatory Think call; notes return as its tool result,
-    # not an automatically injected, hardcoded pre-turn cycle.
-    assert messages[1]["content"][0]["toolUse"]["name"] == "think"
-    assert messages[1]["content"][0]["toolUse"]["input"]["system_prompt"] == ""
-    assert THINK_NOTES in str(messages[2]["content"])
 
     await handle.signal(ChatWorkflow.end_chat)
     await handle.result()
@@ -411,57 +389,76 @@ async def test_model_activity_carries_no_skill_catalog(client: Client) -> None:
 
 
 @pytest.mark.asyncio(loop_scope="module")
-async def test_think_zero_cycles_skips_model_and_first_call_parameters_are_model_chosen(client: Client):
-    handle = await start_session(client, "chat-zero-think")
-    THINK_REQUESTS.append({"thought": "Greeting", "cycle_count": 0, "system_prompt": ""})
-    SCRIPTS.append(text_events("Hello"))
+async def test_think_call_schedules_the_think_activity_with_model_chosen_parameters(client: Client):
+    handle = await start_session(client, "chat-think-activity")
+    SCRIPTS.extend([
+        tool_call_events("think", "think-1", {"thought": "Greeting", "cycle_count": 2, "system_prompt": "careful"}),
+        text_events("Hello"),
+    ])
     assert await asyncio.wait_for(handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="Hey there")), 15) == "Hello"
-    assert THINK_CALLS == []
-    calls = [block["toolUse"] for message in await handle.query(ChatWorkflow.messages) for block in message["content"] if "toolUse" in block]
-    assert calls[0]["input"]["cycle_count"] == 0
+
+    # The model's call — parameters chosen by the model, not injected — ran as
+    # the "think" activity, exactly once. Unset optional parameters arrive as
+    # the signature defaults the model sees in the schema.
+    assert THINK_CALLS == [{
+        "thought": "Greeting",
+        "cycle_count": 2,
+        "system_prompt": "careful",
+        "tools": None,
+        "model_provider": "perplexity",
+        "model_settings": None,
+        "thinking_system_prompt": None,
+        "workflow_id": handle.id,
+    }]
+    names = await activity_names(handle)
+    assert names.count("think") == 1
+    assert "model_catalog" in names
     assert CATALOG_CALLS == [handle.id]  # Existing workflow bootstrap catalog refresh only.
-    await handle.signal(ChatWorkflow.end_chat)
-    await handle.result()
 
-
-@pytest.mark.asyncio(loop_scope="module")
-async def test_think_uses_parent_model_and_tools_and_chains_cycles_without_retaining_history(client: Client):
-    handle = await start_session(client, "chat-astra-evidence")
-    THINK_REQUESTS.append({"thought": "Inspect catalog", "cycle_count": 2, "system_prompt": ""})
-    THINK_SCRIPTS.extend([tool_call_events("list_agent_models", "think-catalog", {}), text_events("cycle one"), text_events("cycle two")])
-    SCRIPTS.append(text_events("Evidence received"))
-    assert await asyncio.wait_for(handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="Use catalog")), 15) == "Evidence received"
-    assert CATALOG_CALLS == [handle.id, handle.id]  # Bootstrap, then Think's inherited tool.
-    assert len(THINK_CALLS) == 3
-    for request in THINK_CALLS:
-        assert "think" not in {spec["name"] for spec in request["tools"]}
-        assert {"browser", "take_screenshot", "graph", "use_skill", "list_agent_models"}.issubset({spec["name"] for spec in request["tools"]})
-        assert request["invocation_state"].get("reasoning_effort") is None
-        assert "require_think" not in request["invocation_state"]
-    assert "Previous cycle concluded: cycle one" in str(THINK_CALLS[-1]["messages"])
-    assert "think-catalog" not in str(THINK_CALLS[-1]["messages"])
+    # The activity's structured return reaches the model as the tool result
+    # (Temporal's activity adapter encodes it as JSON).
     messages = await handle.query(ChatWorkflow.messages)
     think_result = messages[2]["content"][0]["toolResult"]
-    assert think_result["content"][0]["text"] == "Cycle 1/2:\ncycle one\n\nCycle 2/2:\ncycle two"
-    history = await handle.fetch_history()
-    names = [event.activity_task_scheduled_event_attributes.activity_type.name for event in history.events if event.HasField("activity_task_scheduled_event_attributes")]
-    assert "list_agent_models" in names
-    assert "think" not in names
+    assert json.loads(think_result["content"][0]["text"]) == {
+        "status": "success",
+        "content": [{"text": "notes on: Greeting"}],
+    }
     await handle.signal(ChatWorkflow.end_chat)
     await handle.result()
 
 
 @pytest.mark.asyncio(loop_scope="module")
-async def test_later_explicit_think_call_uses_same_native_contract(client: Client):
+async def test_later_explicit_think_call_uses_the_same_activity_contract(client: Client):
     handle = await start_session(client, "chat-later-think")
-    THINK_REQUESTS.append({"thought": "Initial classification", "cycle_count": 0, "system_prompt": ""})
     SCRIPTS.extend([tool_call_events("think", "later-think", {"thought": "Inspect evidence", "cycle_count": 1, "system_prompt": ""}), text_events("Complete")])
-    THINK_SCRIPTS.extend([tool_call_events("list_agent_models", "later-catalog", {}), text_events("Later result")])
     assert await asyncio.wait_for(handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="Interleave")), 15) == "Complete"
-    assert len(THINK_CALLS) == 2
-    assert "Inspect evidence" in str(THINK_CALLS[0]["messages"])
-    assert "later-think" not in str(THINK_CALLS[0]["messages"])
-    assert THINK_CALLS[0]["invocation_state"].get("reasoning_effort") is None
+    assert [call["thought"] for call in THINK_CALLS] == ["Inspect evidence"]
+    assert THINK_CALLS[0]["cycle_count"] == 1
+    assert (await activity_names(handle)).count("think") == 1
+    messages = await handle.query(ChatWorkflow.messages)
+    think_result = messages[2]["content"][0]["toolResult"]
+    assert json.loads(think_result["content"][0]["text"])["content"] == [{"text": "notes on: Inspect evidence"}]
+    await handle.signal(ChatWorkflow.end_chat)
+    await handle.result()
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_failed_think_activity_reaches_the_model_as_an_error_result(client: Client):
+    """One automatic attempt (THINK_RETRY_POLICY): a failed think is re-driven
+    by the model, not blindly retried, and the error text is the activity's
+    own message, not "Activity task failed"."""
+    handle = await start_session(client, "chat-think-failure")
+    SCRIPTS.extend([
+        tool_call_events("think", "fail-think", {"thought": "FAIL:think exploded", "cycle_count": 1, "system_prompt": ""}),
+        text_events("I saw the think failure"),
+    ])
+    assert await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="try thinking")) == "I saw the think failure"
+    assert (await activity_names(handle)).count("think") == 1
+    messages = await handle.query(ChatWorkflow.messages)
+    think_result = messages[2]["content"][0]["toolResult"]
+    assert think_result["status"] == "error"
+    assert "think exploded" in think_result["content"][0]["text"]
+    assert "Activity task failed" not in think_result["content"][0]["text"]
     await handle.signal(ChatWorkflow.end_chat)
     await handle.result()
 
@@ -601,7 +598,7 @@ async def test_concurrent_turns_are_serialized(client: Client) -> None:
     messages = await handle.query(ChatWorkflow.messages)
     # Strictly alternating: user, assistant, user, assistant. Interleaved
     # turns would break this ordering.
-    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"] * 2
+    assert [m["role"] for m in messages] == ["user", "assistant"] * 2
 
     await handle.signal(ChatWorkflow.end_chat)
     await handle.result()
@@ -628,6 +625,76 @@ async def test_failed_model_activity_surfaces_to_the_caller(client: Client) -> N
     assert await handle.query(ChatWorkflow.model_id) == "fake/broken"
     await handle.signal(ChatWorkflow.end_chat)
     await handle.result()
+
+
+@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.parametrize("failure_mode", ["recover", "exhausted", "partial"])
+async def test_native_model_retry_after_think_does_not_repeat_tools(client: Client, failure_mode):
+    """Real Temporal + Strands/OpenAI parser; only the upstream HTTP is scripted."""
+    handle = await start_session(client, f"chat-overload-{failure_mode}", model_id="fake/perplexity")
+    overload = {"error": {"message": "upstream model is overloaded, please try again later"}}
+    complete = {"type": "response.completed", "response": {"id": "test-response", "usage": None}}
+    PERPLEXITY_RESPONSES.append([
+        {"type": "response.output_item.added", "item": {
+            "type": "function_call", "id": "fc-think", "call_id": "think-once",
+            "name": "think", "arguments": json.dumps({"thought": "plan once"}),
+        }},
+        complete,
+    ])
+    if failure_mode == "partial":
+        PERPLEXITY_RESPONSES.append([
+            {"type": "response.output_text.delta", "delta": "partial answer"}, overload,
+        ])
+    else:
+        PERPLEXITY_RESPONSES.extend([[overload]] * (3 if failure_mode == "exhausted" else 1))
+    if failure_mode == "recover":
+        PERPLEXITY_RESPONSES.append([
+            {"type": "response.output_text.delta", "delta": "recovered answer"}, complete,
+        ])
+
+    try:
+        async with asyncio.timeout(20):
+            if failure_mode == "recover":
+                assert await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="research")) == "recovered answer"
+                assert PERPLEXITY_ATTEMPTS == [1, 1, 2]
+                messages = await handle.query(ChatWorkflow.messages)
+                assert assistant_texts(messages) == ["recovered answer"]
+            else:
+                with pytest.raises(WorkflowUpdateFailedError) as caught:
+                    await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="research"))
+                cause = caught.value
+                while cause.__cause__ is not None:
+                    cause = cause.__cause__
+                assert "upstream model is overloaded" in str(cause)
+                assert PERPLEXITY_ATTEMPTS == ([1, 1, 2, 3] if failure_mode == "exhausted" else [1, 1])
+                assert await handle.query(ChatWorkflow.model_id) == "fake/perplexity"
+        assert len(THINK_CALLS) == 1
+        assert (await activity_names(handle)).count("think") == 1
+        assert not PERPLEXITY_RESPONSES
+    finally:
+        await handle.signal(ChatWorkflow.end_chat)
+        await handle.result()
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_perplexity_start_to_close_timeout_is_not_retried(client: Client, monkeypatch):
+    monkeypatch.setattr("workflow.MODEL_START_TO_CLOSE", timedelta(seconds=1))
+    handle = await start_session(client, "chat-overload-timeout", model_id="fake/perplexity")
+    PERPLEXITY_RESPONSES.append([])
+    try:
+        async with asyncio.timeout(10):
+            with pytest.raises(WorkflowUpdateFailedError):
+                await handle.execute_update(ChatWorkflow.turn, TurnInput(prompt="timeout"))
+        assert PERPLEXITY_ATTEMPTS == [1]
+        history = await handle.fetch_history()
+        timed_out = [event.activity_task_timed_out_event_attributes for event in history.events
+                     if event.HasField("activity_task_timed_out_event_attributes")]
+        assert len(timed_out) == 1
+        from temporalio.api.enums.v1 import RetryState
+        assert timed_out[0].retry_state == RetryState.RETRY_STATE_NON_RETRYABLE_FAILURE
+    finally:
+        await handle.signal(ChatWorkflow.end_chat)
+        await handle.result()
 
 
 def graph_call_events(tool_id: str) -> list[dict[str, Any]]:
@@ -713,13 +780,12 @@ async def test_turn_model_id_switches_the_factory_for_the_next_turn(
         ChatWorkflow.turn, TurnInput(prompt="two", model_id="fake/alt")
     )
     assert reply_two == "from the second model"
-    # think_activity resolves its model through this query; it must reflect
-    # the new value.
+    # The model_id query must reflect the new value for the next turn.
     assert await handle.query(ChatWorkflow.model_id) == "fake/alt"
 
-    # Each turn includes the mandatory Think call/result before the response.
+    # Conversation carries across the rebuild: strictly user/assistant pairs.
     messages = await handle.query(ChatWorkflow.messages)
-    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"] * 2
+    assert [m["role"] for m in messages] == ["user", "assistant"] * 2
     texts = assistant_texts(messages)
     assert "from the first model" in texts
     assert "from the second model" in texts
@@ -737,30 +803,25 @@ async def test_turn_model_id_switches_the_factory_for_the_next_turn(
 
 
 @pytest.mark.asyncio(loop_scope="module")
-async def test_think_inherits_selected_model_and_tools_after_model_switch(client: Client):
+async def test_think_activity_contract_is_stable_across_model_switch(client: Client):
+    """A per-turn model switch rebuilds the session agent, but the think call
+    keeps dispatching the same activity with the model-chosen input."""
     handle = await start_session(client, "chat-think-model-switch")
     try:
         for model_name, scripts in [("fake/text", SCRIPTS), ("fake/alt", ALT_SCRIPTS)]:
-            THINK_REQUESTS.append({"thought": "Inspect catalog", "cycle_count": 1, "system_prompt": ""})
-            THINK_SCRIPTS.extend([
-                tool_call_events("list_agent_models", f"catalog-{model_name}", {}),
-                text_events(f"Thought from {model_name}"),
+            scripts.extend([
+                tool_call_events("think", f"think-{model_name}", {"thought": f"Thought for {model_name}", "cycle_count": 1, "system_prompt": ""}),
+                text_events(f"Reply from {model_name}"),
             ])
-            scripts.append(text_events(f"Reply from {model_name}"))
             reply = await asyncio.wait_for(handle.execute_update(
                 ChatWorkflow.turn, TurnInput(prompt="Inspect catalog", model_id=model_name),
             ), 20)
             assert reply == f"Reply from {model_name}"
-            assert [call["model_name"] for call in THINK_CALLS[-2:]] == [model_name] * 2
-            for call in THINK_CALLS[-2:]:
-                names = {spec["name"] for spec in call["tools"]}
-                assert "think" not in names
-                assert {"list_agent_models", "browser", "take_screenshot", "graph", "use_skill"} <= names
-            messages = await handle.query(ChatWorkflow.messages)
-            assert f"Thought from {model_name}" in str(messages[-2])
-        # Each turn refreshes the catalog and Think invokes its inherited tool.
-        assert CATALOG_CALLS == [handle.id] * 4
-        assert len(THINK_CALLS) == 4
+            assert THINK_CALLS[-1]["thought"] == f"Thought for {model_name}"
+            assert THINK_CALLS[-1]["workflow_id"] == handle.id
+        # Each turn refreshes the catalog outside the think activity.
+        assert CATALOG_CALLS == [handle.id] * 2
+        assert len(THINK_CALLS) == 2
         assert await handle.query(ChatWorkflow.model_id) == "fake/alt"
     finally:
         await handle.signal(ChatWorkflow.end_chat)
@@ -850,7 +911,7 @@ async def test_continue_as_new_preserves_the_session(client: Client) -> None:
     assert "turn-one" not in texts, "rollover replayed the previous turn's frames"
 
     messages = await latest.query(ChatWorkflow.messages)
-    assert [m["role"] for m in messages] == ["user", "assistant", "user", "assistant"] * 2
+    assert [m["role"] for m in messages] == ["user", "assistant"] * 2
 
     await latest.signal(ChatWorkflow.end_chat)
     await latest.result()
@@ -896,7 +957,6 @@ def test_workflow_builds_agent_with_config_model_stream_batch_interval() -> None
     wf._tool_results = SimpleNamespace(publish=lambda *a, **k: None)
     wf._loaded_tools = []
     wf._connected_mcp_servers = []
-    # _ThinkFirstHook reads turn-scoped notes off the workflow's own stream.
     wf._stream = SimpleNamespace(get_state=lambda **k: SimpleNamespace(log=[], base_offset=0))
 
     with (
@@ -915,6 +975,17 @@ def test_workflow_builds_agent_with_config_model_stream_batch_interval() -> None
         ta.call_args.kwargs["streaming_batch_interval"]
         == config.MODEL_STREAM_BATCH_INTERVAL
     )
+    # Strands' vended ContextOffloader keeps oversized tool results (uncapped
+    # browser get_text bodies) out of every later model activity input, with
+    # its thresholds in config.py. Same plugin Agent(context_manager="auto")
+    # installs; no local truncation code.
+    from strands.vended_plugins.context_offloader import ContextOffloader, InMemoryStorage
+    offloaders = [p for p in ta.call_args.kwargs["plugins"] if isinstance(p, ContextOffloader)]
+    assert len(offloaders) == 1
+    offloader = offloaders[0]
+    assert offloader._max_result_tokens == config.CONTEXT_OFFLOAD_MAX_RESULT_TOKENS
+    assert offloader._preview_tokens == config.CONTEXT_OFFLOAD_PREVIEW_TOKENS
+    assert isinstance(offloader._raw_storage, InMemoryStorage)
     from temporalio import activity
     from temporalio.contrib.strands._temporal_activity_tool import TemporalActivityTool
     assert [item.tool_name for item in workflow.COMPUTER_USE_TOOLS] == [
@@ -927,10 +998,15 @@ def test_workflow_builds_agent_with_config_model_stream_batch_interval() -> None
             assert binding._options[option] == value
 
 
-def test_model_chosen_think_schema_offers_no_provider_override():
-    """Agent API models fill every schema field; live turns sent
-    model_provider="/" and Think rejected it. Temporal cycles only use the
-    session's worker factory, so the override must not be offered."""
+def test_think_tool_on_agent_is_the_think_activity_with_the_config_envelope():
+    """The model-facing think tool dispatches the ``think`` activity.
+
+    It is bound on the session agent as a TemporalActivityTool carrying the
+    config THINK_* envelope (one automatic attempt: a replayed think is a
+    duplicate inference), and its schema follows the activity wrapper's
+    signature — ``model_provider``/``model_settings`` are the tool's
+    documented override interface, present by design.
+    """
     import unittest.mock
     import config
     import workflow
@@ -947,7 +1023,6 @@ def test_model_chosen_think_schema_offers_no_provider_override():
     wf._tool_results = SimpleNamespace(publish=lambda *a, **k: None)
     wf._loaded_tools = []
     wf._connected_mcp_servers = []
-    wf._model_chosen_think = True
     wf._stream = SimpleNamespace(get_state=lambda **k: SimpleNamespace(log=[], base_offset=0))
 
     with (
@@ -957,10 +1032,24 @@ def test_model_chosen_think_schema_offers_no_provider_override():
         wf._build_agent([])
 
     think = next(t for t in ta.call_args.kwargs["tools"] if getattr(t, "tool_name", None) == "think")
-    properties = think.tool_spec["inputSchema"]["json"]["properties"]
-    assert "model_provider" not in properties
-    assert "model_settings" not in properties
-    assert {"thought", "cycle_count", "system_prompt"} <= set(properties)
+    assert think is workflow.THINK_TOOL
+    from temporalio.contrib.strands._temporal_activity_tool import TemporalActivityTool
+    assert isinstance(think, TemporalActivityTool)
+    assert think._options["start_to_close_timeout"] == config.THINK_START_TO_CLOSE
+    assert think._options["heartbeat_timeout"] == config.THINK_HEARTBEAT_TIMEOUT
+    assert think._options["retry_policy"] == config.THINK_RETRY_POLICY
+
+    schema = think.tool_spec["inputSchema"]["json"]
+    assert set(schema.get("properties", {})) == {
+        "thought",
+        "cycle_count",
+        "system_prompt",
+        "tools",
+        "model_provider",
+        "model_settings",
+        "thinking_system_prompt",
+    }
+    assert schema.get("required") == ["thought"]
 
 
 @pytest.mark.asyncio
@@ -975,7 +1064,7 @@ async def test_real_session_startup_answers_queries_without_model_or_filesystem_
         queue = f"startup-query-{uuid4()}"
         async with Worker(
             env.client, task_queue=queue, workflows=[ChatWorkflow],
-            activities=[stub_list_agent_models],
+            activities=[stub_model_catalog],
             workflow_runner=UnsandboxedWorkflowRunner(),
         ):
             for index in range(3):
@@ -993,7 +1082,7 @@ async def test_real_session_startup_answers_queries_without_model_or_filesystem_
                     assert not failures
                     scheduled = [event.activity_task_scheduled_event_attributes.activity_type.name
                                  for event in history.events if event.HasField("activity_task_scheduled_event_attributes")]
-                    assert set(scheduled) <= {"list_agent_models"}
+                    assert set(scheduled) <= {"model_catalog"}
                 finally:
                     await handle.signal(ChatWorkflow.end_chat)
                     await asyncio.wait_for(handle.result(), 10)

@@ -40,9 +40,9 @@ os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
 TASK_QUEUE = "test-hot-load"
 
 
-@activity.defn(name="list_agent_models")
-async def stub_list_agent_models() -> dict[str, Any]:
-    return {"object": "list", "data": []}
+@activity.defn(name="model_catalog")
+async def stub_model_catalog() -> list:
+    return []
 SCRIPTS: deque[list[dict[str, Any]]] = deque()
 ECHO_SERVER = Path(__file__).resolve().parent / "echo_mcp_server.py"
 FILE_READ_MARKER = "hot-load-file-read-marker-7f3a"
@@ -64,12 +64,6 @@ class ScriptedModel(Model):
     async def stream(
         self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
-        if (kwargs.get("invocation_state") or {}).get("require_think"):
-            for event in tool_use_events("hotload-initial-think", "think", {
-                "thought": "Analyze request", "cycle_count": 0, "reasoning_effort": "minimal",
-            }):
-                yield event
-            return
         if not SCRIPTS:
             raise ApplicationError(
                 "test script exhausted: a model call arrived with no scripted reply",
@@ -172,7 +166,7 @@ async def client() -> AsyncGenerator[Client, None]:
                 load_tool_activity,
                 run_loaded_tool,
                 mcp_client_activity,
-                stub_list_agent_models,
+                stub_model_catalog,
                 think_activity.think,
             ],
             workflow_runner=UnsandboxedWorkflowRunner(),

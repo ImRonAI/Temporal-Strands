@@ -368,10 +368,13 @@ def check(files: dict[str, str]) -> list[dict]:
             attempt = call_options(retry, workflow_path).get("maximum_attempts") if isinstance(retry, ast.Call) else None
             if not isinstance(attempt, ast.Constant) or type(attempt.value) is not int or attempt.value != 1:
                 report(workflow_path, call, "mutation-retry", "Browser mutations require a verified RetryPolicy(maximum_attempts=1)")
-        think = [node for node in calls if dotted(node.func, {}).endswith("activity_as_tool") and node.args
-                 and dotted(node.args[0], {}) == "think_activity.think"]
-        if not think or not any(isinstance(node, ast.Name) and node.id == "THINK_TOOL" and isinstance(node.ctx, ast.Load) for node in ast.walk(tree)):
-            report(workflow_path, tree, "preserve-think", "Preserve the native Think activity binding and its use by the Perplexity agent")
+        think_bound = False
+        think_tool = symbols.get((workflow_path, "THINK_TOOL"))
+        if isinstance(think_tool, ast.Call) and dotted(think_tool.func, {}).endswith("activity_as_tool") and think_tool.args:
+            think_bound = dotted(think_tool.args[0], imports[workflow_path]) == "think_activity.think"
+        think_used = any(isinstance(node, ast.Name) and node.id == "THINK_TOOL" and isinstance(node.ctx, ast.Load) for node in ast.walk(tree))
+        if not think_bound or not think_used:
+            report(workflow_path, tree, "preserve-think", "Preserve think as THINK_TOOL = activity_as_tool(think_activity.think) on the session agent")
         rollover = [node for node in calls if dotted(node.func, {}).endswith(".continue_as_new")]
         carried = [node for call in rollover for node in ast.walk(call) if isinstance(node, ast.Call) and dotted(node.func, {}) == "ChatInput"]
         if not carried:

@@ -1,4 +1,4 @@
-"""Debug: dump activity_as_tool ToolSpecs and the _format_request tools array."""
+"""Debug: dump the workflow registry ToolSpecs and the _format_request tools array."""
 
 import json
 import sys
@@ -6,30 +6,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from temporalio.contrib.strands.workflow import activity_as_tool
+from run_worker import workflow_tool_specs
 
-import perplexity_operations as ops
-from think_activity import think
-
-ACTIVITIES = [
-    ops.create_fast_agent_response,
-    ops.create_low_agent_response,
-    ops.create_medium_agent_response,
-    ops.create_high_agent_response,
-    ops.create_xhigh_agent_response,
-    ops.create_wide_research_agent_response,
-    ops.retrieve_agent_response,
-    ops.list_agent_response_files,
-    ops.download_agent_response_file,
-    ops.list_agent_models,
-    think,
-]
-
-specs = []
-for act in ACTIVITIES:
-    tool = activity_as_tool(act)
-    spec = tool.tool_spec
-    specs.append(spec)
+specs = workflow_tool_specs()
+for spec in specs:
     print("=" * 80)
     print(spec["name"])
     print(json.dumps(spec["inputSchema"]["json"], indent=2, default=str))

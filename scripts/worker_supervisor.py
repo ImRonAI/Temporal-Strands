@@ -14,6 +14,9 @@ Behavior:
 - SIGTERM/SIGINT/SIGHUP to the supervisor are forwarded to the child, the child
   is reaped (with a SIGKILL escalation after KILL_TIMEOUT), and the supervisor
   exits WITHOUT restarting -- no orphaned or resurrected children.
+- The wait on the child is polled in POLL_INTERVAL slices, never a bare
+  blocking wait(), so a child that ignores SIGTERM cannot pin the supervisor:
+  shutdown always completes within roughly POLL_INTERVAL + KILL_TIMEOUT.
 
 Usage:
     worker_supervisor.py [--] <command> [args...]
@@ -35,8 +38,15 @@ BACKOFF_INITIAL = 1.0
 BACKOFF_MAX = 30.0
 STABLE_SECONDS = 30.0
 KILL_TIMEOUT = 10.0
+POLL_INTERVAL = 0.1
 
 _FORWARD_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+
+
+def _forwarded_signal(signum: int) -> int:
+    # SIGHUP (terminal closed) is not a meaningful request to a worker; ask it
+    # to terminate instead.
+    return signal.SIGTERM if signum == signal.SIGHUP else signum
 
 
 class Supervisor:
@@ -48,12 +58,14 @@ class Supervisor:
         backoff_max: float = BACKOFF_MAX,
         stable_seconds: float = STABLE_SECONDS,
         kill_timeout: float = KILL_TIMEOUT,
+        poll_interval: float = POLL_INTERVAL,
     ) -> None:
         self.command = command
         self.backoff_initial = backoff_initial
         self.backoff_max = backoff_max
         self.stable_seconds = stable_seconds
         self.kill_timeout = kill_timeout
+        self.poll_interval = poll_interval
         self.child: subprocess.Popen | None = None
         self.shutdown_signal: int | None = None
 
@@ -61,28 +73,45 @@ class Supervisor:
         print(f"[worker-supervisor] {message}", file=sys.stderr, flush=True)
 
     def _handle_signal(self, signum: int, _frame: object) -> None:
-        # Record intent; the run loop does the forwarding/reaping so shutdown
-        # is not performed inside a signal handler frame.
+        # Record intent only. The run loop notices it within one poll interval
+        # and performs the forwarding/reaping outside the handler frame, so a
+        # child that ignores the signal cannot pin the supervisor in wait().
         self.shutdown_signal = signum
-        child = self.child
-        if child is not None and child.poll() is None:
-            try:
-                child.send_signal(
-                    signal.SIGTERM if signum == signal.SIGHUP else signum
-                )
-            except OSError:
-                pass
 
     def _spawn(self) -> subprocess.Popen:
         # start_new_session=False: the child stays in our process group so a
         # group-wide SIGINT from concurrently/ctrl-c reaches it too.
         return subprocess.Popen(self.command)
 
-    def _reap(self, child: subprocess.Popen) -> int:
+    def _wait_child(self, child: subprocess.Popen) -> int | None:
+        """Wait for the child to exit, returning early if shutdown is requested.
+
+        Returns the exit code, or None when a shutdown signal interrupted the
+        wait while the child was still running. Never blocks unboundedly:
+        each wait() slice is capped at poll_interval.
+        """
+        while self.shutdown_signal is None:
+            try:
+                return child.wait(timeout=self.poll_interval)
+            except subprocess.TimeoutExpired:
+                continue
+        return child.poll()
+
+    def _terminate(self, child: subprocess.Popen, signum: int) -> int:
+        """Forward the shutdown signal, then reap with a bounded SIGKILL escalation."""
+        if child.poll() is not None:
+            return child.returncode
+        try:
+            child.send_signal(_forwarded_signal(signum))
+        except OSError:
+            pass
         try:
             return child.wait(timeout=self.kill_timeout)
         except subprocess.TimeoutExpired:
-            self.log(f"child {child.pid} ignored signal; sending SIGKILL")
+            self.log(
+                f"child {child.pid} ignored signal for {self.kill_timeout:.1f}s; "
+                "sending SIGKILL"
+            )
             try:
                 child.kill()
             except OSError:
@@ -104,7 +133,7 @@ class Supervisor:
                 backoff = min(backoff * 2, self.backoff_max)
                 continue
             self.log(f"child started pid={self.child.pid}")
-            code = self.child.wait()
+            code = self._wait_child(self.child)
             uptime = time.monotonic() - started
             if self.shutdown_signal is not None:
                 break
@@ -117,25 +146,24 @@ class Supervisor:
             self._sleep(backoff)
             backoff = min(backoff * 2, self.backoff_max)
 
-        # Shutdown path: signal already forwarded by the handler; reap without
-        # restarting.
+        # Shutdown path: forward the signal and reap without restarting. The
+        # reap is bounded by kill_timeout, after which SIGKILL is sent.
         child = self.child
         exit_code = 0
+        signum = self.shutdown_signal
         if child is not None:
-            if child.poll() is None:
-                exit_code = self._reap(child)
+            if child.poll() is None and signum is not None:
+                exit_code = self._terminate(child, signum)
             else:
                 exit_code = child.returncode
-        self.log(
-            f"shutdown (signal {self.shutdown_signal}); child reaped, exiting"
-        )
-        return 128 + self.shutdown_signal if self.shutdown_signal else exit_code
+        self.log(f"shutdown (signal {signum}); child reaped, exiting")
+        return 128 + signum if signum else exit_code
 
     def _sleep(self, seconds: float) -> None:
         # Interruptible sleep: a shutdown signal during backoff exits promptly.
         deadline = time.monotonic() + seconds
         while self.shutdown_signal is None and time.monotonic() < deadline:
-            time.sleep(0.1)
+            time.sleep(self.poll_interval)
 
 
 def main(argv: list[str] | None = None) -> int:

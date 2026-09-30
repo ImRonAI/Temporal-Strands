@@ -391,6 +391,123 @@
   border-color: oklch(0.75 0.12 var(--glass-hue) / 0.1);
 }
 
+/* Activity timeline polish. These hooks are applied from components/v0 to
+   composed AI Elements; the vendored primitives keep their own structure and
+   animations. */
+@keyframes activity-step-pulse {
+  0%,
+  100% {
+    opacity: 0.28;
+    transform: scale(0.82);
+  }
+  50% {
+    opacity: 0.72;
+    transform: scale(1.18);
+  }
+}
+
+@keyframes activity-scan {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translateX(-42%);
+  }
+  18%,
+  72% {
+    opacity: 1;
+  }
+  50% {
+    transform: translateX(42%);
+  }
+}
+
+.activity-step > :first-child {
+  isolation: isolate;
+}
+
+.activity-step[data-activity-status="active"] {
+  color: var(--foreground);
+}
+
+.activity-step[data-activity-status="active"] > :first-child::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  z-index: -1;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle,
+    color-mix(in oklch, var(--blurple-bright) 42%, transparent),
+    transparent 70%
+  );
+  filter: blur(2px);
+  animation: activity-step-pulse 1.9s ease-in-out infinite;
+}
+
+.activity-step[data-activity-status="active"] > :first-child > svg {
+  color: var(--blurple-bright);
+  filter: drop-shadow(0 0 10px color-mix(in oklch, var(--blurple-bright) 52%, transparent));
+}
+
+.activity-step[data-activity-status="active"] > :first-child > div {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--blurple-bright) 72%, transparent),
+    color-mix(in oklch, var(--blurple) 24%, transparent)
+  );
+  box-shadow: 0 0 12px color-mix(in oklch, var(--blurple-bright) 24%, transparent);
+}
+
+.activity-step[data-activity-status="pending"] {
+  color: color-mix(in oklch, var(--muted-foreground) 68%, transparent);
+}
+
+.activity-scan {
+  position: relative;
+  overflow: hidden;
+}
+
+.activity-scan::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 12%;
+  left: 12%;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--blurple-bright) 76%, transparent),
+    transparent
+  );
+  animation: activity-scan 3.2s ease-in-out infinite;
+}
+
+.activity-trigger {
+  border-radius: calc(var(--radius) * 0.72);
+  outline-offset: 4px;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    opacity 180ms ease;
+}
+
+.activity-trigger:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--blurple-bright) 6%, transparent);
+}
+
+.activity-trigger:disabled {
+  cursor: wait;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-step[data-activity-status="active"] > :first-child::before,
+  .activity-scan::after {
+    animation: none;
+  }
+}
+
 /* Elevated obsidian: opaque-leaning panel for popovers and nested cards
    that sit on top of an already-glassed surface (no double frosting). */
 @utility app-elevated {

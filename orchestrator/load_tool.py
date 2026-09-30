@@ -24,10 +24,14 @@ https://github.com/temporalio/sdk-python/blob/main/temporalio/contrib/strands/RE
 
 from __future__ import annotations
 
+import ast
 import functools
+import html
 import importlib.util
 import inspect
+import json
 import os
+import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -59,6 +63,9 @@ from config import (
 )
 
 STRANDS_TOOLS_DIR = Path(strands_tools.__file__).resolve().parent
+_MCP_CONFIG_PATH = Path(__file__).resolve().parent / "mcp.json"
+_PACKAGES_PATH = Path(__file__).resolve().parent / "subagent_packages.json"
+_SKIP_DIRS = {"node_modules", "__pycache__", "tests", "test", "skills"}
 
 # Tool activity. Start-to-close matches the installed Strands guide's
 # activity_as_tool(..., start_to_close_timeout=timedelta(seconds=30)).
@@ -74,14 +81,246 @@ def tool_file_path(path: str) -> str:
 
     The path as given when it exists; otherwise the installed ``strands_tools``
     module of that name (``path="calculator"`` -> ``strands_tools/calculator.py``,
-    resolved by ``importlib``). Anything else is returned unchanged for the
-    official tool to report in its own words.
+    resolved by ``importlib``). A bare package id resolves to the nested file
+    that defines its tools (``dicom`` -> ``dicom/strands_tools.py``). Anything
+    else is returned unchanged for the official tool to report in its own words.
     """
     expanded = os.path.expanduser(path)
     if os.path.exists(expanded):
         return expanded
-    spec = importlib.util.find_spec(f"strands_tools.{Path(path).stem}")
+    stem = Path(path).stem
+    spec = importlib.util.find_spec(f"strands_tools.{stem}")
+    if spec is not None and spec.origin and Path(spec.origin).name != "__init__.py":
+        return spec.origin
+    nested = _nested_tool_file(path)
+    if nested:
+        return nested
     return spec.origin if spec is not None and spec.origin else path
+
+
+def _nested_tool_file(path: str) -> str | None:
+    stem = Path(path).stem
+    for candidate in (
+        STRANDS_TOOLS_DIR / path,
+        STRANDS_TOOLS_DIR / stem / "strands_tools.py",
+        STRANDS_TOOLS_DIR / stem / f"{stem}_tools.py",
+    ):
+        if candidate.is_file() and candidate.resolve().is_relative_to(STRANDS_TOOLS_DIR):
+            return str(candidate)
+    return None
+
+
+def _ok(text: str) -> dict[str, Any]:
+    return {"status": "success", "content": [{"text": text}]}
+
+
+def _err(text: str) -> dict[str, Any]:
+    return {"status": "error", "content": [{"text": text}]}
+
+
+def _xml(tag: str, body: str) -> str:
+    return f"<{tag}>\n{body}\n</{tag}>"
+
+
+def _esc(value: str) -> str:
+    return html.escape(value, quote=True)
+
+
+def _py_tools() -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+    for py in STRANDS_TOOLS_DIR.rglob("*.py"):
+        if _SKIP_DIRS.intersection(py.parts) or py.name.startswith("test_"):
+            continue
+        try:
+            tree = ast.parse(py.read_text(errors="replace"))
+        except SyntaxError:
+            continue
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for dec in node.decorator_list:
+                tool_name = _decorated_tool_name(dec, node.name)
+                if tool_name:
+                    found.append((tool_name, str(py)))
+    found.sort()
+    return found
+
+
+def _decorated_tool_name(dec: ast.expr, fallback: str) -> str | None:
+    fid = getattr(dec, "id", None) or getattr(getattr(dec, "func", None), "id", None)
+    attr = getattr(getattr(dec, "func", None), "attr", None)
+    if fid not in {"tool", "strands_tool"} and attr not in {"tool", "strands_tool"}:
+        return None
+    if isinstance(dec, ast.Call):
+        for kw in dec.keywords:
+            if kw.arg == "name" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                return kw.value.value
+    return fallback
+
+
+def _mcp_config() -> dict[str, Any]:
+    if not _MCP_CONFIG_PATH.is_file():
+        return {}
+    return json.loads(_MCP_CONFIG_PATH.read_text())
+
+
+def _disk_mcp_servers() -> list[str]:
+    names: list[str] = []
+    for child in STRANDS_TOOLS_DIR.iterdir():
+        if child.is_dir() and "mcp" in child.name.lower() and child.name not in _SKIP_DIRS:
+            names.append(child.name)
+    return sorted(names)
+
+
+def _resolve_arg(arg: str) -> str:
+    if arg.startswith("-"):
+        return arg
+    candidate = (STRANDS_TOOLS_DIR / arg).resolve()
+    if str(candidate).startswith(str(STRANDS_TOOLS_DIR)) and candidate.exists():
+        return str(candidate)
+    return arg
+
+
+def _server_line(name: str, cfg: dict[str, Any], status: str) -> str:
+    if not cfg:
+        return f'<server name="{_esc(name)}" status="{status}"/>'
+    if cfg.get("url"):
+        return (
+            f'<server name="{_esc(name)}" status="{status}" '
+            f'transport="streamable_http" server_url="{_esc(str(cfg["url"]))}" '
+            f'credentials="{"worker-configured" if cfg.get("headers") else "none"}"/>'
+        )
+    args = [_resolve_arg(str(item)) for item in (cfg.get("args") or [])]
+    env = cfg.get("env") or {}
+    missing = [
+        value[2:-1]
+        for value in env.values()
+        if isinstance(value, str) and value.startswith("${") and value.endswith("}")
+        and not os.environ.get(value[2:-1])
+    ]
+    attrs = (
+        f' transport="stdio" command="{_esc(str(cfg.get("command") or ""))}" '
+        f'args="{_esc(json.dumps(args))}"'
+    )
+    if env:
+        attrs += f' env="{_esc(json.dumps(env))}"'
+    if missing:
+        attrs += f' env_missing="{_esc(",".join(missing))}"'
+    return f'<server name="{_esc(name)}" status="{status}"{attrs}/>'
+
+
+def _expand_env(env: dict[str, Any]) -> tuple[dict[str, str] | None, list[str]]:
+    expanded: dict[str, str] = {}
+    missing: list[str] = []
+    for key, value in env.items():
+        text = "" if value is None else str(value)
+        variables = re.findall(r"\$\{(?:env:)?([^}]+)\}", text)
+        missing.extend(var for var in variables if not os.environ.get(var))
+        expanded[key] = re.sub(
+            r"\$\{(?:env:)?([^}]+)\}",
+            lambda match: os.environ.get(match[1], match[0]),
+            text,
+        )
+    return (None if missing else expanded), missing
+
+
+def _server_status(name: str, configured: dict[str, Any]) -> str:
+    if name in _EXTRA_MCP_PARAMS or (name in configured and not configured[name].get("continue_on_error")):
+        return "connected"
+    if name in configured:
+        return "started"
+    return "off"
+
+
+def _schemas() -> list[tuple[str, str]]:
+    used = {
+        str((params.get("env") or {}).get("OPENAPI_SPEC_PATH") or "")
+        for params in _EXTRA_MCP_PARAMS.values()
+    }
+    rows: list[tuple[str, str]] = []
+    for entry in _mcp_config().get("openapiSchemas") or []:
+        if not isinstance(entry, dict):
+            continue
+        rel = str(entry.get("path") or "")
+        full = str((STRANDS_TOOLS_DIR / rel).resolve()) if rel else ""
+        if rel and full not in used and not any(item.endswith(rel) for item in used if item):
+            rows.append((str(entry.get("name") or rel), rel))
+    return rows
+
+
+def _read_packages() -> dict[str, Any]:
+    if not _PACKAGES_PATH.is_file():
+        return {}
+    data = json.loads(_PACKAGES_PATH.read_text())
+    return data if isinstance(data, dict) else {}
+
+
+def _write_packages(data: dict[str, Any]) -> None:
+    _PACKAGES_PATH.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def _inventory(query: str = "") -> str:
+    needle = query.strip().lower()
+
+    def keep(text: str) -> bool:
+        return not needle or needle in text.lower()
+
+    loaded = {
+        getattr(tool, "tool_name", "")
+        for tool in _worker_agent().tool_registry.registry.values()
+    }
+    tools = []
+    seen: set[str] = set()
+    for tool_name, path in _py_tools():
+        seen.add(tool_name)
+        line = (
+            f'<tool name="{_esc(tool_name)}" path="{_esc(path)}" '
+            f'loaded="{str(tool_name in loaded).lower()}"/>'
+        )
+        if keep(line):
+            tools.append(line)
+    for tool_name in sorted(loaded - seen):
+        if not tool_name:
+            continue
+        line = f'<tool name="{_esc(tool_name)}" path="meta" loaded="true"/>'
+        if keep(line):
+            tools.append(line)
+    skills = []
+    try:
+        from skills_config import discovered_skills
+
+        for skill in discovered_skills():
+            desc = (getattr(skill, "description", "") or "").replace("\n", " ").strip()[:160]
+            line = f'<skill name="{_esc(skill.name)}" description="{_esc(desc)}"/>'
+            if keep(line):
+                skills.append(line)
+    except Exception as error:  # noqa: BLE001 - catalog is optional
+        skills.append(f"<!-- skills unavailable: {_esc(str(error))} -->")
+    configured = _mcp_config().get("mcpServers") or {}
+    servers = []
+    names = sorted(set(configured) | set(_disk_mcp_servers()) | set(_EXTRA_MCP_PARAMS))
+    for server in names:
+        status = _server_status(server, configured)
+        line = _server_line(server, configured.get(server) or {}, status)
+        if keep(line):
+            servers.append(line)
+    schemas = [
+        f'<schema name="{_esc(label)}" path="{_esc(rel)}"/>'
+        for label, rel in _schemas()
+        if keep(label + rel)
+    ]
+    packages = []
+    for pkg_name, pkg in _read_packages().items():
+        line = f'<package name="{_esc(pkg_name)}">{_esc(json.dumps(pkg))}</package>'
+        if keep(line):
+            packages.append(line)
+    return "\n".join([
+        _xml("tools", "\n".join(tools)),
+        _xml("skills", "\n".join(skills)),
+        _xml("mcp_servers", "\n".join(servers)),
+        _xml("openapi_schemas", "\n".join(schemas)),
+        _xml("packages", "\n".join(packages)),
+    ])
 
 
 # ---------------------------------------------------------------------------
@@ -101,23 +340,112 @@ def _worker_agent() -> Agent:
 
 
 @activity.defn(name="load_tool")
-async def load_tool_activity(path: str, name: str) -> dict:
-    """Load a community tool onto this session's TemporalAgent registry.
+async def load_tool_activity(
+    path: str = "",
+    name: str = "",
+    action: str = "load",
+    tools: list[str] | None = None,
+    skills: list[str] | None = None,
+    mcp_servers: list[str] | None = None,
+    query: str = "",
+) -> dict:
+    """Load, unload, or list tools, skills, MCP servers, schemas, and packages.
 
-    After a successful load the model calls the registered ``name`` — the
-    Temporal activity name — never a package import path.
+    Default action is load: ``path`` is a bare module name or a ``.py`` file,
+    ``name`` is the registry name. ``list_tools`` returns tools (including
+    meta-tools), skills, MCP servers, unconverted OpenAPI schemas, and
+    subagent packages. ``unload`` removes a name this tool loaded.
 
     Args:
-        path: Bare community module name the worker remaps
-            (``path="calculator"``), or a ``.py`` file you created.
-        name: Registry name the model will call after load.
+        path: Bare community module name (``calculator``, ``dicom``, ``fhir``,
+            ``forge``) or a ``.py`` file you created.
+        name: Registry name to load or unload, or the subagent package name.
+        action: load (default), unload, list_tools, list_mcp_servers,
+            list_schemas, list_skills, list_packages, save_package, or
+            delete_package.
+        tools: Tool names stored on a subagent package.
+        skills: Catalog skill names stored on a subagent package.
+        mcp_servers: MCP server names stored on a subagent package.
+        query: Optional substring filter for list_tools.
     """
-    return official_load_tool(path=tool_file_path(path), name=name, agent=_worker_agent())
+    if action == "load":
+        return official_load_tool(path=tool_file_path(path), name=name, agent=_worker_agent())
+    if action == "unload":
+        return await _unload(name)
+    if action in {"list_tools", "list_mcp_servers", "list_schemas", "list_skills", "list_packages"}:
+        text = _inventory(query)
+        if action != "list_tools":
+            tag = {
+                "list_mcp_servers": "mcp_servers",
+                "list_schemas": "openapi_schemas",
+                "list_skills": "skills",
+                "list_packages": "packages",
+            }[action]
+            start = text.index(f"<{tag}>")
+            end = text.index(f"</{tag}>") + len(f"</{tag}>")
+            text = text[start:end]
+        return _ok(text)
+    if action == "save_package":
+        if not name:
+            return _err("package name is required")
+        packages = _read_packages()
+        packages[name] = {
+            "tools": list(tools or []),
+            "skills": list(skills or []),
+            "mcp_servers": list(mcp_servers or []),
+        }
+        _write_packages(packages)
+        return _ok(f"saved package {name}")
+    if action == "delete_package":
+        packages = _read_packages()
+        if name not in packages:
+            return _err(f"no package {name}")
+        del packages[name]
+        _write_packages(packages)
+        return _ok(f"deleted package {name}")
+    return _err(f"unknown load_tool action {action!r}")
+
+
+async def _unload(name: str) -> dict:
+    if not name:
+        return _err("name is required")
+    loaded_path = await _loaded_tool_path(name)
+    if loaded_path is None and name not in _worker_agent().tool_registry.registry:
+        return _err(f"{name} is not a loaded tool")
+    if loaded_path is None:
+        return _err(f"{name} is not a loaded tool")
+    _worker_agent().tool_registry.registry.pop(name, None)
+    return _ok(f"unloaded {name}")
 
 
 @activity.defn(name="mcp_client")
 @functools.wraps(official_mcp_client, updated=())
 async def mcp_client_activity(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    bound = inspect.signature(official_mcp_client).bind_partial(*args, **kwargs)
+    if bound.arguments.get("action") == "connect":
+        kwargs = dict(bound.arguments)
+        params = dict(kwargs.get("server_config") or {})
+        configured = (_mcp_config().get("mcpServers") or {}).get(kwargs.get("connection_id"), {})
+        if configured.get("url"):
+            resolved, missing = _expand_env({"server_url": configured["url"]})
+            if resolved is None:
+                return _err(f"cannot connect: missing environment {', '.join(missing)}")
+            configured_url = resolved["server_url"]
+            supplied_url = kwargs.get("server_url") or params.get("server_url")
+            if supplied_url and supplied_url not in (configured["url"], configured_url):
+                return _err("configured connection_id must use its configured server URL")
+            kwargs["server_url"] = configured_url
+            kwargs["transport"] = configured.get("transport", "streamable_http").replace("-", "_")
+            if configured.get("headers"):
+                kwargs["headers"] = configured["headers"]
+        for field in ("env", "headers"):
+            values = kwargs.get(field, params.get(field))
+            if isinstance(values, dict):
+                expanded, missing = _expand_env(values)
+                if missing:
+                    return _err(f"cannot connect: missing environment {', '.join(missing)}")
+                kwargs[field] = expanded
+        args = ()
     result = official_mcp_client(*args, **kwargs)
     call = inspect.signature(official_mcp_client).bind_partial(*args, **kwargs).arguments
     _track_extra_connection(call, result)
@@ -227,7 +555,7 @@ def _track_extra_connection(inp: dict[str, Any], result: Any) -> None:
         and result.get("status") == "success"
     ):
         params = dict(inp.get("server_config") or {})
-        for key in ("transport", "command", "args", "env", "server_url"):
+        for key in ("transport", "command", "args", "env", "server_url", "headers"):
             if inp.get(key) is not None:
                 params[key] = inp[key]
         _EXTRA_MCP_PARAMS[connection_id] = params
@@ -243,6 +571,12 @@ def _mcp_factory(server: str) -> Callable[[], MCPClient]:
     Same construction the Temporal Strands README uses for
     ``StrandsPlugin(mcp_clients=...)`` factories.
     """
+    configured = (_mcp_config().get("mcpServers") or {}).get(server)
+    if configured and configured.get("url"):
+        # Resolve configured credentials on the worker, including after restart.
+        return lambda: MCPClient.load_servers({
+            "mcpServers": {server: {**configured, "continue_on_error": False}},
+        })[0]
     params = _EXTRA_MCP_PARAMS[server]
     transport = params.get("transport") or "stdio"
 
@@ -255,8 +589,8 @@ def _mcp_factory(server: str) -> Callable[[], MCPClient]:
             )
             return MCPClient(lambda: stdio_client(server_params))
         if transport == "sse":
-            return MCPClient(lambda: sse_client(params["server_url"]))
-        return MCPClient(lambda: streamablehttp_client(params["server_url"]))
+            return MCPClient(lambda: sse_client(params["server_url"], headers=params.get("headers")))
+        return MCPClient(lambda: streamablehttp_client(params["server_url"], headers=params.get("headers")))
 
     return make
 

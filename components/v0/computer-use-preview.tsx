@@ -2,10 +2,12 @@
 
 import type { ChatStatus } from "ai"
 import {
-  GlobeIcon,
   HandIcon,
   Maximize2Icon,
   Minimize2Icon,
+  MonitorIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
   RotateCwIcon,
 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -16,7 +18,6 @@ import {
   ArtifactActions,
   ArtifactClose,
   ArtifactContent,
-  ArtifactHeader,
   ArtifactTitle,
 } from "@/components/ai-elements/artifact"
 import {
@@ -66,24 +67,44 @@ const MODES_LOCKING_CLOSE: ReadonlySet<BrowserControlMode> = new Set([
   "recovery",
 ])
 
-const BLURPLE_BADGE = "border-blurple/25 bg-blurple/15 text-blurple-bright"
-const AMBER_BADGE = "border-amber-500/30 bg-amber-500/10 text-amber-300"
+/** One-word connection state rendered as a small dot beside the title. The
+ *  label stays plain text so the toolbar reads as an instrument, not a badge
+ *  wall. Green is reserved for a verified live link (agent streaming or the
+ *  human holding control); amber is every transitional or unverified state. */
+type Tone = "live" | "idle" | "busy" | "error"
 
-const BADGE: Record<BrowserControlMode, { label: string; className: string }> = {
-  agent: { label: "Agent working", className: BLURPLE_BADGE },
-  stopping: { label: "Stopping", className: AMBER_BADGE },
-  human: {
-    label: "You have control",
-    className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
-  },
-  relinquishing: { label: "Relinquishing", className: AMBER_BADGE },
-  instructions: { label: "Paused", className: AMBER_BADGE },
-  resuming: { label: "Resuming", className: BLURPLE_BADGE },
-  recovery: { label: "Recovery required", className: AMBER_BADGE },
+const TONE_DOT: Record<Tone, string> = {
+  live: "bg-emerald-400 shadow-[0_0_8px_oklch(0.79_0.17_160/0.75)]",
+  idle: "bg-muted-foreground/50",
+  busy: "bg-amber-400 shadow-[0_0_8px_oklch(0.83_0.17_85/0.6)] animate-pulse-soft",
+  error: "bg-destructive shadow-[0_0_8px_oklch(0.64_0.22_25/0.6)]",
 }
 
-const HEADER_BUTTON =
-  "h-7 shrink-0 gap-1.5 px-2.5 text-[11px] font-medium"
+const TONE_TEXT: Record<Tone, string> = {
+  live: "text-emerald-300",
+  idle: "text-muted-foreground",
+  busy: "text-amber-300",
+  error: "text-destructive",
+}
+
+const BADGE: Record<BrowserControlMode, { label: string; tone: Tone }> = {
+  agent: { label: "Agent working", tone: "live" },
+  stopping: { label: "Stopping", tone: "busy" },
+  human: { label: "You have control", tone: "live" },
+  relinquishing: { label: "Relinquishing", tone: "busy" },
+  instructions: { label: "Paused", tone: "busy" },
+  resuming: { label: "Resuming", tone: "busy" },
+  recovery: { label: "Recovery required", tone: "busy" },
+}
+
+const TOOLBAR_ACTION = "h-7 shrink-0 gap-1.5 px-2 text-[11px] font-medium"
+/** WebPreviewNavigationButton spreads className over its own, so restate the
+ *  icon-button reset it would otherwise provide. */
+const TOOLBAR_ICON = "size-7 p-0 text-muted-foreground hover:text-foreground"
+
+/** The desktop is a black canvas; noVNC paints its own letterbox, so this is
+ *  only what shows before the viewer connects. */
+const DESKTOP_CANVAS = "bg-[oklch(0.11_0.006_285)]"
 
 export type ComputerUsePreviewPanelProps = {
   preview: ComputerUsePreviewState
@@ -100,6 +121,10 @@ export type ComputerUsePreviewPanelProps = {
   onTakeControl: () => Promise<void>
   onReleaseControl?: () => Promise<void>
   onGiveControl: (message: PromptInputMessage) => Promise<void>
+  /** In-app expansion: the parent hides the chat column so the desktop takes
+   *  the whole row. Layout only — nothing about the session changes. */
+  expanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
   className?: string
 }
 
@@ -118,6 +143,8 @@ export function ComputerUsePreviewPanel({
   onTakeControl,
   onReleaseControl,
   onGiveControl,
+  expanded = false,
+  onExpandedChange,
   className,
 }: ComputerUsePreviewPanelProps) {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -293,179 +320,228 @@ export function ComputerUsePreviewPanel({
     }
   }
 
-  const badge = checkingControl && sessionId
-    ? { label: "Checking control", className: AMBER_BADGE }
+  // Viewer connection and chat-stream status are separate facts: an idle or
+  // interrupted chat never claims the desktop is live, and vice versa.
+  const badge: { label: string; tone: Tone } = checkingControl && sessionId
+    ? { label: "Checking control", tone: "busy" }
     : mode === "agent" && !isStreaming
-    ? { label: status === "error" ? "Stream interrupted" : "Chat idle", className: status === "error" ? AMBER_BADGE : BLURPLE_BADGE }
+    ? status === "error"
+      ? { label: "Stream interrupted", tone: "error" }
+      : { label: "Chat idle", tone: "idle" }
     : BADGE[mode]
+
+  const hint = mode === "human"
+    ? "Your input is enabled. Relinquish to hand instructions back to the agent."
+    : mode === "recovery"
+    ? "Input disabled until desktop control is verified."
+    : "Take control to interact; agent screenshots appear in the task timeline."
+
+  const showSteering = mode === "instructions" || mode === "resuming" || (mode === "recovery" && Boolean(handoffText))
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col" ref={rootRef}>
       <Artifact
         className={cn(
-          "@container/browser ide-glass flex h-full min-h-0 flex-col overflow-hidden rounded-xl",
+          "@container/browser flex h-full min-h-0 flex-col overflow-hidden rounded-xl border-border/70 shadow-[0_24px_60px_-28px_oklch(0.05_0.01_285/0.9)]",
+          DESKTOP_CANVAS,
           className
         )}
         data-testid="computer-use-preview"
       >
-        <ArtifactHeader className="ide-glass-edge flex-wrap gap-2 border-b bg-white/[0.03] px-4 py-2.5">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <span className="flex size-7 items-center justify-center rounded-lg bg-blurple/30 shadow-[0_0_16px_-2px_oklch(0.499_0.214_278/0.7),inset_0_1px_0_0_oklch(0.9_0.05_285/0.25)]">
-              <GlobeIcon className="size-4 text-blurple-bright" />
-            </span>
-            <ArtifactTitle className="truncate font-medium tracking-tight">
-              Linux desktop
-            </ArtifactTitle>
-            <span
-              className={cn(
-                "rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-medium",
-                badge.className
-              )}
-              data-testid="browser-control-badge"
-            >
-              {badge.label}
-            </span>
-          </div>
-          <ArtifactActions>
-            {mode === "agent" || mode === "recovery" ? (
-              <Button
-                className={cn(HEADER_BUTTON, "border-blurple/30 bg-blurple/10 text-blurple-bright hover:bg-blurple/20")}
-                data-testid="take-control"
-                disabled={!takeoverAvailable || transitionPending}
-                title={!takeoverAvailable ? "A chat session, noVNC viewer and native release acknowledgment are required" : undefined}
-                onClick={takeControl}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                <HandIcon className="size-3.5" />
-                Take control
-              </Button>
-            ) : null}
-            {mode === "human" ? (
-              <Button
-                className={cn(HEADER_BUTTON, "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20")}
-                data-testid="relinquish"
-                disabled={transitionPending || !onReleaseControl}
-                onClick={releaseControl}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                <HandIcon className="size-3.5" />
-                Relinquish
-              </Button>
-            ) : null}
-            <ArtifactClose
-              aria-label="Close browser preview"
-              className="w-auto gap-1 px-2.5 text-[11px] font-medium"
-              data-testid="browser-close"
-              disabled={closeDisabled}
-              onClick={onClose}
-              title={closeDisabled ? "Finish the control handoff before closing" : "Close"}
-            >
-              <span aria-hidden>Close</span>
-            </ArtifactClose>
-          </ArtifactActions>
-        </ArtifactHeader>
-
         <ArtifactContent className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
           <WebPreview className="min-h-0 flex-1 rounded-none border-0 bg-transparent">
-            <WebPreviewNavigation className="ide-glass-edge h-11 border-b bg-black/20 px-2">
-              <WebPreviewNavigationButton
-                aria-label="Reconnect viewer"
-                data-testid="viewer-reconnect"
-                disabled={!sessionId || checkingControl || transitionPending}
-                onClick={reconnectViewer}
-                tooltip="Reconnect viewer"
-              >
-                <RotateCwIcon className="size-4" />
-              </WebPreviewNavigationButton>
+            {/* The only chrome: one 40px instrument strip. Identity + state on
+                the left, the visited URL as a quiet monospace readout, and
+                every control on the right. Nothing else sits between the
+                operator and the live desktop. */}
+            <WebPreviewNavigation
+              className="h-10 gap-1.5 border-b border-white/[0.06] bg-background/85 px-2 py-0 backdrop-blur-sm"
+              data-testid="desktop-toolbar"
+            >
+              <div className="flex min-w-0 shrink-0 items-center gap-2 pl-1" title={hint}>
+                <span
+                  aria-hidden
+                  className={cn("size-1.5 shrink-0 rounded-full transition-colors duration-500", TONE_DOT[badge.tone])}
+                />
+                <ArtifactTitle className="hidden text-xs font-medium tracking-tight @min-[28rem]/browser:block">
+                  Linux desktop
+                </ArtifactTitle>
+                <span
+                  className={cn("truncate font-mono text-[10px] font-medium uppercase tracking-[0.08em]", TONE_TEXT[badge.tone])}
+                  data-testid="browser-control-badge"
+                >
+                  {badge.label}
+                </span>
+              </div>
+
               <WebPreviewUrl
-                className="pointer-events-none opacity-90"
+                aria-label="Visited page"
+                className="pointer-events-none hidden h-7 min-w-0 flex-1 truncate rounded-md border-transparent bg-white/[0.03] px-2 font-mono text-[11px] text-muted-foreground shadow-none @min-[36rem]/browser:block md:text-[11px]"
                 readOnly
+                tabIndex={-1}
+                title={preview.url}
                 value={preview.url}
               />
-              <WebPreviewNavigationButton
-                aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-                data-testid="browser-fullscreen"
-                onClick={toggleFullscreen}
-                tooltip={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-              >
-                {fullscreen ? (
-                  <Minimize2Icon className="size-4" />
-                ) : (
-                  <Maximize2Icon className="size-4" />
-                )}
-              </WebPreviewNavigationButton>
+              <span className="min-w-0 flex-1 @min-[36rem]/browser:hidden" />
+
+              <ArtifactActions className="shrink-0 gap-1">
+                <WebPreviewNavigationButton
+                  aria-label="Reconnect viewer"
+                  className={TOOLBAR_ICON}
+                  data-testid="viewer-reconnect"
+                  disabled={!sessionId || checkingControl || transitionPending}
+                  onClick={reconnectViewer}
+                  tooltip="Reconnect viewer"
+                >
+                  <RotateCwIcon className="size-3.5" />
+                </WebPreviewNavigationButton>
+                {mode === "agent" || mode === "recovery" ? (
+                  <Button
+                    className={cn(TOOLBAR_ACTION, "border-blurple/30 bg-blurple/10 text-blurple-bright hover:bg-blurple/20")}
+                    data-testid="take-control"
+                    disabled={!takeoverAvailable || transitionPending}
+                    title={!takeoverAvailable ? "A chat session, noVNC viewer and native release acknowledgment are required" : undefined}
+                    onClick={takeControl}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <HandIcon className="size-3.5" />
+                    Take control
+                  </Button>
+                ) : null}
+                {mode === "human" ? (
+                  <Button
+                    className={cn(TOOLBAR_ACTION, "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20")}
+                    data-testid="relinquish"
+                    disabled={transitionPending || !onReleaseControl}
+                    onClick={releaseControl}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <HandIcon className="size-3.5" />
+                    Relinquish
+                  </Button>
+                ) : null}
+                {onExpandedChange ? (
+                  <WebPreviewNavigationButton
+                    aria-label={expanded ? "Show chat" : "Hide chat"}
+                    aria-pressed={expanded}
+                    className={TOOLBAR_ICON}
+                    data-testid="browser-expand"
+                    onClick={() => onExpandedChange(!expanded)}
+                    tooltip={expanded ? "Show chat" : "Hide chat"}
+                  >
+                    {expanded ? (
+                      <PanelLeftOpenIcon className="size-3.5" />
+                    ) : (
+                      <PanelLeftCloseIcon className="size-3.5" />
+                    )}
+                  </WebPreviewNavigationButton>
+                ) : null}
+                <WebPreviewNavigationButton
+                  aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+                  className={TOOLBAR_ICON}
+                  data-testid="browser-fullscreen"
+                  onClick={toggleFullscreen}
+                  tooltip={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+                >
+                  {fullscreen ? (
+                    <Minimize2Icon className="size-3.5" />
+                  ) : (
+                    <Maximize2Icon className="size-3.5" />
+                  )}
+                </WebPreviewNavigationButton>
+                <ArtifactClose
+                  aria-label="Close desktop preview"
+                  className={TOOLBAR_ICON}
+                  data-testid="browser-close"
+                  disabled={closeDisabled}
+                  onClick={onClose}
+                  title={closeDisabled ? "Finish the control handoff before closing" : "Close"}
+                />
+              </ArtifactActions>
             </WebPreviewNavigation>
 
-            {pendingApproval && mode === "agent" ? (
-              <Alert
-                className="mx-2 mt-2 shrink-0 border-amber-500/30 bg-amber-500/5"
-                data-testid="computer-use-approval"
-              >
-                <AlertTitle>Approval required</AlertTitle>
-                <AlertDescription>
-                  <div className="flex w-full flex-col gap-3">
-                    <p data-testid="approval-reason">{pendingApproval}</p>
-                    <div className="flex gap-2">
-                      <Button onClick={onApprove} size="sm">
-                        Approve
-                      </Button>
-                      <Button onClick={onDeny} size="sm" variant="outline">
-                        Deny
-                      </Button>
+            {/* The desktop owns everything below the toolbar. Approvals and
+                failures float over it so the framebuffer never shrinks; the
+                intent readout is a corner chip for the same reason. */}
+            <div className={cn("relative flex min-h-0 flex-1 flex-col", DESKTOP_CANVAS)}>
+              {mode === "human" ? (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 z-10 ring-1 ring-inset ring-emerald-400/40"
+                  data-testid="human-control-ring"
+                />
+              ) : null}
+
+              {pendingApproval && mode === "agent" ? (
+                <Alert
+                  className="absolute inset-x-2 top-2 z-20 mx-auto max-w-xl border-amber-500/30 bg-background/92 shadow-[0_16px_40px_-16px_oklch(0.05_0.01_285/0.9)] backdrop-blur-md"
+                  data-testid="computer-use-approval"
+                >
+                  <AlertTitle>Approval required</AlertTitle>
+                  <AlertDescription>
+                    <div className="flex w-full flex-col gap-3">
+                      <p data-testid="approval-reason">{pendingApproval}</p>
+                      <div className="flex gap-2">
+                        <Button onClick={onApprove} size="sm">
+                          Approve
+                        </Button>
+                        <Button onClick={onDeny} size="sm" variant="outline">
+                          Deny
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                </AlertDescription>
-              </Alert>
-            ) : null}
+                  </AlertDescription>
+                </Alert>
+              ) : null}
 
-            {handoffError || controlError ? (
-              <Alert
-                className="mx-2 mt-2 shrink-0 border-destructive/40 bg-destructive/10"
-                data-testid="browser-handoff-error"
-                role="alert"
-                variant="destructive"
-              >
-                <AlertTitle>{controlError ? "Desktop control unavailable" : "Handoff failed"}</AlertTitle>
-                <AlertDescription>{controlError || handoffError}</AlertDescription>
-              </Alert>
-            ) : null}
+              {handoffError || controlError ? (
+                <Alert
+                  className="absolute inset-x-2 top-2 z-20 mx-auto max-w-xl border-destructive/40 bg-background/92 shadow-[0_16px_40px_-16px_oklch(0.05_0.01_285/0.9)] backdrop-blur-md"
+                  data-testid="browser-handoff-error"
+                  role="alert"
+                  variant="destructive"
+                >
+                  <AlertTitle>{controlError ? "Desktop control unavailable" : "Handoff failed"}</AlertTitle>
+                  <AlertDescription>{controlError || handoffError}</AlertDescription>
+                </Alert>
+              ) : null}
 
-            {preview.intent && mode === "agent" ? (
-              <p className="ide-glass-edge shrink-0 border-b px-3 py-1.5 text-muted-foreground text-xs">
-                <span className="font-medium text-foreground">{preview.action}</span>
-                {" · "}
-                {preview.intent}
-              </p>
-            ) : null}
+              {iframeSrc ? (
+                <WebPreviewBody
+                  title="Linux desktop via noVNC"
+                  className={cn("bg-transparent", mode === "human" ? "" : "pointer-events-none")}
+                  data-control-mode={mode}
+                  key={`${sessionId ?? ""}-${control?.epoch ?? ""}-${reloadKey}`}
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
+                  src={iframeSrc}
+                />
+              ) : (
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center" role="status">
+                  <MonitorIcon aria-hidden className="size-8 text-muted-foreground/50" />
+                  <p className="max-w-xs text-sm text-muted-foreground">
+                    Desktop viewer unavailable. A native noVNC URL is required.
+                  </p>
+                </div>
+              )}
 
-            {iframeSrc ? <WebPreviewBody
-              title="Linux desktop via noVNC"
-              className={cn(mode === "human" ? "" : "pointer-events-none")}
-              data-control-mode={mode}
-              key={`${sessionId ?? ""}-${control?.epoch ?? ""}-${reloadKey}`}
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
-              src={iframeSrc}
-            /> : <p role="status" className="p-3 text-sm text-muted-foreground">Desktop viewer unavailable. A native noVNC URL is required.</p>}
+              {preview.intent && mode === "agent" ? (
+                <p
+                  className="pointer-events-none absolute bottom-2 left-2 z-10 max-w-[calc(100%-1rem)] truncate rounded-md border border-white/[0.06] bg-background/85 px-2 py-1 font-mono text-[11px] text-muted-foreground backdrop-blur-sm"
+                  data-testid="desktop-intent"
+                >
+                  <span className="font-medium text-foreground">{preview.action}</span>
+                  {" · "}
+                  {preview.intent}
+                </p>
+              ) : null}
+            </div>
 
-            {iframeSrc ? (
-              <p className="shrink-0 border-t px-3 py-1.5 text-xs text-muted-foreground">
-                Desktop viewer via noVNC. {mode === "human" ? "Your input is enabled." : mode === "recovery" ? "Input disabled until desktop control is verified." : "Take control to interact; agent screenshots appear in the task timeline."}
-              </p>
-            ) : null}
-
-            {mode === "human" ? (
-              <p className="ide-glass-edge shrink-0 border-t bg-emerald-500/[0.04] px-3 py-1.5 text-emerald-300/90 text-xs">
-                You have control of the browser session. Click Relinquish when
-                  you are done to hand instructions back to the agent.
-              </p>
-            ) : null}
-
-            {mode === "instructions" || mode === "resuming" || (mode === "recovery" && handoffText) ? (
-              <div className="ide-glass-edge shrink-0 border-t bg-white/[0.02] p-3">
+            {showSteering ? (
+              <div className="shrink-0 border-t border-white/[0.06] bg-background/85 p-2 backdrop-blur-sm">
                 <PromptInput className="w-full" onSubmit={giveControl}>
                   <PromptInputBody>
                     <PromptInputTextarea

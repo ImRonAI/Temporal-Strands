@@ -9,10 +9,10 @@ other sub-agent activity here does:
 - Model: the session's model by default (parent workflow ``model_id`` query
   against the worker's registered factories); ``model_id`` may name any other
   registered factory id explicitly. No provider zoo, no environment switching.
-- Tools: skill Pattern 2 inherit. Rebuild a plain parent Agent (TemporalAgent
-  cannot cross the activity boundary), then ``graph_tool._select_tools``
-  filters ``parent.tool_registry`` by name. Omit ``tools`` to inherit all
-  registry names. Unknown names log the official warning and are skipped.
+- Tools: rebuild a plain parent Agent (TemporalAgent cannot cross the
+  activity boundary), then ``graph_tool._select_tools`` keeps only the
+  registry names passed in ``tools``. Omit ``tools`` and the sub-agent
+  gets none. Unknown names are skipped.
 - Skills: opt-in. ``skills`` attaches the official ``strands.AgentSkills``
   plugin scoped to the assigned names (progressive disclosure via its
   ``skills`` tool); omitted means no skill catalog on the sub-agent.
@@ -26,15 +26,17 @@ other sub-agent activity here does:
 from __future__ import annotations
 
 import asyncio
-import traceback
+from contextlib import aclosing, suppress
 from typing import Any, Optional
 
 from strands import Agent
+from strands.types._events import ToolResultEvent, ToolStreamEvent
+from strands.types.tools import ToolResult, ToolUse
 from temporalio import activity
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
 from temporalio.exceptions import ApplicationError
 
-from config import GRAPH_QUIET_HEARTBEAT_INTERVAL, THINK_STREAM_BATCH_INTERVAL
+from config import GRAPH_QUIET_HEARTBEAT_INTERVAL, SUBAGENT_STREAM_BATCH_INTERVAL
 from graph_tool import _select_tools, _tool_name
 from subagent_support import (
     heartbeat,
@@ -56,7 +58,7 @@ async def use_agent_activity(
     tools: Optional[list[str]] = None,
     model_id: Optional[str] = None,
     skills: Optional[list[str]] = None,
-) -> dict[str, Any]:
+) -> ToolResult:
     """Run one isolated sub-agent turn with its own system prompt, streaming live.
 
     Creates a fresh agent with the given persona, runs it once on the prompt,
@@ -68,10 +70,9 @@ async def use_agent_activity(
         system_prompt: The sub-agent's persona and instructions.
         agent_name: Optional display label for the sub-agent (defaults to
             "sub-agent"); shown in the live activity stream.
-        tools: Optional tools for the sub-agent: names that exist on the
-            parent TemporalAgent registry after official load (the Temporal
-            activity name). Omit to inherit every parent-registry name.
-            Unknown names log the official warning and are skipped.
+        tools: Registry names to assign. Omit this and the sub-agent has no
+            tools. Load a discoverable community tool with load_tool first,
+            then pass its registry name. Unknown names are skipped.
         model_id: Leave blank to inherit the parent TemporalAgent's model.
             A registered factory name (the same string TemporalAgent(model=)
             takes) runs the sub-agent on that model instead.
@@ -138,50 +139,59 @@ async def use_agent_activity(
         )
 
         stream_client = WorkflowStreamClient.from_within_activity(
-            batch_interval=THINK_STREAM_BATCH_INTERVAL,
+            batch_interval=SUBAGENT_STREAM_BATCH_INTERVAL,
         )
         topic = stream_client.topic(THINKING_TOPIC)
 
-        result: Any = None
-        stream = agent.stream_async(prompt)
+        result: ToolResult | None = None
+        nested_use: ToolUse = {
+            "name": "use_agent", "toolUseId": activity_id, "input": {"input": prompt},
+        }
+        stream = agent.as_tool(name="use_agent").stream(nested_use, {})
         # The sub-agent goes quiet while its own tool calls run (use_skill,
         # file ops), so a per-chunk heartbeat alone can outlast the heartbeat
         # timeout; the ticker keeps Temporal aware between events.
-        ticker = asyncio.create_task(
-            quiet_heartbeat_ticker(GRAPH_QUIET_HEARTBEAT_INTERVAL.total_seconds())
-        )
-        async with stream_client:
+        async with stream_client, aclosing(stream):
+            ticker = asyncio.create_task(
+                quiet_heartbeat_ticker(GRAPH_QUIET_HEARTBEAT_INTERVAL.total_seconds())
+            )
             try:
                 async for event in stream:
                     heartbeat()
+                    if isinstance(event, ToolResultEvent):
+                        result = event.tool_result
+                        continue
+                    if not isinstance(event, ToolStreamEvent):
+                        raise ApplicationError(
+                            "use_agent cannot resume an interrupted sub-agent inside an activity",
+                            type="UseAgentActivityError", non_retryable=True,
+                        )
                     topic.publish(
                         {
                             "tool_use": tool_use,
                             "data": sanitize_stream_payload(
-                                {"agent_name": label, "event": event},
+                                {"agent_name": label, "event": event["tool_stream_event"]["data"]},
                                 name_key="agent_name",
                             ),
                         }
                     )
-                    if "result" in event:
-                        result = event["result"]
             finally:
                 ticker.cancel()
-                await stream.aclose()
+                with suppress(asyncio.CancelledError):
+                    await ticker
 
-        reply = str(result).strip() if result is not None else ""
-        return {
-            "status": "success",
-            "content": [{"text": reply or f"Agent {label!r} completed."}],
-            "toolUseId": activity_id,
-        }
+        if result is None:
+            raise ApplicationError("use_agent produced no tool result", non_retryable=True)
+        return result
     except ApplicationError:
         raise
     except Exception as error:  # noqa: BLE001 - tool boundary
-        message = f"Error in use_agent: {error}\n{traceback.format_exc()}"
+        # Raising (not returning) is the framework contract: ``activity_as_tool``
+        # turns a returned value into a success tool result, so an error dict
+        # would reach the model as a successful call (graph_activity._fail).
         activity.logger.error("use_agent activity failed: %s", error)
-        return {
-            "status": "error",
-            "content": [{"text": message}],
-            "toolUseId": activity_id,
-        }
+        raise ApplicationError(
+            f"Error in use_agent: {error}",
+            type="UseAgentActivityError",
+            non_retryable=True,
+        ) from error

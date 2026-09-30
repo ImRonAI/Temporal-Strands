@@ -31,18 +31,16 @@ from collections.abc import Callable
 from typing import Any
 
 import httpx
-import perplexity
 from dotenv import load_dotenv
 from google import genai
 from temporalio.client import Client
 from temporalio.contrib.strands import StrandsPlugin
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
-import perplexity_operations
 import think_activity
-# Shared native-tools builders live in agent_api_tools (also imported by
-# perplexity_operations); the public names are re-exported here so existing
-# callers and tests keep working against run_worker.
+# Shared native-tools builders live in agent_api_tools; the public names are
+# re-exported here so existing callers and tests keep working against
+# run_worker.
 from agent_api_tools import (  # noqa: F401 - re-exported public API
     MCP_SERVERS,
     NATIVE_TOOLS,
@@ -60,6 +58,7 @@ from config import (
     MAX_OUTPUT_TOKENS_CEILING,
     MAX_STEPS_CEILING,
     PERPLEXITY_API_BASE,
+    PERPLEXITY_CATALOG_HTTP_TIMEOUT,
     PERPLEXITY_PRESETS,
     PROVIDER_GOOGLE_AI_STUDIO,
     PROVIDER_OUTPUT_CEILINGS,
@@ -140,7 +139,7 @@ async def fetch_model_ids(api_key: str) -> list[str]:
     GET /v1/models requires a bearer token as of 2026-08-02: without one it
     returns 401.
     """
-    async with httpx.AsyncClient(timeout=30) as http:
+    async with httpx.AsyncClient(timeout=PERPLEXITY_CATALOG_HTTP_TIMEOUT.total_seconds()) as http:
         response = await http.get(
             PERPLEXITY_MODELS_URL,
             headers={"Authorization": f"Bearer {api_key}"},
@@ -199,15 +198,6 @@ def build_perplexity_factories(
         for model_id in registered_ids
     ]
     return factories, catalog
-
-
-def perplexity_client_factory(api_key: str) -> Callable[[], Any]:
-    """AsyncPerplexity factory for perplexity_operations activities."""
-    return lambda: perplexity.AsyncPerplexity(
-        api_key=api_key,
-        base_url=PERPLEXITY_API_BASE,
-        max_retries=0,
-    )
 
 
 def google_api_key() -> str | None:
@@ -312,7 +302,6 @@ async def assemble_model_factories() -> tuple[
         )
         factories.update(perplexity_factories)
         catalog.extend(perplexity_catalog)
-        perplexity_operations.configure(perplexity_client_factory(perplexity_key))
         default_model = DEFAULT_MODEL_ID
 
     gemini_key = google_api_key()
@@ -343,11 +332,11 @@ def workflow_tool_specs() -> list[dict[str, Any]]:
     starts. MCP/computer-use tools are excluded: their specs come from live
     servers / the Gemini-only branch, not from ``activity_as_tool`` here.
     """
-    from workflow import AGENT_API_TOOLS, PERMANENT_COMMUNITY_TOOLS, THINK_TOOL
+    from workflow import PERMANENT_COMMUNITY_TOOLS, THINK_TOOL
 
     return [
         dict(tool.tool_spec)
-        for tool in (*PERMANENT_COMMUNITY_TOOLS, THINK_TOOL, *AGENT_API_TOOLS)
+        for tool in (*PERMANENT_COMMUNITY_TOOLS, THINK_TOOL)
     ]
 
 
@@ -358,13 +347,13 @@ def validate_outbound_tools() -> None:
     so one invalid schema rejects the whole request before inference. This
     replays the exact outbound conversion (``PerplexityModel._format_request``:
     function entries with ``_ensure_object_properties``-normalized parameters,
-    prepended natives) and runs the existing Agent API contract validator
-    (``perplexity_operations._validate_tools``). Legal JSON Schema features
+    prepended natives) and runs the Agent API contract validator
+    (``agent_api_tools._validate_tools``). Legal JSON Schema features
     pass through; only contract violations and non-JSON-serializable payloads
     fail.
     """
     from perplexity_model import _ensure_object_properties
-    from perplexity_operations import _validate_tools
+    from agent_api_tools import _validate_tools
 
     converted = [
         {
@@ -413,17 +402,6 @@ WORKER_ACTIVITIES = [
         mcp_client_activity,
         run_loaded_tool,
         think_activity.think,
-        perplexity_operations.create_fast_agent_response,
-        perplexity_operations.create_low_agent_response,
-        perplexity_operations.create_medium_agent_response,
-        perplexity_operations.create_high_agent_response,
-        perplexity_operations.create_xhigh_agent_response,
-        perplexity_operations.create_wide_research_agent_response,
-        perplexity_operations.retrieve_agent_response,
-        perplexity_operations.list_agent_response_files,
-        perplexity_operations.download_agent_response_file,
-        perplexity_operations.list_agent_models,
-        perplexity_operations.cancel_agent_response,
 ]
 
 
@@ -439,12 +417,30 @@ def connect_included_mcp_servers() -> list[str]:
     shell_bin = _ROOT / ".venv/bin/strands-shell"
 
     for name, cfg in servers.items():
+        if cfg.get("continue_on_error"):
+            continue
         if "command" in cfg:
             command = cfg["command"]
             if command == ".venv/bin/strands-shell" and shell_bin.is_file():
                 command = str(shell_bin.resolve())
-            args = cfg.get("args", [])
+            raw_args = [str(item) for item in cfg.get("args", [])]
+            args = []
+            for index, item in enumerate(raw_args):
+                previous = raw_args[index - 1] if index else ""
+                candidate = _ROOT / "strands-tools" / item
+                if previous == "--from" and candidate.exists():
+                    args.append(str(candidate.resolve()))
+                else:
+                    args.append(item)
             env = cfg.get("env")
+            if isinstance(env, dict):
+                from load_tool import _expand_env
+
+                expanded, missing = _expand_env(env)
+                if missing:
+                    logger.warning("MCP server '%s' skipped: missing %s", name, ", ".join(missing))
+                    continue
+                env = expanded
             res = mcp_client(
                 action="connect",
                 connection_id=name,
@@ -494,11 +490,8 @@ async def main() -> None:
     )
 
     # One shared registry for every sub-agent activity (graph / use_agent /
-    # use_skill); think keeps its own pinned copy.
+    # use_skill); Think receives the same named factories below.
     subagent_support.configure(model_factories)
-    # Legacy Think remains configured for pre-patch histories. New Think runs
-    # natively inside ChatWorkflow with the same tools and model as its parent.
-    think_activity.set_model_factories(model_factories)
     # Formation nodes select a model by registered id only -- the same
     # factories StrandsPlugin serves -- never by provider name.
     configure_models(model_factories)

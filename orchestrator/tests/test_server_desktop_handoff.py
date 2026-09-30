@@ -335,6 +335,22 @@ async def test_status_native_probe_failure_is_unavailable_not_lost_ownership(des
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["stopping", "relinquishing", "resuming", "human"])
+async def test_status_probe_during_transfer_reports_live_mode_not_recovery(desktop, target):
+    """A control transfer flips viewonly between the state read and the VNC
+    receipt; that mismatch is the transfer, not a lost desktop."""
+    async def vnc(*args, **kwargs):
+        set_state(desktop, mode=target)
+        raise HTTPException(503, "receipt moved under the probe")
+
+    desktop.vnc.side_effect = vnc
+    result = await server.desktop_control_status("chat-1", Response())
+    assert result["ready"] is False
+    assert result["mode"] == target
+    assert server._desktop_mode("chat-1")["mode"] == target
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("change", [{"epoch": 456}, {"mode": "human"}])
 async def test_status_race_returns_current_native_state_unavailable(desktop, change):
     async def query(*args, **kwargs):

@@ -229,7 +229,7 @@ def desktop_image(tmp_path, monkeypatch):
     return ref, resolve_observation(ref, namespace="test", workflow_id="chat-1")
 
 
-def desktop_messages(ref, name="browser"):
+def desktop_messages(ref, name="take_screenshot"):
     return [
         {"role": "assistant", "content": [{"toolUse": {"toolUseId": "capture-1", "name": name, "input": {}}}]},
         {"role": "user", "content": [{"toolResult": {"toolUseId": "capture-1", "status": "success", "content": [
@@ -239,7 +239,7 @@ def desktop_messages(ref, name="browser"):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["browser", "click", "take_screenshot"])
+@pytest.mark.parametrize("name", ["click", "take_screenshot"])
 async def test_desktop_observation_becomes_separate_user_image(desktop_image, name):
     ref, png = desktop_image
     recorder = Recorder(sse(CREATED, SEARCH_RESULTS_EVENT, text_delta("seen"), COMPLETED))
@@ -545,49 +545,36 @@ def think_spec():
 
 
 @pytest.mark.asyncio
-async def test_require_think_forces_native_choice_without_synthesizing_arguments(think_spec) -> None:
-    arguments = json.dumps({
-        "thought": "Compare the evidence", "reasoning_effort": "low", "cycle_count": 3,
-    })
-    recorder = Recorder(sse(
-        CREATED,
-        function_call_added(name="think", arguments=arguments),
-        function_call_done(name="think", arguments=arguments),
-        COMPLETED,
-    ))
+async def test_require_think_invocation_state_is_dead_and_choice_passes_through(think_spec) -> None:
+    """``require_think`` was the deleted ``_ThinkFirstHook``'s wiring; the model
+    now decides think cycles itself, so the flag must not force tool_choice."""
+    recorder = Recorder(sse(COMPLETED))
     model = build(recorder)
-    messages = [{"role": "user", "content": [{"text": "Investigate this task"}]}]
-    state = {"require_think": True, "reasoning_effort": "high"}
-    before = copy.deepcopy((messages, state, think_spec, model.get_config()))
 
-    events = await collect(
-        model, messages, tool_specs=[think_spec], tool_choice={"auto": {}},
-        invocation_state=state,
+    await collect(
+        model, tool_specs=[think_spec], tool_choice={"auto": {}},
+        invocation_state={"require_think": True, "reasoning_effort": "high"},
     )
 
-    assert len(recorder.requests) == 1
-    assert recorder.request["tool_choice"] == {"type": "function", "name": "think"}
-    assert recorder.request["input"] == [{
-        "role": "user", "content": [{"type": "input_text", "text": "Investigate this task"}],
-    }]
-    assert recorder.request["tools"] == [{
-        "type": "function", "name": "think", "description": think_spec["description"],
-        "parameters": think_spec["inputSchema"]["json"],
-    }]
+    assert recorder.request["tool_choice"] == "auto"
     assert recorder.request["reasoning"] == {"effort": "high"}
     assert "invocation_state" not in recorder.request
     assert "require_think" not in recorder.request
-    assert tool_use_inputs(events) == {"call_1": arguments}
-    assert (messages, state, think_spec, model.get_config()) == before
+    assert "call think first" not in (recorder.request.get("instructions") or "").lower()
 
-    recorder.body = sse(CREATED, text_delta("continue"), COMPLETED)
-    await collect(
-        model, messages, tool_specs=[think_spec], tool_choice={"auto": {}},
-        invocation_state={"require_think": False},
-    )
-    assert len(recorder.requests) == 2
-    assert recorder.request["tool_choice"] == "auto"
-    assert "reasoning" not in recorder.request
+
+@pytest.mark.asyncio
+async def test_invalid_reasoning_effort_fails_before_the_api_call() -> None:
+    """An effort outside the Agent API's enum is a permanent 400; raise
+    non-retryable before any request goes out."""
+    recorder = Recorder(sse(COMPLETED))
+
+    with pytest.raises(ApplicationError) as caught:
+        await collect(build(recorder), invocation_state={"reasoning_effort": "ludicrous"})
+
+    assert caught.value.non_retryable is True
+    assert "reasoning effort" in str(caught.value)
+    assert recorder.requests == []
 
 
 @pytest.mark.asyncio
@@ -597,12 +584,8 @@ async def test_require_think_forces_native_choice_without_synthesizing_arguments
     pytest.param(
         {"tool_choice": {"auto": {}}, "invocation_state": {}}, "auto", id="empty-state",
     ),
-    pytest.param(
-        {"tool_choice": {"auto": {}}, "invocation_state": {"require_think": False}},
-        "auto", id="cleared-flag",
-    ),
 ])
-async def test_without_require_think_preserves_sdk_auto_choice(think_spec, kwargs, expected_choice) -> None:
+async def test_tool_choice_passes_through_unmodified(think_spec, kwargs, expected_choice) -> None:
     recorder = Recorder(sse(COMPLETED))
     await collect(build(recorder), tool_specs=[think_spec], **kwargs)
 
@@ -612,7 +595,6 @@ async def test_without_require_think_preserves_sdk_auto_choice(think_spec, kwarg
         assert recorder.request["tool_choice"] == expected_choice
     assert recorder.request["input"] == []
     assert "invocation_state" not in recorder.request
-    assert "require_think" not in recorder.request
 
 
 @pytest.mark.asyncio
@@ -624,7 +606,7 @@ async def test_astra_invocation_reasoning_effort_is_honored_without_leaking(thin
     before = copy.deepcopy(model.get_config())
     await collect(
         model, tool_specs=[think_spec], tool_choice={"auto": {}},
-        invocation_state={"reasoning_effort": effort, "require_think": False},
+        invocation_state={"reasoning_effort": effort},
     )
 
     assert recorder.request["model"] == "openai/gpt-6-astra"
@@ -659,8 +641,12 @@ async def test_astra_factory_matches_live_model_native_requests(monkeypatch) -> 
                 "search_indicators", "search_child_indicators", "get_variable_metadata",
                 "get_observations", "get_child_observations",
             ],
+            "defer_loading": True,
         },
-        {"type": "mcp", "server_label": "pophive", "server_url": "https://pophive.example/mcp"},
+        {
+            "type": "mcp", "server_label": "pophive", "server_url": "https://pophive.example/mcp",
+            "defer_loading": True,
+        },
         *connectors,
     ]
     assert THINK_MODEL_ID == "openai/gpt-6-astra"
@@ -744,6 +730,138 @@ async def test_images_are_encoded_by_the_parent_formatter() -> None:
             "content": [{"type": "input_image", "image_url": "data:image/png;base64,cG5n"}],
         }
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", [b"hello text", "naïve café — 日本語".encode()])
+async def test_attachments_survive_the_temporal_payload_converter(raw: bytes) -> None:
+    """Text documents inline as text after the Temporal round-trip.
+
+    Round-trips the real activity input through StrandsPlugin's converter,
+    then formats it -- the exact path of ``invoke_model_streaming``. The Agent
+    API rejects ``input_file`` parts, so the document must arrive as text.
+    """
+    from temporalio.contrib.strands._model_activity import _StreamingInvokeModelInput
+    from temporalio.contrib.strands._plugin import _data_converter
+    from workflow import TurnDocument, TurnInput, turn_content_blocks
+
+    blocks = turn_content_blocks(TurnInput(
+        prompt="read", documents=[TurnDocument(format="txt", data=base64.b64encode(raw).decode())]))
+    converter = _data_converter(None)
+    payloads = await converter.encode([_StreamingInvokeModelInput(
+        model_name="m", messages=[{"role": "user", "content": blocks}])])
+    [decoded] = await converter.decode(payloads, [_StreamingInvokeModelInput])
+    recorder = Recorder(sse(COMPLETED))
+
+    await collect(build(recorder), decoded.messages)
+
+    assert recorder.request["input"][0]["content"] == [
+        {"type": "input_text", "text": "read"},
+        {"type": "input_text", "text": f"Attached document (format: txt):\n\n{raw.decode()}"},
+    ]
+
+
+def _pdf_with_text(text: str) -> bytes:
+    """A minimal valid one-page PDF whose content stream draws ``text``."""
+    stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, obj in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{number} 0 obj\n".encode() + obj + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n".encode() + b"0000000000 65535 f \n"
+    for offset in offsets:
+        out += f"{offset:010d} 00000 n \n".encode()
+    out += (f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref}\n%%EOF").encode()
+    return bytes(out)
+
+
+def _blank_pdf() -> bytes:
+    """A one-page PDF with no content stream -- no text layer, like a scan."""
+    from io import BytesIO
+
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    buffer = BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_pdf_attachments_inline_their_extracted_text() -> None:
+    """PDFs ride as parsed text: the API's validator rejects ``input_file``."""
+    recorder = Recorder(sse(COMPLETED))
+    messages = [{"role": "user", "content": [
+        {"document": {"format": "pdf", "source": {"bytes": _pdf_with_text("hello pdf")}}},
+    ]}]
+
+    await collect(build(recorder), messages)
+
+    text = recorder.request["input"][0]["content"][0]["text"]
+    assert text.startswith("Attached document (format: pdf):\n\n")
+    assert "hello pdf" in text
+
+
+@pytest.mark.asyncio
+async def test_scanned_pdfs_fail_before_the_request() -> None:
+    """A PDF with no text layer names the reason instead of sending junk."""
+    recorder = Recorder(sse(COMPLETED))
+    messages = [{"role": "user", "content": [
+        {"document": {"format": "pdf", "source": {"bytes": _blank_pdf()}}},
+    ]}]
+
+    with pytest.raises(ApplicationError, match="no extractable text") as excinfo:
+        await collect(build(recorder), messages)
+
+    assert excinfo.value.non_retryable
+    assert recorder.requests == []
+
+
+@pytest.mark.asyncio
+async def test_malformed_pdfs_fail_before_the_request() -> None:
+    recorder = Recorder(sse(COMPLETED))
+    messages = [{"role": "user", "content": [
+        {"document": {"format": "pdf", "source": {"bytes": b"not a pdf"}}},
+    ]}]
+
+    with pytest.raises(ApplicationError, match="not readable") as excinfo:
+        await collect(build(recorder), messages)
+
+    assert excinfo.value.non_retryable
+    assert recorder.requests == []
+
+
+@pytest.mark.asyncio
+async def test_long_documents_truncate_with_a_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(perplexity_model, "DOCUMENT_INLINE_MAX_CHARS", 10)
+    recorder = Recorder(sse(COMPLETED))
+    messages = [{"role": "user", "content": [
+        {"document": {"format": "md", "source": {"bytes": b"a" * 25}}},
+    ]}]
+
+    await collect(build(recorder), messages)
+
+    text = recorder.request["input"][0]["content"][0]["text"]
+    assert text == ("Attached document (format: md):\n\n"
+                    "aaaaaaaaaa\n\n[truncated: kept the first 10 of 25 characters]")
+
+
+def test_source_bytes_accepts_bytes_base64_and_legacy_text() -> None:
+    assert perplexity_model.source_bytes(b"\x89PNG") == b"\x89PNG"
+    assert perplexity_model.source_bytes(base64.b64encode(b"\x89PNG").decode()) == b"\x89PNG"
+    assert perplexity_model.source_bytes("plain text!") == b"plain text!"
 
 
 # ---------------------------------------------------------------------------
@@ -1140,6 +1258,52 @@ async def test_re_running_the_same_model_does_not_leak_native_frames() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", [
+    [],
+    [text_delta("partial answer")],
+    [SEARCH_RESULTS_EVENT],
+    [function_call_added()],
+    [output_item_done(SHARE_FILE_ITEM)],
+    [{"type": "response.future_tool.running"}],
+    ["data: not-json\n\n"],
+])
+@pytest.mark.parametrize("chunk_size", [None, 7])
+async def test_overload_is_retryable_only_before_stream_progress(prefix, chunk_size):
+    """09:01:21 UTC failure: HTTP 200, then an SDK APIError in the SSE body.
+
+    The parent buffers function calls and can skip native events entirely, so
+    checking only its yielded text would incorrectly retry tool executions.
+    """
+    message = "upstream model is overloaded, please try again later"
+    recorder = Recorder(sse(CREATED, *prefix, {"error": {"message": message}}), chunk_size=chunk_size)
+    model = build(recorder)
+    with pytest.raises(ApplicationError) as caught:
+        await collect(model)
+    assert caught.value.type == "PerplexityModelError"
+    assert caught.value.non_retryable is bool(prefix)
+    if not prefix or not isinstance(prefix[0], str):
+        assert message in str(caught.value)
+    assert isinstance(caught.value.__cause__, (APIError, json.JSONDecodeError))
+    assert len(recorder.requests) == 1  # Temporal, not the provider, owns retries.
+
+    # A cached model's next invocation must not inherit the progress fence.
+    recorder.body = sse(CREATED, {"error": {"message": message}})
+    with pytest.raises(ApplicationError) as clean:
+        await collect(model)
+    assert clean.value.non_retryable is False
+
+
+@pytest.mark.asyncio
+async def test_unknown_stream_failure_does_not_enable_automatic_replay():
+    recorder = Recorder(sse(CREATED, {"error": {"message": "connection lost"}}))
+    with pytest.raises(ApplicationError) as caught:
+        await collect(build(recorder))
+    assert caught.value.non_retryable is True
+    assert "connection lost" in str(caught.value)
+    assert len(recorder.requests) == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("failure_mode", ["http", "stream"])
 async def test_connector_failure_propagates_verbatim_without_replay(monkeypatch, failure_mode):
     """A connector error from the API is the API's answer: one request, the
@@ -1261,7 +1425,7 @@ async def test_response_failed_with_context_overflow_raises_context_window() -> 
 
 
 @pytest.mark.asyncio
-async def test_response_failed_otherwise_re_raises_and_is_not_a_bare_exception() -> None:
+async def test_response_failed_otherwise_is_nonretryable() -> None:
     failed = {
         "type": "response.failed",
         "response": response_obj(
@@ -1270,10 +1434,10 @@ async def test_response_failed_otherwise_re_raises_and_is_not_a_bare_exception()
     }
     recorder = Recorder(sse(CREATED, failed))
 
-    with pytest.raises(RuntimeError) as caught:
+    with pytest.raises(ApplicationError) as caught:
         await collect(build(recorder))
 
-    assert type(caught.value) is not Exception
+    assert caught.value.non_retryable is True
     assert "bad tools" in str(caught.value)
 
 

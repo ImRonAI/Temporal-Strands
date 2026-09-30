@@ -59,7 +59,7 @@ def test_registry_contract_is_activity_names_not_package_paths() -> None:
     """Pattern 2: the model sees Temporal activity names, not import paths."""
     from pathlib import Path
 
-    from workflow import AGENT_API_TOOLS, COMPUTER_USE_TOOLS, THINK_TOOL
+    from workflow import COMPUTER_USE_TOOLS, THINK_TOOL
 
     identity = json.loads(Path(__file__).resolve().parents[1].joinpath("agent.json").read_text())
     prompt = identity["prompt"]
@@ -71,7 +71,6 @@ def test_registry_contract_is_activity_names_not_package_paths() -> None:
         for tool in (
             *PERMANENT_COMMUNITY_TOOLS,
             THINK_TOOL,
-            *AGENT_API_TOOLS,
             *COMPUTER_USE_TOOLS,
         )
     }
@@ -103,7 +102,8 @@ def test_graph_tool_exposes_formation_schema() -> None:
     assert "edges" in spec["topology"]["description"]
 
 
-def test_mcp_json_servers_use_temporal_mcp_client() -> None:
+def test_mcp_json_servers_use_temporal_mcp_client(monkeypatch) -> None:
+    monkeypatch.setenv("TELNYX_API_KEY", "test-key")
     factories = mcp_client_factories()
     assert set(factories) == {"shell"}
     handles = temporal_mcp_clients()
@@ -135,6 +135,13 @@ def test_mcp_json_catalog_keeps_shell_and_optional_servers() -> None:
     }
     assert servers["datacommons"]["continue_on_error"] is True
     assert servers["pophive"]["continue_on_error"] is True
+    # The schema catalog is separate from executable MCP server registrations.
+    assert servers["telnyx"]["headers"]["Authorization"] == "Bearer ${TELNYX_API_KEY}"
+    for name in ("telnyx", "telnyx-readonly", "telnyx-docs"):
+        assert servers[name]["continue_on_error"] is True
+        assert servers[name]["url"].startswith("https://")
+        assert "command" not in servers[name]
+    assert any(schema["name"] == "telnyx" for schema in config["openapiSchemas"])
 
 
 def test_startup_connect_skips_streamable_http_catalog(monkeypatch) -> None:
@@ -142,6 +149,7 @@ def test_startup_connect_skips_streamable_http_catalog(monkeypatch) -> None:
     monkeypatch.setenv("DATACOMMONS_MCP_URL", "https://api.datacommons.org/mcp")
     monkeypatch.setenv("DC_API_KEY", "test-key")
     monkeypatch.setenv("POPHIVE_MCP_URL", "https://mcp.pophive.org/mcp")
+    monkeypatch.setenv("TELNYX_API_KEY", "test-key")
     calls: list[dict] = []
 
     def fake_mcp_client(**kwargs):
@@ -164,6 +172,7 @@ def test_mcp_client_factories_skips_temporal_list_tools_for_remote_catalog(
     monkeypatch.setenv("DATACOMMONS_MCP_URL", "https://api.datacommons.org/mcp")
     monkeypatch.setenv("DC_API_KEY", "test-key")
     monkeypatch.setenv("POPHIVE_MCP_URL", "https://example.com/mcp")
+    monkeypatch.delenv("TELNYX_API_KEY", raising=False)
     assert set(mcp_client_factories()) == {"shell"}
 
 
@@ -173,8 +182,12 @@ def test_load_servers_skips_optional_servers_without_env(
     monkeypatch.delenv("DATACOMMONS_MCP_URL", raising=False)
     monkeypatch.delenv("DC_API_KEY", raising=False)
     monkeypatch.delenv("POPHIVE_MCP_URL", raising=False)
+    monkeypatch.setenv("TELNYX_API_KEY", "test-key")
     clients = MCPClient.load_servers(str(MCP_CONFIG_PATH))
-    assert len(clients) == 1
+    names = {client._application_name for client in clients}
+    assert "shell" in names
+    assert "datacommons" not in names
+    assert "pophive" not in names
 
 
 def test_mcp_client_connects_shell_and_accepts_another_connection() -> None:

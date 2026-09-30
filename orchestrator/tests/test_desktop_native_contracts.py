@@ -53,7 +53,7 @@ from config import (
     DESKTOP_TASK_TIMEOUT,
 )
 from perplexity_model import _ensure_object_properties
-from perplexity_operations import _validate_tools
+from agent_api_tools import _validate_tools
 
 # --------------------------------------------------------------------------
 # Version baseline (spec 3.1). Fail loudly if the pins drift under the tests.
@@ -1031,8 +1031,8 @@ def test_desktop_config_constants_are_finite_and_distinct_from_model_policy() ->
 
     assert DESKTOP_MUTATION_RETRY_POLICY.maximum_attempts == 1
     assert DESKTOP_OBSERVATION_RETRY_POLICY.maximum_attempts == 3
-    assert MODEL_RETRY_POLICY.maximum_attempts == 0  # unlimited, model-only
-    assert MODEL_START_TO_CLOSE == timedelta(seconds=60)
+    assert MODEL_RETRY_POLICY.maximum_attempts == 1  # no duplicate streamed inference
+    assert MODEL_START_TO_CLOSE == timedelta(minutes=10)
     assert DESKTOP_MUTATION_TIMEOUT == DESKTOP_TASK_TIMEOUT
     assert timedelta(0) < DESKTOP_OBSERVATION_TIMEOUT <= timedelta(minutes=1)
     assert DESKTOP_JOB_HEARTBEAT_TIMEOUT == timedelta(seconds=30)

@@ -54,11 +54,13 @@ worker. Prefer the one-shot form.
 from __future__ import annotations
 
 import asyncio
+from contextlib import aclosing, suppress
 from typing import Any, Optional, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 from strands import Agent
 from strands.types._events import ToolResultEvent, ToolStreamEvent
+from strands.types.tools import ToolResult, ToolUse
 from graph_tool import graph as sibling_graph
 from temporalio import activity
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
@@ -67,7 +69,7 @@ from temporalio.exceptions import ApplicationError
 from config import (
     GRAPH_EXECUTION_TIMEOUT,
     GRAPH_QUIET_HEARTBEAT_INTERVAL,
-    THINK_STREAM_BATCH_INTERVAL,
+    SUBAGENT_STREAM_BATCH_INTERVAL,
 )
 from subagent_support import (
     heartbeat,
@@ -121,9 +123,17 @@ class GraphNode(BaseModel):
     tools: Optional[list[str]] = Field(
         default=None,
         description=(
-            "Registry names on the parent agent. Applied only when model_settings "
-            "is set; otherwise the node inherits every parent-registry tool. "
-            "Unknown names are skipped."
+            "Registry names the parent assigns. Omit this and the node gets no "
+            "tools. Hot-load a community tool with load_tool first, then name "
+            "it here. Unknown names are skipped."
+        ),
+    )
+    skills: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "Catalog skill names the parent assigns. The node gets the official "
+            "skills tool scoped to exactly these names. Omit and the node has "
+            "no skills. Unknown names fail the call."
         ),
     )
 
@@ -228,7 +238,7 @@ def flatten_native_event(
                 {
                     "type": "multiagent_node_stream",
                     "node_id": node_path,
-                    "event": publishable(inner),
+                    "event": publishable(inner, agent_event=True),
                 },
                 node_path,
             )
@@ -289,25 +299,24 @@ async def _run_sibling(
     parent: Agent,
     activity_id: str,
     on_event: Any = None,
-) -> dict[str, Any]:
+) -> ToolResult:
     """Run one sibling-graph tool action, forwarding stream frames.
 
     Closes the generator on the way out (including cancellation) and never
     swallows ``CancelledError``.
     """
-    tool_use = {"toolUseId": activity_id, "name": "graph", "input": tool_input}
-    result: dict[str, Any] = {}
-    stream = sibling_graph.stream(tool_use, {"agent": parent})
-    try:
+    tool_use: ToolUse = {"toolUseId": activity_id, "name": "graph", "input": tool_input}
+    result: ToolResult | None = None
+    async with aclosing(sibling_graph.stream(tool_use, {"agent": parent})) as stream:
         async for event in stream:
             heartbeat()
             if isinstance(event, ToolStreamEvent) and on_event is not None:
                 data = cast(dict[str, Any], event["tool_stream_event"]).get("data")
                 on_event(data)
             elif isinstance(event, ToolResultEvent):
-                result = cast(dict[str, Any], event.tool_result)
-    finally:
-        await stream.aclose()
+                result = event.tool_result
+    if result is None:
+        raise _fail("graph produced no tool result")
     return result
 
 
@@ -339,10 +348,12 @@ async def graph_activity(
     and cleaned up in one call, and every node's progress streams live.
 
     A node is an agent, the official graph-tool shape: id, role,
-    system_prompt, optional model_settings.model_id, optional tools.
-    There is no node type. Edges are {"from", "to"}. Omit model_settings
-    to inherit the session model and every parent-registry tool. When
-    model_settings is set, tools filters parent.tool_registry by name.
+    system_prompt, optional model_settings.model_id, optional tools,
+    optional skills. There is no node type. Edges are {"from", "to"}.
+    Omit model_settings to inherit the session model. tools names
+    parent-registry tools to assign; omit tools and the node gets none.
+    skills names catalog skills; the node gets the official skills tool
+    scoped to those names. Omit skills and the node has none.
     Each batch transition streams a multiagent_handoff event
     (from_node_ids, to_node_ids).
 
@@ -353,11 +364,12 @@ async def graph_activity(
         graph_id: Optional stable label for the run (auto-derived if omitted).
         task: Task prompt executed through the formation (required for execute).
         topology: Official topology: nodes (id, role, system_prompt, optional
-            model_settings, optional tools), edges ({"from", "to"}), optional
-            entry_points. Required for create and for single-call execute.
-        tools: Optional default registry names. Applied only when a node sets
-            model_settings; otherwise each node inherits every parent-registry
-            tool. Unknown names log the official warning and are skipped.
+            model_settings, optional tools, optional skills), edges
+            ({"from", "to"}), optional entry_points. Required for create and
+            for single-call execute.
+        tools: Default registry names for nodes that omit their own tools
+            list. Omit this too and those nodes get no tools. Unknown names
+            are skipped.
     """
     from workflow import THINKING_TOPIC
 
@@ -390,7 +402,7 @@ async def graph_activity(
         raise _fail(f"graph tools: {error}") from error
 
     stream_client = WorkflowStreamClient.from_within_activity(
-        batch_interval=THINK_STREAM_BATCH_INTERVAL,
+        batch_interval=SUBAGENT_STREAM_BATCH_INTERVAL,
     )
     topic = stream_client.topic(THINKING_TOPIC)
 
@@ -508,3 +520,5 @@ async def graph_activity(
             return result
     finally:
         ticker.cancel()
+        with suppress(asyncio.CancelledError):
+            await ticker

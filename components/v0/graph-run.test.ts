@@ -129,7 +129,7 @@ describe("foldGraphEvent", () => {
     })
   })
 
-  it("reconciles tool actions by toolUseId across start, fragments, and result", () => {
+  it.each([true, false])("reconciles tool input with cumulative snapshots present=%s", (withSnapshot) => {
     const snap = createGraphRunSnapshot("graph-tool-1")
     const stream = (event: unknown) =>
       foldGraphEvent(snap, {
@@ -149,14 +149,17 @@ describe("foldGraphEvent", () => {
       event: { contentBlockDelta: { delta: { toolUse: { input: '{"path":' } } } },
     })
     stream({
+      event: { contentBlockDelta: { delta: { toolUse: { input: '"a.txt"}' } } } },
+    })
+    stream({
       type: "tool_use_stream",
-      delta: { toolUse: { input: '"a.txt"}' } },
       current_tool_use: {
         toolUseId: "t1",
         name: "file_write",
-        input: '{"path":"a.txt"}',
+        ...(withSnapshot ? { input: '{"path":"a.txt"}' } : {}),
       },
     })
+    expect(snap.nodes["coder"].tools[0].input).toBe('{"path":"a.txt"}')
     stream({
       message: {
         role: "user",

@@ -1,6 +1,7 @@
 """Native Strands browser exposed as a Temporal activity.
 
-One stock ``LocalChromiumBrowser`` per worker process. The worker runs inside the desktop
+One stock ``LocalChromiumBrowser`` at a time per worker process, discarded for
+a fresh stock instance after every close. The worker runs inside the desktop
 environment (Xvfb), so Chromium launches headed on that display via the stock
 tool and its own environment variables (STRANDS_BROWSER_*). Lifecycle cleanup
 uses native x11vnc and Playwright on that same display.
@@ -26,7 +27,7 @@ from pathlib import Path
 
 from PIL import ImageGrab
 from strands_tools.browser import LocalChromiumBrowser
-from strands_tools.browser.models import BrowserInput
+from strands_tools.browser.models import BrowserInput, CloseAction, ScreenshotAction
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
@@ -37,7 +38,28 @@ from config import (
 )
 from desktop_observation import store_observation
 
-_browser = LocalChromiumBrowser(launch_options={"headless": False, "chromium_sandbox": True})
+_LAUNCH_OPTIONS = {"headless": False, "chromium_sandbox": True}
+
+_browser = LocalChromiumBrowser(launch_options=dict(_LAUNCH_OPTIONS))
+
+
+def stock_browser() -> LocalChromiumBrowser:
+    """The worker's current stock tool instance (replaced after every close)."""
+    return _browser
+
+
+def _discard_browser() -> None:
+    """Replace a closed stock tool with a fresh stock instance.
+
+    strands-agents-tools 0.8.5 ``Browser.close`` runs ``_async_cleanup``, which
+    nulls ``_playwright`` (strands-tools/browser/browser.py:975) but never
+    resets ``_started``, so ``browser()`` (browser.py:127-129) never re-runs
+    ``_start()`` and every later ``init_session`` fails with "Playwright not
+    initialized". A fresh stock instance has ``_started = False``
+    (browser.py:56-68) and re-runs ``_start()`` on its next use — no subclass.
+    """
+    global _browser
+    _browser = LocalChromiumBrowser(launch_options=dict(_LAUNCH_OPTIONS))
 
 
 def artifact_root() -> Path:
@@ -204,29 +226,30 @@ def release_desktop() -> None:
             if query != "viewonly,client_count,pointer_mask":
                 continue
 
-            async def close_sessions():
-                # Stock close suppresses errors and clears handles even on failure.
-                # Use its native Playwright handles and loop, retaining failed state.
-                async with asyncio.timeout(max(0, deadline - time.monotonic())):
-                    errors = []
-                    for session in list(_browser._sessions.values()):
-                        try:
-                            if session.browser is None:
-                                raise RuntimeError("Browser session has no verifiable native handle")
-                            await session.browser.close()
-                            if session.browser.is_connected():
-                                raise RuntimeError("Browser remained connected after close")
-                        except Exception as error:
-                            errors.append(error)
-                    if errors:
-                        raise RuntimeError("Not all desktop browsers closed") from errors[0]
-                    if _browser._playwright is not None:
-                        await _browser._playwright.stop()
-                    _browser._sessions.clear()
-                    _browser._playwright = None
-                    _browser._started = False
-
-            _browser._execute_async(close_sessions())
+            # The stock close action closes every session, but its public
+            # result cannot expose per-session cleanup errors: _async_cleanup
+            # swallows them into a list that is only debug-logged
+            # (strands-tools/browser/browser.py:961-967, 980-982) and close
+            # reports success regardless (browser.py:940-946). No public
+            # accessor returns the native handles either (list_local_sessions,
+            # browser.py:313-322, returns names only). The smallest private
+            # reach is therefore reading `_sessions`/`_started` to snapshot
+            # handles; closure is then proven through the public Playwright
+            # API (Browser.is_connected) after invoking the stock close action.
+            handles = []
+            for session in _browser._sessions.values():
+                if session.browser is None:
+                    raise RuntimeError("Browser session has no verifiable native handle")
+                handles.append(session.browser)
+            if handles or _browser._started:
+                closed = _browser.browser(browser_input=BrowserInput.model_validate(
+                    {"action": {"type": "close", "session_name": "desktop-release"}}))
+                if closed.get("status") != "success":
+                    raise RuntimeError(f"Stock browser close failed: {closed}")
+                for handle in handles:
+                    if handle.is_connected():
+                        raise RuntimeError("Browser remained connected after close")
+                _discard_browser()
 
         if time.monotonic() >= deadline:
             raise TimeoutError("Desktop cleanup deadline expired")
@@ -368,26 +391,27 @@ def desktop_control(action: str) -> dict:
 
 @activity.defn(name="browser", no_thread_cancel_exception=True)
 def browser_activity(browser_input: BrowserInput) -> dict:
-    """Stock browser on the shared Linux desktop. Results include full-display screenshots.
-
-    Use computer click/move actions for screenshot coordinates (0-999 across
-    the full display); browser selector/CDP coordinates refer to page content.
-    """
+    # strands-temporal skill: "Ecosystem tools (strands_tools.*) -> wrap in a
+    # thin @activity.defn". The stock result, including its own
+    # {"status": "error"} dicts, goes back to the model unchanged.
+    # desktop_action binds this workflow as the desktop owner (runtime.json)
+    # and heartbeats while the GUI works; without it /desktop-control has no
+    # owner to hand off to and Take Control stays disabled.
     with desktop_action() as epoch:
-        action = browser_input.action
-        with desktop_state() as state:
-            session = getattr(action, "session_name", None)
-            if action.type == "init_session" and not state.get("session_name"):
-                state["session_name"] = session
-            elif session is not None and session != state.get("session_name"):
-                raise ApplicationError("Browser session does not match desktop owner", non_retryable=True)
-        # Never accept a model-chosen output path. Stock screenshot writing is
-        # scoped to a disposable directory; the model sees the actual display.
-        with tempfile.TemporaryDirectory(prefix="desktop-capture-") as scratch:
-            if action.type == "screenshot":
-                browser_input = browser_input.model_copy(update={"action": action.model_copy(
-                    update={"path": str(Path(scratch) / "page.png")})})
-            result = _browser.browser(browser_input=browser_input)
-        if result.get("status") == "error":
-            raise ApplicationError(str(result), non_retryable=True)
-        return {**result, "action": action.type, "observation": capture_desktop(epoch)}
+        result = _browser.browser(browser_input=browser_input)
+        if isinstance(browser_input.action, CloseAction) and result.get("status") == "success":
+            # The stock close leaves the instance unable to restart (see
+            # _discard_browser); the next action gets a fresh stock tool.
+            _discard_browser()
+        elif isinstance(browser_input.action, ScreenshotAction) and result.get("status") == "success":
+            # The stock screenshot saves a PNG and returns only its filename
+            # (strands-tools/browser/browser.py:609-638) — no image reaches the
+            # model. Mirror the computer-use flow: full-display pixels go to
+            # the scoped artifact store, and only the integrity-checked
+            # ObservationRef enters the Temporal payload.
+            return {**result, "observation": capture_desktop(epoch)}
+        return result
+
+
+# The model sees the stock tool's own description, not an app-written one.
+browser_activity.__doc__ = LocalChromiumBrowser.browser.tool_spec["description"]

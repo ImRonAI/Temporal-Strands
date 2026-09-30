@@ -11,6 +11,8 @@ import type { BundledLanguage } from "shiki"
 import {
   BotIcon,
   BrainIcon,
+  CheckIcon,
+  ChevronDownIcon,
   ClockIcon,
   CodeIcon,
   CreditCardIcon,
@@ -23,10 +25,12 @@ import {
   ImageIcon,
   LinkIcon,
   ListIcon,
+  Loader2Icon,
   MapPinIcon,
   PackageIcon,
   SearchIcon,
   ServerIcon,
+  Share2Icon,
   TerminalSquareIcon,
   UsersIcon,
   WrenchIcon,
@@ -71,6 +75,7 @@ import {
   JSXPreviewError,
 } from "@/components/ai-elements/jsx-preview"
 import { MessageResponse } from "@/components/ai-elements/message"
+import { Shimmer } from "@/components/ai-elements/shimmer"
 import {
   Sandbox,
   SandboxContent,
@@ -132,8 +137,9 @@ import {
   parseDataObservation,
 } from "./data-observation"
 import { DataObservationPanel } from "./data-observation-panel"
+import { useFileDownload } from "./use-file-download"
 import { ComputerUseActivity, buildActivitySegments } from "./computer-use-activity"
-import { toolPresentation, thinkSummaryWasStreamed } from "./computer-use"
+import { toolPresentation, unstreamedThinkOutput } from "./computer-use"
 import { SkillAgent } from "./skill-agent"
 import type { SkillRunSnapshot } from "./skill-run"
 
@@ -271,6 +277,19 @@ const GMP_MAP = {
 // One reconciled data-agent-run part per nested preset run, emitted by
 // app/api/orchestrator/route.ts from the backend's agent_runs topic.
 type AgentRunPart = { type: "data-agent-run"; id?: string; data: AgentRunSnapshot }
+type SkillRunPart = { type: "data-skill-run"; id?: string; data: SkillRunSnapshot }
+type RetryPart = { type: "data-retry"; id?: string; data: { attempt?: number } }
+
+type ActivityPart = UIMessage["parts"][number]
+
+const isNativeToolPart = (part: ActivityPart): part is NativeToolPart =>
+  part.type === "data-native-tool"
+const isAgentRunPart = (part: ActivityPart): part is AgentRunPart =>
+  part.type === "data-agent-run"
+const isSkillRunPart = (part: ActivityPart): part is SkillRunPart =>
+  part.type === "data-skill-run"
+const isRetryPart = (part: ActivityPart): part is RetryPart =>
+  part.type === "data-retry"
 
 // The nested run's live status while its tool result hasn't landed yet.
 function chainStatus(chain: AgentChain, run: AgentRunSnapshot | undefined): string {
@@ -431,11 +450,14 @@ const IMAGE_FILE = /\.(png|jpe?g|gif|webp|svg)$/i
  * ArtifactHeader (title + description, actions) over ArtifactContent. Source
  * files stream into a CodeBlock (Code Block example: header with filename and
  * copy button); html/pdf render live through WebPreview (Web Preview example:
- * navigation with URL bar over the iframe body).
+ * navigation with URL bar over the iframe body). Header actions: share the
+ * file's link, and a real in-browser download with progress while it fetches.
  */
 function ShareFileArtifact({ name, url }: { name: string; url: string | null }) {
   const codeLanguage = codeLanguageFor(name)
   const [source, setSource] = useState<string | null>(null)
+  const [shared, setShared] = useState(false)
+  const { state: downloadState, progress, download } = useFileDownload(url, name)
 
   useEffect(() => {
     if (!url || !codeLanguage) return
@@ -453,6 +475,28 @@ function ShareFileArtifact({ name, url }: { name: string; url: string | null }) 
 
   const preview = url && PREVIEWABLE.test(name)
 
+  async function share() {
+    if (!url) return
+    const absolute = new URL(url, window.location.href).toString()
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title: name, url: absolute })
+      } catch {
+        // User dismissed the share sheet; nothing to report.
+      }
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(absolute)
+      setShared(true)
+      setTimeout(() => setShared(false), 2000)
+    } catch {
+      // Clipboard unavailable (permissions); the URL stays visible in the bar.
+    }
+  }
+
+  const downloading = downloadState === "downloading"
+
   return (
     <Artifact className="app-glass app-glass-edge">
       <ArtifactHeader className="app-glass-edge bg-black/25">
@@ -464,11 +508,38 @@ function ShareFileArtifact({ name, url }: { name: string; url: string | null }) 
         </div>
         {url && (
           <ArtifactActions>
+            {downloading && (
+              <span className="self-center text-xs text-muted-foreground tabular-nums">
+                {progress !== null ? `${Math.round(progress * 100)}%` : "…"}
+              </span>
+            )}
             <ArtifactAction
-              icon={DownloadIcon}
-              label="Download"
-              tooltip="Download file"
-              onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+              icon={shared ? CheckIcon : Share2Icon}
+              label={shared ? "Link copied" : "Share"}
+              tooltip={shared ? "Link copied" : "Share file link"}
+              onClick={share}
+            />
+            <ArtifactAction
+              icon={downloading ? Loader2Icon : DownloadIcon}
+              label={
+                downloading
+                  ? progress !== null
+                    ? `Downloading ${Math.round(progress * 100)}%`
+                    : "Downloading"
+                  : downloadState === "error"
+                    ? "Download failed — try again"
+                    : "Download"
+              }
+              tooltip={
+                downloading
+                  ? "Downloading"
+                  : downloadState === "error"
+                    ? "Download failed — try again"
+                    : "Download file"
+              }
+              className={downloading ? "[&_svg]:animate-spin" : undefined}
+              disabled={downloading}
+              onClick={download}
             />
           </ArtifactActions>
         )}
@@ -544,22 +615,28 @@ function RunChain({ run, running }: { run: AgentRunSnapshot; running: boolean })
             icon={ClockIcon}
             label={`Reconnected · attempt ${run.attempt}`}
             status="complete"
+            className="activity-step"
+            data-activity-status="complete"
           />
         )}
-        {timeline.map((entry) =>
-          entry.kind === "reasoning" ? (
+        {timeline.map((entry) => {
+          if (entry.kind !== "reasoning") {
+            return <NativeToolStep key={entry.key} native={entry.native as NativeTool} />
+          }
+          const status = running ? "active" : "complete"
+          return (
             <ChainOfThoughtStep
               icon={BrainIcon}
               key={entry.key}
               label="Thinking"
-              status={running ? "active" : "complete"}
+              status={status}
+              className="activity-step"
+              data-activity-status={status}
             >
               <MessageResponse isAnimating={running}>{entry.text}</MessageResponse>
             </ChainOfThoughtStep>
-          ) : (
-            <NativeToolStep key={entry.key} native={entry.native as NativeTool} />
           )
-        )}
+        })}
       </ChainOfThoughtContent>
     </ChainOfThought>
   )
@@ -1593,24 +1670,19 @@ export function AgentActivity({
 }) {
   const [isOpen, setIsOpen] = useState(true)
   const reasoningParts = parts.filter(isReasoningUIPart)
-  // Think tokens arrive as native reasoning parts. Its tool part is only
-  // needed for pending status, failures, or a conclusion absent from the stream.
+  // Think output arrives as native reasoning parts. Its tool part supplies
+  // lifecycle/error information, never a second copy of the conclusion.
   const dynamicTools = parts.filter(isDynamicToolUIPart)
   const thinkParts = dynamicTools.filter((p) => p.toolName === "think")
   const toolParts = dynamicTools.filter((p) => p.toolName !== "think")
   const reasoningText = reasoningParts.map((p) => p.text).join("")
   const skillRuns = new Map<string, SkillRunSnapshot>()
   for (const part of parts) {
-    if (part.type === "data-skill-run") {
-      const run = part.data as SkillRunSnapshot
-      skillRuns.set(run.toolUseId, run)
-    }
+    if (isSkillRunPart(part)) skillRuns.set(part.data.toolUseId, part.data)
   }
   // Native Agent API server-side tools: web/people/finance search, URL fetch,
   // sandbox execution, MCP calls, and shared files.
-  const nativeTools = parts.filter(
-    (p): p is NativeToolPart => p.type === "data-native-tool"
-  )
+  const nativeTools = parts.filter(isNativeToolPart)
   // Nested preset sub-agent runs: one reconciled snapshot per run. The last
   // occurrence of each part id is the current snapshot (the AI SDK reconciles
   // data parts by id, so in practice there is one per id already).
@@ -1618,18 +1690,20 @@ export function AgentActivity({
   {
     const runIndexById = new Map<string, number>()
     for (const part of parts) {
-      if (part.type !== "data-agent-run") continue
-      const runPart = part as AgentRunPart
-      const key = runPart.id ?? runPart.data.activityId
+      if (!isAgentRunPart(part)) continue
+      const key = part.id ?? part.data.activityId
       const existing = runIndexById.get(key)
       if (existing === undefined) {
         runIndexById.set(key, agentRuns.length)
-        agentRuns.push(runPart.data)
+        agentRuns.push(part.data)
       } else {
-        agentRuns[existing] = runPart.data
+        agentRuns[existing] = part.data
       }
     }
   }
+
+  const activityOpen = isThinking || isOpen
+  const activityTitle = isThinking ? "Thinking…" : "Chain of Thought"
 
   if (
     !reasoningText &&
@@ -1641,12 +1715,42 @@ export function AgentActivity({
   ) {
     if (!isThinking) return null
     return (
-      <ChainOfThought open={isThinking || isOpen} onOpenChange={setIsOpen} className="app-glass rounded-xl border px-4 py-3.5">
-        <ChainOfThoughtHeader disabled={isThinking} className="text-[13px] font-medium tracking-[0.01em]">Thinking…</ChainOfThoughtHeader>
-        <ChainOfThoughtContent>
-          <ChainOfThoughtStep icon={BrainIcon} label="Working" status="active" />
-        </ChainOfThoughtContent>
-      </ChainOfThought>
+      <Task
+        open={activityOpen}
+        onOpenChange={setIsOpen}
+        className="app-glass app-glass-edge activity-scan rounded-xl border px-4 py-3.5"
+        data-testid="agent-activity-task"
+        data-activity-state="active"
+      >
+        <TaskTrigger title={activityTitle} disabled className="activity-trigger w-full text-left">
+          <div className="flex w-full items-center gap-2 text-muted-foreground text-sm">
+            <span className="flex size-6 items-center justify-center rounded-full border border-blurple-bright/20 bg-blurple/10">
+              <BotIcon className="size-3.5 text-blurple-bright" />
+            </span>
+            <span className="min-w-0 flex-1 text-left text-[13px] font-medium tracking-[0.01em] text-foreground">
+              <Shimmer>Thinking…</Shimmer>
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-black/20 px-2 py-0.5 text-[11px] text-muted-foreground">
+              <span className="size-1.5 animate-pulse-soft rounded-full bg-blurple-bright" />
+              Live
+            </span>
+            <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+          </div>
+        </TaskTrigger>
+        <TaskContent className="activity-timeline">
+          <ChainOfThought open className="space-y-0">
+            <ChainOfThoughtContent className="mt-0">
+              <ChainOfThoughtStep
+                icon={BrainIcon}
+                label={<Shimmer>Working</Shimmer>}
+                status="active"
+                className="activity-step"
+                data-activity-status="active"
+              />
+            </ChainOfThoughtContent>
+          </ChainOfThought>
+        </TaskContent>
+      </Task>
     )
   }
 
@@ -1659,96 +1763,137 @@ export function AgentActivity({
   )
 
   const segments = buildActivitySegments(parts, isThinking)
+  const activityMeta = `${segments.length} update${segments.length === 1 ? "" : "s"}`
 
   return (
-    <ChainOfThought open={isThinking || isOpen} onOpenChange={setIsOpen} className="app-glass rounded-xl border px-4 py-3.5">
-      <ChainOfThoughtHeader disabled={isThinking} className="text-[13px] font-medium tracking-[0.01em]">{isThinking ? "Thinking…" : "Chain of Thought"}</ChainOfThoughtHeader>
-      <ChainOfThoughtContent>
-        {segments.map((segment) => {
-          if (segment.kind === "computer-use") {
-            return (
-              <ComputerUseActivity
-                key={`computer-use-${segment.index}`}
-                parts={segment.parts}
-                isThinking={isThinking}
-                sessionId={sessionId}
-              />
-            )
-          }
+    <Task
+      open={activityOpen}
+      onOpenChange={setIsOpen}
+      className={`app-glass app-glass-edge rounded-xl border px-4 py-3.5 ${isThinking ? "activity-scan" : ""}`}
+      data-testid="agent-activity-task"
+      data-activity-state={isThinking ? "active" : "complete"}
+    >
+      <TaskTrigger title={activityTitle} disabled={isThinking} className="activity-trigger w-full text-left">
+        <div className="flex w-full items-center gap-2 text-muted-foreground text-sm">
+          <span className="flex size-6 items-center justify-center rounded-full border border-blurple-bright/20 bg-blurple/10">
+            <BotIcon className="size-3.5 text-blurple-bright" />
+          </span>
+          <span className="min-w-0 flex-1 text-left text-[13px] font-medium tracking-[0.01em] text-foreground">
+            {isThinking ? <Shimmer>Thinking…</Shimmer> : activityTitle}
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-black/20 px-2 py-0.5 text-[11px] text-muted-foreground">
+            <span className={`size-1.5 rounded-full ${isThinking ? "animate-pulse-soft bg-blurple-bright" : "bg-muted-foreground/50"}`} />
+            {isThinking ? `${activityMeta} · Live` : activityMeta}
+          </span>
+          <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+        </div>
+      </TaskTrigger>
+      <TaskContent className="activity-timeline">
+        <ChainOfThought open className="space-y-0">
+          <ChainOfThoughtContent className="mt-0">
+            {segments.map((segment) => {
+              if (segment.kind === "computer-use") {
+                return (
+                  <ComputerUseActivity
+                    key={`computer-use-${segment.index}`}
+                    parts={segment.parts}
+                    isThinking={isThinking}
+                    sessionId={sessionId}
+                  />
+                )
+              }
 
-          const part = segment.part
-          const i = segment.index
+              const part = segment.part
+              const i = segment.index
 
-          if (part.type === "data-skill-run") {
-            const run = part.data as SkillRunSnapshot
-            if (dynamicTools.some((tool) => tool.toolName === "use_skill" && tool.toolCallId === run.toolUseId)) return null
-            return (
-              <SkillAgent
-                key={`skill-${run.toolUseId}`}
-                run={skillRuns.get(run.toolUseId)}
-                isThinking={isThinking}
-                renderNative={(event) => <NativeToolStep native={event as NativeTool} />}
-              />
-            )
-          }
+              if (isSkillRunPart(part)) {
+                const run = part.data
+                if (dynamicTools.some((tool) => tool.toolName === "use_skill" && tool.toolCallId === run.toolUseId)) return null
+                return (
+                  <SkillAgent
+                    key={`skill-${run.toolUseId}`}
+                    run={skillRuns.get(run.toolUseId)}
+                    isThinking={isThinking}
+                    renderNative={(event) => <NativeToolStep native={event as NativeTool} />}
+                  />
+                )
+              }
 
-          // GWEN-6: route.ts emits one reconciled data-retry part (stable id
-          // "retry") when the workflow's model retry policy re-runs a turn.
-          if (part.type === "data-retry") {
-            const attempt = (part as { data?: { attempt?: number } }).data?.attempt
-            return (
+              // GWEN-6: route.ts emits one reconciled data-retry part (stable id
+              // "retry") when the workflow's model retry policy re-runs a turn.
+              if (isRetryPart(part)) {
+                const attempt = part.data?.attempt
+                return (
+                  <ChainOfThoughtStep
+                    icon={ClockIcon}
+                    key="retry"
+                    label={`Retrying${typeof attempt === "number" ? ` · attempt ${attempt}` : ""}`}
+                    status="complete"
+                    className="activity-step"
+                    data-activity-status="complete"
+                  />
+                )
+              }
+
+              if (isNativeToolPart(part)) {
+                return <NativeToolStep key={part.id ?? `native-${i}`} native={part.data} />
+              }
+
+              if (isAgentRunPart(part)) {
+                const run = part.data
+                if (boundRuns.has(run.activityId)) return null
+                const status = isTerminalRunStatus(run.status) ? "complete" : "active"
+                return (
+                  <ChainOfThoughtStep
+                    icon={BotIcon}
+                    key={`agent-run-${run.activityId}`}
+                    label={run.activity}
+                    status={status}
+                    className="activity-step"
+                    data-activity-status={status}
+                  >
+                    <UnboundRunCard run={run} />
+                  </ChainOfThoughtStep>
+                )
+              }
+
+              if (isReasoningUIPart(part)) {
+                if (!part.text) return null
+                const streaming = part.state === "streaming" && isThinking
+                const status = streaming ? "active" : "complete"
+                return (
+                  <ChainOfThoughtStep
+                    icon={BrainIcon}
+                    key={`reasoning-${i}`}
+                    label="Thinking"
+                    status={status}
+                    className="activity-step"
+                    data-activity-status={status}
+                  >
+                    <MessageResponse isAnimating={streaming}>{part.text}</MessageResponse>
+                  </ChainOfThoughtStep>
+                )
+              }
+
+              if (isDynamicToolUIPart(part)) {
+                return <Fragment key={part.toolCallId}>{renderDynamicTool(part)}</Fragment>
+              }
+
+              return null
+            })}
+            {isThinking && (
               <ChainOfThoughtStep
                 icon={ClockIcon}
-                key="retry"
-                label={`Retrying${typeof attempt === "number" ? ` · attempt ${attempt}` : ""}`}
-                status="complete"
+                label={<Shimmer>Still working</Shimmer>}
+                status="active"
+                className="activity-step"
+                data-activity-status="active"
               />
-            )
-          }
-
-          if (part.type === "data-native-tool") {
-            const native = (part as NativeToolPart).data
-            return <NativeToolStep key={(part as NativeToolPart).id ?? `native-${i}`} native={native} />
-          }
-
-          if (part.type === "data-agent-run") {
-            const run = (part as AgentRunPart).data
-            if (boundRuns.has(run.activityId)) return null
-            return (
-              <ChainOfThoughtStep
-                icon={BotIcon}
-                key={`agent-run-${run.activityId}`}
-                label={run.activity}
-                status={isTerminalRunStatus(run.status) ? "complete" : "active"}
-              >
-                <UnboundRunCard run={run} />
-              </ChainOfThoughtStep>
-            )
-          }
-
-          if (isReasoningUIPart(part)) {
-            if (!part.text) return null
-            const streaming = part.state === "streaming" && isThinking
-            return (
-              <ChainOfThoughtStep
-                icon={BrainIcon}
-                key={`reasoning-${i}`}
-                label="Thinking"
-                status={streaming ? "active" : "complete"}
-              >
-                <MessageResponse isAnimating={streaming}>{part.text}</MessageResponse>
-              </ChainOfThoughtStep>
-            )
-          }
-
-          if (isDynamicToolUIPart(part)) {
-            return <Fragment key={part.toolCallId}>{renderDynamicTool(part)}</Fragment>
-          }
-
-          return null
-        })}
-      </ChainOfThoughtContent>
-    </ChainOfThought>
+            )}
+          </ChainOfThoughtContent>
+        </ChainOfThought>
+      </TaskContent>
+    </Task>
   )
 
 
@@ -1768,29 +1913,41 @@ export function AgentActivity({
 
     if (part.toolName === "think") {
       const result = toolPresentation(part)
-      const showConclusion = result.terminal && result.text && !thinkSummaryWasStreamed(result.text, parts)
-      if (result.terminal && !result.error && !showConclusion) return null
+      // Think's returned output is shown only where the live reasoning stream
+      // did not already carry it (nothing streamed, or a cut-short cycle).
+      const missing = result.terminal && !result.error ? unstreamedThinkOutput(result.text, parts) : ""
+      if (result.terminal && !result.error && !missing) return null
+      // Live: the reasoning step already shows progress; avoid a second marker.
       if (!result.terminal && isThinking && reasoningText) return null
+      const status = result.terminal ? "complete" : isThinking ? "active" : "pending"
       return (
         <ChainOfThoughtStep
           icon={BrainIcon}
           label={result.error
             ? result.state === "output-denied" ? "Thinking denied" : "Thinking failed"
-            : showConclusion ? "Thinking result" : "Thinking"}
-          status={result.terminal ? "complete" : isThinking ? "active" : "pending"}
+            : missing ? "Thinking result" : "Thinking"}
+          status={status}
           role={result.error ? "alert" : undefined}
-          className={result.error ? "text-destructive" : undefined}
+          className={result.error ? "activity-step text-destructive" : "activity-step"}
+          data-activity-status={status}
         >
-          {(result.error || showConclusion) && <MessageResponse>{result.error || result.text}</MessageResponse>}
-          {!result.terminal && !isThinking && <p>Stream ended before Think returned a result.</p>}
+          {(result.error || missing) && <MessageResponse>{result.error || missing}</MessageResponse>}
+          {!result.terminal && !isThinking && <p className="text-xs text-amber-600">Stream ended before Think returned a result.</p>}
         </ChainOfThoughtStep>
       )
     }
 
     const chain = chainByCreateId.get(part.toolCallId)
     if (chain) {
+      const status = stepStatus(part, isThinking)
       return (
-        <ChainOfThoughtStep icon={BotIcon} label={chain.toolName} status={stepStatus(part, isThinking)}>
+        <ChainOfThoughtStep
+          icon={BotIcon}
+          label={chain.toolName}
+          status={status}
+          className="activity-step"
+          data-activity-status={status}
+        >
           <AgentChainCard chain={chain} run={runByChainKey.get(chain.key)} />
         </ChainOfThoughtStep>
       )
@@ -1801,11 +1958,14 @@ export function AgentActivity({
     // mcp_client tool or a direct MCP tool render the data panel above the
     // native Tool card; everything else is the Tool card alone.
     const observation = observationFromDynamicTool(part)
+    const status = stepStatus(part, isThinking)
     return (
       <ChainOfThoughtStep
         icon={observation ? ServerIcon : WrenchIcon}
         label={observation ? `${observation.server} · ${observation.tool}` : part.toolName}
-        status={stepStatus(part, isThinking)}
+        status={status}
+        className="activity-step"
+        data-activity-status={status}
       >
         {observation && <DataObservationPanel observation={observation} />}
         <DynamicTool part={part} />

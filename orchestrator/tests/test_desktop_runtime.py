@@ -139,6 +139,7 @@ def test_both_tool_paths_route_natively_with_heartbeat_and_no_retry():
         assert tool._options.get("start_to_close_timeout") == DESKTOP_TASK_TIMEOUT
         assert tool._options.get("schedule_to_start_timeout") is None
         assert tool._options.get("schedule_to_close_timeout") is None
+        # Both paths run inside desktop_action(), which heartbeats during GUI work.
         assert tool._options["heartbeat_timeout"] == DESKTOP_JOB_HEARTBEAT_TIMEOUT
         assert tool._options["cancellation_type"] == workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED
     host_names = {activity._Definition.must_from_callable(fn).name for fn in run_worker.WORKER_ACTIVITIES}
@@ -258,7 +259,6 @@ def test_platform_fence_rejects_startup_and_both_tools_before_gui_access(monkeyp
         browser.initialize_desktop()
     for invoke in (
         lambda: cua.execute_computer_use("click", {"x": 500, "y": 500}),
-        lambda: browser.browser_activity(BrowserInput.model_validate({"action": {"type": "list_local_sessions"}})),
     ):
         with pytest.raises(ApplicationError, match="cannot execute on the host") as error:
             invoke()

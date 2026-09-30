@@ -33,9 +33,14 @@ class RegisteredModel:
 DESKTOP_BROWSER_TASK_QUEUE = "desktop-browser"
 # Deployment command prefix retained for the API's read-only native VNC probe.
 # Control transfers execute only inside the desktop worker, never on the host.
+# x11vnc remote control multiplexes every -R/-Q through one X property
+# (X11VNC_REMOTE); a concurrent probe clobbers a transfer's receipt. The probe
+# therefore takes the worker's handoff.lock (flock(2), same Linux kernel) via
+# util-linux flock inside the container, bounded below the command timeout.
 DESKTOP_VNC_GRANT_COMMAND = os.environ.get(
     "DESKTOP_VNC_GRANT_COMMAND",
-    "docker --context colima exec gwen-desktop x11vnc -display :99 -R script:noviewonly;nodeny -Q viewonly,deny",
+    "docker --context colima exec gwen-desktop flock -w 10 /var/lib/gwen-desktop-artifacts/handoff.lock "
+    "x11vnc -display :99 -R script:noviewonly;nodeny -Q viewonly,deny",
 )
 DESKTOP_VNC_REVOKE_COMMAND = os.environ.get(
     "DESKTOP_VNC_REVOKE_COMMAND",
@@ -51,6 +56,12 @@ DESKTOP_VNC_VIEW_COMMAND = os.environ.get(
 )
 DESKTOP_VNC_COMMAND_TIMEOUT = 15
 DESKTOP_HANDOFF_TIMEOUT = timedelta(seconds=45)
+# The handoff update must outlive the wait it performs server-side (turn-lock
+# wait bounded by DESKTOP_HANDOFF_TIMEOUT), hence the 2x envelope.
+DESKTOP_HANDOFF_START_TO_CLOSE = 2 * DESKTOP_HANDOFF_TIMEOUT
+# Backoff between retries when a handoff update loses the race with a
+# continue-as-new rollover (SessionRollingOver) — server.py take/give paths.
+HANDOFF_ROLLOVER_RETRY_BACKOFF = timedelta(milliseconds=100)
 # Startup probe: is the workflow that owns the desktop still running? Bounded so
 # a slow Temporal cannot stall worker startup; on doubt ownership is kept.
 DESKTOP_OWNER_PROBE_TIMEOUT = timedelta(seconds=10)
@@ -60,10 +71,11 @@ DESKTOP_OWNER_PROBE_TIMEOUT = timedelta(seconds=10)
 # the stateless router endpoint, which rejects catalog model ids and
 # background/store/max_steps.
 PERPLEXITY_API_BASE = "https://api.perplexity.ai"
-# Provider capability exceptions, not a model-picker catalog. Fable 5.1 rejects
-# named/required tool choice even with adaptive thinking (verified via gateway).
-# https://platform.claude.com/docs/en/api/errors#forced-tool-use-not-supported
-PERPLEXITY_AUTO_TOOL_CHOICE_MODELS = frozenset({"anthropic/claude-fable-5-1"})
+# Worker boot catalog fetch (run_worker.fetch_catalog_ids) — bounded so a hung
+# /v1/models cannot stall worker startup.
+PERPLEXITY_CATALOG_HTTP_TIMEOUT = timedelta(seconds=30)
+# FastAPI lifespan's shared outbound client (server.py).
+SERVER_HTTP_TIMEOUT = timedelta(seconds=60)
 # Perplexity-only ``response.output_item.done`` item types. These are the
 # server-side tool payloads in the Agent API's OutputItem union that the
 # OpenAI Responses stream loop has no branch for and silently skips
@@ -113,6 +125,9 @@ PERMANENT_HTTP_STATUSES = frozenset({400, 401, 403, 404, 422, 424})
 PERMANENT_API_ERROR_TYPES = frozenset({
     "invalid_request", "invalid_request_error", "external_connector_error",
 })
+# The Agent API's documented reasoning-effort enum (OpenAPI), enforced
+# pre-request by PerplexityModel.
+REASONING_EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh", "max"})
 # Configured Agent API connectors, attached to every request as
 # native {"type": "connector"} tools (agent_api_tools.connector_tools).
 # Authorization lives in the Perplexity Project; requests only reference the
@@ -155,22 +170,41 @@ GEMINI_MAX_OUTPUT_TOKENS = 65_536
 # Agent API / non-Gemini providers: 120k output tokens. Gemini is 65,536
 # (official model-page maximum output tokens).
 MAX_OUTPUT_TOKENS = 120_000
+# The Agent API validates a fixed content-part union and rejects OpenAI's
+# ``input_file`` (400 ``invalid type "input_file"``), so document attachments
+# reach it only as inlined text. Per-document character ceiling for that
+# inlining; larger documents truncate with a marker rather than blowing up
+# the prompt.
+DOCUMENT_INLINE_MAX_CHARS = 100_000
 # Temporal activity options. The Python worker rejects an activity with neither
 # start_to_close_timeout nor schedule_to_close_timeout
 # (temporalio/worker/_workflow_instance.py _outbound_schedule_activity).
 # Schedule-to-close stays unset: the TypeScript ActivityOptions contract cited
 # below defaults that field to unlimited once start-to-close is set.
-# Start-to-close is the value in the installed Strands plugin guide:
-# temporalio/contrib/strands/README.md TemporalAgent(start_to_close_timeout=timedelta(seconds=60)).
-# RetryPolicy() is the official SDK default: 1s / 2.0 / 100×initial /
-# maximum_attempts=0 (unlimited).
+# The guide's 60s example is not suitable for slow reasoning models. This
+# timeout applies to EACH model-call activity, including calls inside Think,
+# not to the whole nested agent. Give a slow streamed completion room to finish
+# while bounding an attempt; the installed plugin's auto_heartbeater reports
+# worker liveness at half the configured heartbeat interval.
+# Model calls can produce billable partial output before an attempt fails;
+# retrying automatically can duplicate that output and hide a real timeout.
 # https://docs.temporal.io/encyclopedia/retry-policies
 # https://python.temporal.io/temporalio.common.RetryPolicy.html
 # https://typescript.temporal.io/api/interfaces/workflow.ActivityOptions
-MODEL_START_TO_CLOSE = timedelta(seconds=60)
+MODEL_START_TO_CLOSE = timedelta(minutes=10)
 MODEL_SCHEDULE_TO_CLOSE: Optional[timedelta] = None
-MODEL_HEARTBEAT: Optional[timedelta] = None
-MODEL_RETRY_POLICY = RetryPolicy()
+MODEL_HEARTBEAT = timedelta(minutes=2)
+MODEL_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
+# Only Perplexity's explicit pre-output overload is marked retryable by its
+# provider. Native Temporal backoff retries that model call, never the turn.
+# Timeout names: temporalio/temporal common/retrypolicy/retry_policy.go.
+PERPLEXITY_MODEL_RETRY_POLICY = RetryPolicy(
+    maximum_attempts=3,
+    non_retryable_error_types=[
+        "TemporalTimeout:StartToClose", "TemporalTimeout:Heartbeat",
+        "ModelThrottledException", "ContextWindowOverflowException",
+    ],
+)
 # Same guide: TemporalMCPClient(start_to_close_timeout=timedelta(seconds=30)).
 MCP_START_TO_CLOSE = timedelta(seconds=30)
 
@@ -182,6 +216,19 @@ MCP_START_TO_CLOSE = timedelta(seconds=30)
 # history events, and the workflow spent its time replaying history instead
 # of streaming.
 MODEL_STREAM_BATCH_INTERVAL = timedelta(milliseconds=200)
+
+# Strands' vended ContextOffloader (strands.vended_plugins.context_offloader):
+# tool results above ``max_result_tokens`` leave the message list and are
+# replaced by a ``preview_tokens`` preview plus a retrievable reference. These
+# are the benchmark-validated values Strands itself uses for
+# ``Agent(context_manager="auto")`` (strands/agent/agent.py
+# _CONTEXT_MANAGER_MAX_RESULT_TOKENS / _CONTEXT_MANAGER_PREVIEW_TOKENS).
+# History-pressure dial: every model activity input carries the full message
+# list (and Strands' invocation_state duplicates it), so three uncapped
+# ~111 KB browser get_text results alone cost ~20 MB of a 52 MB history in
+# chat-d6d70dc8b3ee69f8 and Temporal terminated the turn at the 50 MB limit.
+CONTEXT_OFFLOAD_MAX_RESULT_TOKENS = 1_500
+CONTEXT_OFFLOAD_PREVIEW_TOKENS = 750
 SSE_SUBSCRIBE_RESTART_LIMIT = 3
 SSE_SUBSCRIBE_RESTART_DELAY = 0.25
 SSE_HEARTBEAT_SECONDS = 10
@@ -203,7 +250,12 @@ STREAM_CAN_DRAIN_OVERLAP = timedelta(seconds=1)
 # (docs.temporal.io/workflow-streams#tuning). The outer TemporalAgent's own
 # streaming_batch_interval in workflow.py is the documented LLM-completion case
 # and is unaffected.
-THINK_STREAM_BATCH_INTERVAL = timedelta(seconds=2)
+# Think has a dedicated model stream: flush genuine nested model events promptly
+# without changing the 2s batching of long-running graph/skill/agent activities.
+# 500ms is bounded to avoid the workflow-history pressure seen at 200ms on
+# long-running nested activities; idle periods emit no invented events.
+THINK_STREAM_BATCH_INTERVAL = timedelta(milliseconds=500)
+SUBAGENT_STREAM_BATCH_INTERVAL = timedelta(seconds=2)
 # The think sub-agent runs up to 10 minutes wall-clock (multi-minute nested
 # stream, not a ~30 s completion); the heartbeat keeps Temporal aware the
 # stream is alive between flushed batches. Exactly one automatic attempt: a
@@ -213,8 +265,6 @@ THINK_START_TO_CLOSE = timedelta(minutes=10)
 THINK_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
 THINK_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
 THINK_MODEL_ID = "openai/gpt-6-astra"
-# Verified accepted and echoed by Agent API for Astra on 2026-09-10.
-THINK_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
 # --- Formation graph / sub-agent activities ---
 # A whole formation replay is expensive and non-idempotent (every node call
 # is billable inference), so like the think envelope the graph and use_agent
@@ -233,40 +283,6 @@ GRAPH_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
 USE_AGENT_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
 USE_AGENT_START_TO_CLOSE = timedelta(minutes=15)
 USE_AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
-# --- Perplexity Agent API operation activities (perplexity_operations.py) ---
-# Background+streamed preset runs can research for a long time; the heartbeat
-# keeps Temporal aware the stream is alive between events.
-# SDK requires start-to-close or schedule-to-close. This reuses the existing
-# whole-formation start-to-close (long streamed work). Schedule-to-close stays
-# unset so Temporal's unlimited default applies.
-AGENT_OPERATION_START_TO_CLOSE = GRAPH_START_TO_CLOSE
-AGENT_OPERATION_SCHEDULE_TO_CLOSE: Optional[timedelta] = None
-AGENT_OPERATION_HEARTBEAT: Optional[timedelta] = None
-AGENT_OPERATION_RETRY_POLICY = RetryPolicy()
-# The Agent API documents no idempotency key for POST /v1/responses, so an
-# automatic retry after an AMBIGUOUS failure (start-to-close timeout, dropped
-# stream after the request was accepted) could start a second billable
-# background run. The six preset create activities therefore get exactly one
-# automatic attempt; recovery from an ambiguous create failure is deliberate
-# (the orchestrator can call retrieve_agent_response). Retrieve/list/download
-# are read-only and keep AGENT_OPERATION_RETRY_POLICY's ordinary retries.
-AGENT_CREATE_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
-# Sub-agent run events ride their own topic. Unlike the think stream (one
-# short model call), a preset create_* activity streams a background run for
-# many minutes, and every flushed batch is a durable Signal in the hosting
-# ChatWorkflow's history. At 200 ms one turn produced ~1,000 publish Signals /
-# 20 MB (chat-be6529f8005d0b0e): workflow-task replay then exceeded the SDK's
-# 2 s deadlock detector on every attempt, and a 52 MB sibling run was
-# terminated at the server history limit. This is Temporal's documented
-# WorkflowStreamClient default (docs.temporal.io/workflow-streams#tuning:
-# "raise it to amortize Signal cost"; 200 ms is their figure for a ~30 s
-# completion, not a long nested run).
-AGENT_RUNS_STREAM_BATCH_INTERVAL = timedelta(seconds=2)
-# Where download_agent_response_file persists share_file bytes; never inside
-# Temporal payloads. Overridable per deployment.
-AGENT_FILE_STORE_DIR = Path(
-    os.environ.get("AGENT_FILE_STORE_DIR", ".agent-files")
-)
 # Computer Use / browser actions are Temporal activities on desktop-browser.
 # Start-to-close is assigned after DESKTOP_TASK_TIMEOUT. Schedule-to-start and
 # schedule-to-close stay unset so Temporal's unlimited default applies.

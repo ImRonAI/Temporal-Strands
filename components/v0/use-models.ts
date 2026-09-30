@@ -21,7 +21,10 @@ export type UseModelsResult = {
 let catalog: Promise<PerplexityModel[]> | null = null
 
 function loadModels(): Promise<PerplexityModel[]> {
-  catalog ??= fetch("/api/models", { cache: "no-store" })
+  catalog ??= fetch("/api/models", {
+    cache: "no-store",
+    signal: AbortSignal.timeout(20_000),
+  })
     .then((res) => {
       if (!res.ok) throw new Error(`Failed to load models (${res.status})`)
       return res.json() as Promise<{ data: PerplexityModel[] }>
@@ -43,6 +46,8 @@ export function useModels(refreshKey = false): UseModelsResult {
 
   useEffect(() => {
     let cancelled = false
+    // Keep the last catalog visible while refreshing. Initial state already
+    // reports loading; only the request callbacks should update effect state.
     loadModels()
       .then((data) => {
         if (cancelled) return
@@ -52,7 +57,9 @@ export function useModels(refreshKey = false): UseModelsResult {
       })
       .catch((err) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : "Failed to load models")
+        setError(err instanceof Error && err.name === "TimeoutError"
+          ? "Model catalog request timed out. Reopen the picker to retry."
+          : err instanceof Error ? err.message : "Failed to load models")
         setStatus("error")
       })
 

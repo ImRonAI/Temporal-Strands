@@ -96,7 +96,7 @@ const SHELL_TOOLS = new Set(["shell"])
 const MCP_WRITE_TOOLS = new Set(["write_file"])
 const MCP_READ_TOOLS = new Set(["read_file"])
 
-const PREVIEWABLE = /\.(html?|pdf)$/i
+const PREVIEWABLE = /\.(html?|pdf|png|jpe?g|gif|webp|svg)$/i
 const HTML_FILE = /\.html?$/i
 
 // npm run, pnpm dev, pnpm run, yarn/bun/vite/next, python -m http.server.

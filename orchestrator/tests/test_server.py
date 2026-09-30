@@ -14,7 +14,6 @@ from unittest.mock import AsyncMock, MagicMock, call
 import pytest
 from fastapi.testclient import TestClient
 
-import perplexity_operations
 import server
 import asyncio
 import json
@@ -264,6 +263,46 @@ def test_turn_update_failure_closes_subscription_not_the_workflow(
     assert '"done": true' not in response.text
     assert subscription.closed, "the pump must aclose() the subscription it opened"
     handle.cancel.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_client_disconnect_closes_waiter_without_ending_durable_turn(monkeypatch):
+    waiting = asyncio.Event()
+    waiter_closed = asyncio.Event()
+
+    async def result():
+        waiting.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            waiter_closed.set()
+
+    handle = MagicMock()
+    handle.query = AsyncMock(return_value=None)
+    handle.start_update = AsyncMock(return_value=SimpleNamespace(result=result))
+    temporal_client = MagicMock()
+    temporal_client.get_workflow_handle.return_value = handle
+    monkeypatch.setitem(server._state, "client", temporal_client)
+    subscription = TrackedSubscription(items=[_frame("working", 0)], block=True)
+    monkeypatch.setattr(server.WorkflowStreamClient, "create", MagicMock(
+        return_value=SimpleNamespace(
+            get_offset=AsyncMock(return_value=0),
+            subscribe=lambda *args, **kwargs: subscription,
+        ),
+    ))
+
+    response = await server.turn_stream("detached-session", server.TurnRequest(prompt="continue working"))
+    async with asyncio.timeout(5):
+        assert b"working" in await anext(response.body_iterator)
+        await waiting.wait()
+        await response.body_iterator.aclose()
+        await waiter_closed.wait()
+
+    assert subscription.closed
+    handle.start_update.assert_awaited_once()
+    handle.cancel.assert_not_called()
+    handle.terminate.assert_not_called()
+    handle.signal.assert_not_called()
 
 
 def test_turn_pump_iterates_the_subscription_directly() -> None:
@@ -573,9 +612,12 @@ async def test_turn_completion_without_native_events(monkeypatch, failure):
 
 
 @pytest.mark.asyncio
-async def test_model_error_message_survives_native_workflow_envelope(monkeypatch):
-    message = 'Managed connector "connector_googledrive" is not connected.'
-    error = ApplicationError(message, type="PerplexityModelError", non_retryable=True)
+@pytest.mark.parametrize("message,non_retryable", [
+    ('Managed connector "connector_googledrive" is not connected.', True),
+    ("upstream model is overloaded, please try again later", False),
+])
+async def test_model_error_message_survives_native_workflow_envelope(monkeypatch, message, non_retryable):
+    error = ApplicationError(message, type="PerplexityModelError", non_retryable=non_retryable)
     harness = NativeTurnStream(monkeypatch, failure=WorkflowUpdateFailedError(error))
     harness.finished.set()
     response = await server.turn_stream("chat-1", server.TurnRequest(prompt="hello"))
@@ -624,8 +666,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Any:
         yield test_client
 
 
-def test_agent_runs_topic_matches_operations_module() -> None:
-    assert server.AGENT_RUNS_TOPIC == perplexity_operations.AGENT_RUNS_TOPIC
+def test_agent_runs_topic_matches_workflow_module() -> None:
     assert server.AGENT_RUNS_TOPIC == "agent_runs"
     assert server.AGENT_RUNS_TOPIC in server.CHAT_TOPICS
 

@@ -214,6 +214,8 @@ def latest_observation(messages: list[dict[str, Any]]) -> tuple[str, str, Observ
 
     Tool output text and nested page content are not a source of references.
     Names are correlated with assistant tool calls, not supplied by the result.
+    Both desktop tool paths qualify: the computer-use actions and the stock
+    ``browser`` tool (whose screenshot action carries the observation).
     """
     from computer_use_activity import COMPUTER_USE_TOOL_NAMES
 
@@ -234,7 +236,7 @@ def latest_observation(messages: list[dict[str, Any]]) -> tuple[str, str, Observ
                     continue
                 call_id = result.get("toolUseId")
                 name = names.get(call_id)
-                if name == "browser" or name in COMPUTER_USE_TOOL_NAMES:
+                if name in COMPUTER_USE_TOOL_NAMES or name == "browser":
                     latest = call_id, name, result
                 elif name == "think" and include_think:
                     # Only our correlated Think tool's native structured evidence,
@@ -265,6 +267,10 @@ def latest_observation(messages: list[dict[str, Any]]) -> tuple[str, str, Observ
                 return None
             if "observation" in payload:
                 return call_id, name, ObservationRef.model_validate(payload["observation"])
+    if name == "browser":
+        # Browser actions other than screenshot legitimately return text only.
+        # They may have changed the page, so older pixels are never reused.
+        return None
     raise ValueError("Successful desktop result is missing its observation")
 
 

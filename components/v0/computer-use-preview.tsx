@@ -58,8 +58,15 @@ const controlStatusSchema = z.object({
   ready: z.boolean(),
   mode: z.enum(["agent", "stopping", "human", "relinquishing", "instructions", "resuming", "recovery"]),
   // Nanosecond epochs exceed JS integer precision; require lossless wire strings.
-  epoch: z.string().regex(/^[1-9][0-9]*$/),
-})
+  epoch: z.string().regex(/^(0|[1-9][0-9]*)$/),
+  // The session's desktop is claimed lazily on its first browser action, so
+  // the viewer URL arrives with the first confirmed status, not the session.
+  desktop_url: z.string().nullable().optional(),
+}).refine(
+  // Epoch "0" is only the explicit "no desktop claimed yet" state.
+  (data) => data.epoch !== "0" || data.desktop_url === null,
+  { message: "A desktop epoch of 0 requires desktop_url: null" },
+)
 
 const MODES_LOCKING_CLOSE: ReadonlySet<BrowserControlMode> = new Set([
   "stopping",
@@ -142,6 +149,10 @@ export function ComputerUsePreviewPanel({
   const [fullscreen, setFullscreen] = useState(false)
   const [ownershipMode, setMode] = useState<BrowserControlMode>(initialControlMode)
   const [control, setControl] = useState<{ sessionId: string; epoch: string } | null>(null)
+  // The server-confirmed noVNC URL for this session's desktop. It is null
+  // until the first browser action claims a container; data-session only
+  // carries a viewer for histories recorded before lazy desktops.
+  const [viewerUrl, setViewerUrl] = useState<{ sessionId: string; url: string } | null>(null)
   const [checkingControl, setCheckingControl] = useState(true)
   const [transitionPending, setTransitionPending] = useState(false)
   const [controlError, setControlError] = useState("")
@@ -162,6 +173,15 @@ export function ComputerUsePreviewPanel({
       if (!response.ok) throw new Error(`Status request failed (${response.status})`)
       const data = controlStatusSchema.parse(await response.json())
       if (controller.signal.aborted) return
+      if (data.desktop_url) setViewerUrl({ sessionId, url: data.desktop_url })
+      if (data.desktop_url === null) {
+        // No container yet is a normal state, not an error; keep asking
+        // (unconfirmed below) until the first browser action claims one.
+        setControl(null)
+        setMode("recovery")
+        setControlError("")
+        return
+      }
       const confirmedMode = data.ready ? data.mode : "recovery"
       setControl({ sessionId, epoch: data.epoch })
       setMode(confirmedMode)
@@ -194,11 +214,12 @@ export function ComputerUsePreviewPanel({
     if (control?.sessionId !== sessionId || controlError) void refreshControl()
   }, [sessionId, observationId, checkingControl, transitionPending, control?.sessionId, controlError, refreshControl])
 
-  // The mount request races the desktop worker's ownership claim: the panel
-  // opens on the first browser tool part, before runtime.json names this
-  // session, so that first GET legitimately answers 409/503. Keep asking with
-  // backoff until the server confirms, then stop; a confirmed healthy state is
-  // never re-polled on a timer.
+  // The mount request races the lazy desktop claim: the panel opens on the
+  // first browser tool part, before the workflow holds a binding (status
+  // answers desktop_url null) or before runtime.json names this session (409/
+  // 503). Keep asking with backoff until the server confirms, then stop; a
+  // confirmed healthy state is never re-polled on a timer. The first confirmed
+  // status also carries the viewer URL the iframe switches to.
   const unconfirmed = Boolean(sessionId) && !checkingControl && !transitionPending && (control?.sessionId !== sessionId || Boolean(controlError))
   useEffect(() => {
     if (!unconfirmed) return
@@ -216,10 +237,11 @@ export function ComputerUsePreviewPanel({
     return () => { if (timer !== undefined) clearTimeout(timer) }
   }, [unconfirmed, refreshControl])
 
+  const resolvedViewerUrl = viewerUrl && viewerUrl.sessionId === sessionId ? viewerUrl.url : preview.livePreviewUrl
   let iframeSrc = ""
-  if (preview.viewerType === "novnc" && preview.livePreviewUrl) {
+  if (preview.viewerType === "novnc" && resolvedViewerUrl) {
     try {
-      const url = new URL(preview.livePreviewUrl)
+      const url = new URL(resolvedViewerUrl)
       if (url.protocol === "http:" || url.protocol === "https:") {
         url.searchParams.set("view_only", mode === "human" ? "false" : "true")
         iframeSrc = url.toString()

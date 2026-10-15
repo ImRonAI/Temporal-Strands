@@ -102,6 +102,10 @@ describe("computerUsePreview", () => {
     expect(computerUsePreview([session, part], true).livePreviewUrl).toBe("http://localhost:51234/vnc.html?autoconnect=true")
     // Histories recorded before per-session desktops keep the static viewer.
     expect(computerUsePreview([part], true).livePreviewUrl).toBe(DESKTOP_NOVNC_URL)
+    // Desktops are claimed lazily, so POST /sessions now answers desktop_url
+    // null; the panel learns the real viewer from control status instead.
+    const lazy = { type: "data-session", id: "session", data: { sessionId: "chat-1", desktopUrl: null } } as unknown as UIMessage["parts"][number]
+    expect(computerUsePreview([lazy, part], true).livePreviewUrl).toBe(DESKTOP_NOVNC_URL)
   })
 
   it("keeps the viewer and most recent page between actions and after streaming", () => {

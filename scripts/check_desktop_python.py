@@ -385,24 +385,50 @@ def check(files: dict[str, str]) -> list[dict]:
             attempt = call_options(retry, binding_path).get("maximum_attempts") if isinstance(retry, ast.Call) else None
             if not isinstance(attempt, ast.Constant) or type(attempt.value) is not int or attempt.value != 1:
                 report(workflow_path, call, "mutation-retry", "Browser mutations require a verified RetryPolicy(maximum_attempts=1)")
-        think_bound = False
-        think_tool = symbols.get((binding_path, "THINK_TOOL"))
-        if isinstance(think_tool, ast.Call) and dotted(think_tool.func, {}).endswith("activity_as_tool") and think_tool.args:
-            think_bound = dotted(think_tool.args[0], imports[binding_path]) == "think_activity.think"
-        native_think = any(dotted(node, imports[workflow_path]) == "strands_tools.think.think"
-                           for node in ast.walk(tree) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load))
-        think_used = any(isinstance(node, ast.Name) and node.id == "THINK_TOOL" and isinstance(node.ctx, ast.Load) for node in ast.walk(tree))
-        if not ((think_bound and think_used) or native_think):
-            report(workflow_path, tree, "preserve-think", "Preserve installed Think on the session agent, with native durable model/tool dispatch")
+        # Think is the installed strands_tools.think, loaded on demand through
+        # load_tool: the workflow never imports it (that would pull the stock
+        # agent loop into workflow code) and instead hands every turn a
+        # _think_agent_factory in invocation_state so the cycle runs as a nested
+        # TemporalAgent on the session's own model. The invoke call keeps the
+        # factory on `invocation_state`; the factory is a method on the workflow.
+        def imported_modules(node):
+            if isinstance(node, ast.Import):
+                return [alias.name for alias in node.names]
+            if isinstance(node, ast.ImportFrom) and node.module:
+                return [f"{node.module}.{alias.name}" for alias in node.names]
+            return []
+
+        think_imported = any(
+            name == "strands_tools.think" or name.startswith("strands_tools.think.")
+            for node in ast.walk(tree) for name in imported_modules(node)
+        ) or any(
+            dotted(node, imports[workflow_path]).startswith("strands_tools.think.")
+            for node in ast.walk(tree) if isinstance(node, (ast.Name, ast.Attribute))
+        )
+        factory_defined = any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_think_agent_factory"
+                              for node in ast.walk(tree))
+        factory_passed = any(
+            keyword.arg == "invocation_state" and isinstance(keyword.value, ast.Dict)
+            and any(isinstance(key, ast.Constant) and key.value == "think_agent_factory"
+                    and dotted(value, {}) == "self._think_agent_factory"
+                    for key, value in zip(keyword.value.keys, keyword.value.values))
+            for call in calls for keyword in call.keywords
+        )
+        if think_imported or not (factory_defined and factory_passed):
+            report(workflow_path, tree, "preserve-think", "Preserve installed Think on demand: no strands_tools.think import in the workflow, and every turn passes invocation_state={'think_agent_factory': self._think_agent_factory}")
         rollover = [node for node in calls if dotted(node.func, {}).endswith(".continue_as_new")]
         carried = [node for call in rollover for node in ast.walk(call) if isinstance(node, ast.Call) and dotted(node.func, {}) == "ChatInput"]
         if not carried:
             report(workflow_path, tree, "continue-context", "Continue-As-New must explicitly carry ChatInput context")
         for call in carried:
             fields = {keyword.arg: keyword.value for keyword in call.keywords}
-            required = {"session_id": "self._session_id", "resume_prompt": "self._resume_prompt"}
+            # Same-session rollover keeps the Workflow ID (Temporal does that);
+            # the application context it must carry explicitly is the session
+            # model, prompt, transcript, stream cursor and the claimed desktop
+            # binding so the new run never re-provisions a container.
+            required = {"model_id": "self._model_id", "system_prompt": "self._system_prompt", "desktop": "self._desktop"}
             if any(dotted(fields.get(key), {}) != value for key, value in required.items()) or not {"messages", "stream_state"}.issubset(fields):
-                report(workflow_path, call, "continue-context", "Carry the same session_id, messages, stream_state and resume_prompt through rollover")
+                report(workflow_path, call, "continue-context", "Carry the same model_id, system_prompt, messages, stream_state and desktop through rollover")
 
     host_path = "orchestrator/run_worker.py"
     tree = trees.get(host_path)

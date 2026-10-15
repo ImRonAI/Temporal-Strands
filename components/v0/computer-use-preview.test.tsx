@@ -339,6 +339,67 @@ describe("ComputerUsePreviewPanel", () => {
     expect(html).toContain('data-testid="browser-close"')
   })
 
+  describe("lazy desktop viewer", () => {
+    const claimedUrl = "http://localhost:51234/vnc.html?autoconnect=true&resize=scale"
+
+    it("switches the iframe to the desktop_url the control status reports", async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(Response.json({
+        ready: true, mode: "agent", epoch: desktopEpoch, desktop_url: claimedUrl,
+      }))
+      const panel = panelHandlers()
+      await panel.flushEffects()
+      const html = panel.render()
+      expect(html).toContain("Agent working")
+      expect(h.iframeProps.at(-1)?.src).toBe(`${claimedUrl}&view_only=true`)
+      expect(h.buttons.get("take-control")?.disabled).toBe(false)
+    })
+
+    it("treats a session without a desktop yet as a normal unconfirmed state, not an error", async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(Response.json({
+        ready: false, mode: "recovery", epoch: "0", desktop_url: null,
+      }))
+      const panel = panelHandlers({ preview: preview({ livePreviewUrl: "" }) })
+      await panel.flushEffects()
+      const html = panel.render()
+      expect(html).not.toContain('data-testid="browser-handoff-error"')
+      expect(html).toContain("Desktop viewer unavailable")
+      expect(h.iframeProps).toHaveLength(0)
+      expect(h.buttons.get("take-control")?.disabled).toBe(true)
+      expect(fetch).toHaveBeenCalledTimes(1)
+
+      // The first confirmed status after the claim carries the viewer, and the
+      // panel needs no data-session URL to start showing the desktop.
+      vi.mocked(fetch).mockResolvedValueOnce(Response.json({
+        ready: true, mode: "agent", epoch: desktopEpoch, desktop_url: claimedUrl,
+      }))
+      panel.render({ preview: preview({ livePreviewUrl: "", observation }) })
+      await panel.flushEffects()
+      expect(fetch).toHaveBeenCalledTimes(2)
+      const confirmed = panel.render()
+      expect(confirmed).toContain("Agent working")
+      expect(h.iframeProps.at(-1)?.src).toBe(`${claimedUrl}&view_only=true`)
+      expect(h.buttons.get("take-control")?.disabled).toBe(false)
+    })
+
+    it("keeps the data-session viewer when status omits desktop_url", async () => {
+      await renderPanel()
+      expect(h.iframeProps.at(-1)?.src).toBe("https://viewer.test/vnc.html?autoconnect=true&view_only=true")
+    })
+
+    it("rejects epoch 0 unless it is the explicit no-desktop state", async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(Response.json({
+        ready: true, mode: "agent", epoch: "0", desktop_url: claimedUrl,
+      }))
+      const panel = panelHandlers()
+      await panel.flushEffects()
+      const html = panel.render()
+      expect(html).toContain("Recovery required")
+      expect(html).toContain("Could not verify desktop control")
+      // An unverified status never moves the iframe off the known viewer.
+      expect(h.iframeProps.at(-1)?.src).toBe("https://viewer.test/vnc.html?autoconnect=true&view_only=true")
+    })
+  })
+
 })
 
 function panelHandlers(overrides: Partial<React.ComponentProps<typeof ComputerUsePreviewPanel>> = {}) {

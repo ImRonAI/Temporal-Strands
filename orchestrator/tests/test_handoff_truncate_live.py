@@ -118,6 +118,14 @@ async def test_handoff_reaches_real_desktop_activity_and_preserves_rejection() -
                     async with httpx.AsyncClient(
                         transport=httpx.ASGITransport(app=server.app), base_url="http://test",
                     ) as api:
+                        # Lazy desktop: before any desktop use the workflow holds
+                        # no binding, the query never provisions, and control
+                        # status reports that as a normal no-desktop state.
+                        assert await handle.query(ChatWorkflow.desktop_url) is None
+                        status = await api.get(f"/sessions/{queue}/desktop-control")
+                        assert status.status_code == 200, status.text
+                        assert status.json() == {"run_id": None, "ready": False, "mode": "recovery",
+                                                 "epoch": "0", "desktop_url": None}
                         for action in ("take", "release", "give"):
                             response = await api.post(f"/sessions/{queue}/handoff", json={
                                 "action": action, "message": "Continue in this chat",
@@ -130,6 +138,9 @@ async def test_handoff_reaches_real_desktop_activity_and_preserves_rejection() -
                             "action": "give", "message": " ",
                         })
                         assert invalid.status_code == 422
+                    # The handoff update claimed the desktop; the query now
+                    # reports the viewer the stubbed claim returned.
+                    assert await handle.query(ChatWorkflow.desktop_url) == "http://viewer.test/vnc.html"
                     assert await handle.query(ChatWorkflow.model_id) == DEFAULT_MODEL_ID
                     assert await handle.query(ChatWorkflow.messages) == []
                     await handle.signal(ChatWorkflow.end_chat)

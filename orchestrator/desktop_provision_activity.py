@@ -54,6 +54,12 @@ def container_artifact_dir(container: str) -> Path:
     return artifact_parent() / container
 
 
+def session_artifact_root(session_id: str) -> Path:
+    """Host-side bind mount of ``session_id``'s desktop: where its worker writes
+    ``runtime.json`` and screenshot observations."""
+    return container_artifact_dir(desktop_container_name(session_id))
+
+
 async def _docker(*args: str, timeout: float) -> str:
     process = await asyncio.create_subprocess_exec(
         "docker", "--context", DESKTOP_DOCKER_CONTEXT, *args,

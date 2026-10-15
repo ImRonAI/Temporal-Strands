@@ -110,8 +110,10 @@ class ChatWorkflow:
     async def ensure_desktop(self) -> DesktopBinding:
         """Claim this session's desktop on first use; a no-op afterwards.
 
-        A chat that never browses never pays for a container. Concurrent first
-        callers share one provisioning activity via the lock.
+        Nothing claims eagerly: ``POST /sessions`` only starts the workflow, so
+        a chat that never browses never pays for a container. The first browser
+        tool call (``DesktopHook``) or a handoff update is what provisions, and
+        concurrent first callers share one provisioning activity via the lock.
         """
         if self._desktop is None:
             async with self._desktop_lock:
@@ -131,6 +133,11 @@ class ChatWorkflow:
         """The session's desktop binding, provisioning it if this is the first ask."""
         bound = await self.ensure_desktop()
         return {"container": bound.container, "queue": bound.queue, "novnc_url": bound.novnc_url}
+
+    @workflow.query
+    def desktop_url(self) -> str | None:
+        """The claimed desktop's noVNC viewer, or None. Queries never provision."""
+        return self._desktop.novnc_url if self._desktop is not None else None
 
     @workflow.update
     def truncate_stream(self, up_to_offset: int) -> None:

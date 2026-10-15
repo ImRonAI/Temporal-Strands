@@ -32,6 +32,7 @@ import perplexity_model
 from config import NATIVE_OUTPUT_ITEM_TYPES, PERPLEXITY_API_BASE, VISION_PROXY_EFFORT, VISION_PROXY_MODEL
 from perplexity_model import VISION_PROXY_INSTRUCTIONS, PerplexityModel
 from desktop_observation import resolve_observation, store_observation
+from desktop_provision_activity import session_artifact_root
 
 # ---------------------------------------------------------------------------
 # Canned SSE plumbing
@@ -219,7 +220,8 @@ async def collect(model: PerplexityModel, messages=None, **kwargs) -> list[dict[
 def desktop_image(tmp_path, monkeypatch):
     # The model activity runs on the host, where each session's desktop has its
     # own artifact directory; the desktop worker wrote there under its mount.
-    desktop = tmp_path / "gwen-desktop-chat-1"
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(tmp_path))
+    desktop = session_artifact_root("chat-1")
     desktop.mkdir()
     (desktop / "runtime.json").write_text(json.dumps({
         "epoch": 7, "owner": {"namespace": "test", "workflow_id": "chat-1"}, "mode": "agent",

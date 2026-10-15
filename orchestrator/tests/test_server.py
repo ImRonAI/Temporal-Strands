@@ -55,12 +55,16 @@ def seed_catalog(
     return fetch
 
 
+_NOVNC_URL = "http://localhost:51234/vnc.html?autoconnect=true"
+
+
 def _desktop_handle():
-    """A started-workflow handle whose ``desktop`` update reports a claimed container."""
+    """A started-workflow handle. Its ``desktop`` update would claim a container,
+    which ``POST /sessions`` must never do: the desktop is lazy."""
     handle = MagicMock()
     handle.execute_update = AsyncMock(return_value={
         "container": "gwen-desktop-chat-1", "queue": "desktop-browser-chat-1",
-        "novnc_url": "http://localhost:51234/vnc.html?autoconnect=true",
+        "novnc_url": _NOVNC_URL,
     })
     return handle
 
@@ -629,6 +633,90 @@ def test_start_session_503_when_no_worker_serves_a_catalog(
 
     response = client.post("/sessions", json={"model_id": "model-a"})
     assert response.status_code == 503
+
+
+def test_start_session_never_claims_a_desktop(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A chat that never browses never pays for a container: POST /sessions
+    only starts the workflow and answers immediately with no viewer URL."""
+    seed_catalog(monkeypatch, [_MODEL_A])
+    monkeypatch.setattr(server, "task_queue_has_pollers", AsyncMock(return_value=True))
+    handle = _desktop_handle()
+    temporal_client = MagicMock()
+    temporal_client.start_workflow = AsyncMock(return_value=handle)
+    monkeypatch.setitem(server._state, "client", temporal_client)
+
+    response = client.post("/sessions", json={"model_id": "model-a"})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["session_id"].startswith("chat-")
+    assert body["desktop_url"] is None
+    handle.execute_update.assert_not_awaited()
+
+
+def _control_client(monkeypatch: pytest.MonkeyPatch, desktop_url: str | None) -> MagicMock:
+    handle = MagicMock()
+    handle.query = AsyncMock(return_value=desktop_url)
+    temporal_client = MagicMock(namespace="test")
+    temporal_client.get_workflow_handle = MagicMock(return_value=handle)
+    monkeypatch.setitem(server._state, "client", temporal_client)
+    return handle
+
+
+def test_desktop_control_status_without_a_desktop_is_a_normal_state(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """No container yet (the lazy default) answers 200 with mode recovery and
+    desktop_url null, never a 503; nothing on disk is read and no VNC probe runs."""
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(tmp_path))
+    handle = _control_client(monkeypatch, None)
+    probe = AsyncMock()
+    monkeypatch.setattr(server, "_vnc_input", probe)
+    monkeypatch.setattr(server, "task_queue_has_pollers", AsyncMock(return_value=True))
+
+    response = client.get("/sessions/chat-1/desktop-control")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "run_id": None, "ready": False, "mode": "recovery", "epoch": "0", "desktop_url": None,
+    }
+    assert response.headers["cache-control"] == "no-store"
+    handle.query.assert_awaited_once()
+    probe.assert_not_awaited()
+
+
+def test_desktop_control_status_reports_the_claimed_viewer_url(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Once the workflow holds a binding, status carries its noVNC URL next to
+    the existing runtime.json-derived mode and epoch."""
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(tmp_path))
+    desktop = tmp_path / "gwen-desktop-chat-1"
+    desktop.mkdir()
+    (desktop / "runtime.json").write_text(json.dumps({
+        "epoch": 7, "owner": {"namespace": "test", "workflow_id": "chat-1"}, "mode": "agent",
+    }))
+    _control_client(monkeypatch, _NOVNC_URL)
+    monkeypatch.setattr(server, "_vnc_input", AsyncMock())
+    monkeypatch.setattr(server, "task_queue_has_pollers", AsyncMock(return_value=True))
+
+    response = client.get("/sessions/chat-1/desktop-control")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "run_id": None, "ready": True, "mode": "agent", "epoch": "7", "desktop_url": _NOVNC_URL,
+    }
+
+
+def test_desktop_control_status_unknown_session_is_404(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    handle = _control_client(monkeypatch, None)
+    handle.query = AsyncMock(side_effect=RPCError("not found", RPCStatusCode.NOT_FOUND, b""))
+
+    assert client.get("/sessions/missing/desktop-control").status_code == 404
 
 
 def test_readiness_lease_helpers_are_gone() -> None:

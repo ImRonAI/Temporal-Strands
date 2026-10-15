@@ -9,6 +9,7 @@ from PIL import Image
 
 import server
 from desktop_observation import store_observation
+from desktop_provision_activity import session_artifact_root
 
 
 @pytest.mark.asyncio
@@ -17,7 +18,7 @@ async def test_evidence_api_serves_verified_pixels_only_to_current_owner(monkeyp
     monkeypatch.setitem(server._state, "client", SimpleNamespace(namespace="test"))
     # On the host every session's desktop has its own artifact directory (the
     # container's bind mount); the worker inside wrote these under its root.
-    desktop = tmp_path / "gwen-desktop-chat-1"
+    desktop = session_artifact_root("chat-1")
     desktop.mkdir()
     runtime = {"epoch": 7, "owner": {"namespace": "test", "workflow_id": "chat-1"}, "mode": "agent"}
     (desktop / "runtime.json").write_text(json.dumps(runtime))

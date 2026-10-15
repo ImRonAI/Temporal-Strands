@@ -11,11 +11,14 @@ DESKTOP_BROWSER_TASK_QUEUE = "desktop-browser"
 BROWSER_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
 `
 const workflow = `
-import think_activity
 browser = activity_as_tool(browser_activity, **{"task_queue": DESKTOP_BROWSER_TASK_QUEUE, "retry_policy": BROWSER_RETRY_POLICY})
-THINK_TOOL = activity_as_tool(think_activity.think, start_to_close_timeout=THINK_START_TO_CLOSE)
-tools = [THINK_TOOL]
-stream.continue_as_new(lambda state: [ChatInput(session_id=self._session_id, messages=messages, stream_state=state, resume_prompt=self._resume_prompt)])
+class ChatWorkflow:
+    def _think_agent_factory(self, **kwargs):
+        return TemporalAgent(model=self._model_id)
+    async def turn(self, prompt):
+        return await self._agent.invoke_async(prompt, invocation_state={"think_agent_factory": self._think_agent_factory})
+    async def run(self, input):
+        workflow.continue_as_new(ChatInput(model_id=self._model_id, system_prompt=self._system_prompt, messages=list(self._agent.messages), stream_state=self._stream.get_state(), desktop=self._desktop))
 `
 const worker = `queue = await loop.run_in_executor(executor, wait_for_queue_assignment, stopped)\nWorker(client, task_queue=queue, activity_executor=ThreadPoolExecutor(max_workers=1))`
 const fixture = {
@@ -48,12 +51,19 @@ test("automatic mutation retries and missing native executor fail", () => {
 })
 
 test("Think removal and lost continuation context fail", () => {
-  assert.ok(rules({ ...fixture, "orchestrator/workflow.py": workflow.replace("tools = [THINK_TOOL]", "tools = []") }).includes("preserve-think"))
-  assert.deepEqual(rules({ ...fixture, "orchestrator/workflow.py": workflow.replace("THINK_TOOL = activity_as_tool(think_activity.think, start_to_close_timeout=THINK_START_TO_CLOSE)", "from strands_tools.think import think as native_think\nTHINK_TOOL = native_think") }), [])
-  for (const loss of ["session_id=self._session_id", "messages=messages", "stream_state=state", "resume_prompt=self._resume_prompt"]) {
+  // Dropping the factory from invocation_state, or the factory itself, loses on-demand Think.
+  assert.ok(rules({ ...fixture, "orchestrator/workflow.py": workflow.replace(', invocation_state={"think_agent_factory": self._think_agent_factory}', "") }).includes("preserve-think"))
+  assert.ok(rules({ ...fixture, "orchestrator/workflow.py": workflow.replace("self._think_agent_factory}", "None}") }).includes("preserve-think"))
+  assert.ok(rules({ ...fixture, "orchestrator/workflow.py": workflow.replace("def _think_agent_factory(self, **kwargs):", "def _other_factory(self, **kwargs):") }).includes("preserve-think"))
+  // Importing the stock tool into workflow code is the old binding; load_tool owns it now.
+  for (const imported of ["from strands_tools.think import think\n", "import strands_tools.think\n", "from strands_tools import think\n"]) {
+    assert.ok(rules({ ...fixture, "orchestrator/workflow.py": imported + workflow }).includes("preserve-think"), imported)
+  }
+  for (const loss of ["model_id=self._model_id", "system_prompt=self._system_prompt", "messages=list(self._agent.messages)", "stream_state=self._stream.get_state()", "desktop=self._desktop"]) {
     const changed = workflow.replace(loss, "discarded=None")
     assert.ok(rules({ ...fixture, "orchestrator/workflow.py": changed }).includes("continue-context"), loss)
   }
+  assert.ok(rules({ ...fixture, "orchestrator/workflow.py": workflow.replace("desktop=self._desktop", "desktop=None") }).includes("continue-context"))
 })
 
 test("aliased stock-browser and Temporal facade subclasses fail, native hooks remain valid", () => {

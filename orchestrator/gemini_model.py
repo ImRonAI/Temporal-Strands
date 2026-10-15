@@ -30,8 +30,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from desktop_observation import latest_observation, resolve_observation
-from desktop_provision_activity import container_artifact_dir
-from config import desktop_container_name
+from desktop_provision_activity import session_artifact_root
 from workspace_state import StateConflict
 
 
@@ -228,7 +227,7 @@ class GeminiModel(_GeminiModel):
                     raise ValueError("Desktop observation requires a workflow identity")
                 png = resolve_observation(
                     ref, namespace=info.namespace, workflow_id=info.workflow_id,
-                    root=container_artifact_dir(desktop_container_name(info.workflow_id)),
+                    root=session_artifact_root(info.workflow_id),
                 )
         except (OSError, ValueError, StateConflict, RuntimeError) as error:
             raise ApplicationError(

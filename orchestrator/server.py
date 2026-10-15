@@ -76,7 +76,6 @@ from config import (
     DESKTOP_VNC_GRANT_COMMAND,
     DESKTOP_VNC_COMMAND_TIMEOUT,
     DESKTOP_HANDOFF_TIMEOUT,
-    DESKTOP_PROVISION_TIMEOUT,
     HANDOFF_ROLLOVER_RETRY_BACKOFF,
     PROVIDER_DISPLAY_NAMES,
     READINESS_POLLER_CACHE,
@@ -86,7 +85,7 @@ from config import (
     desktop_container_name,
     desktop_task_queue,
 )
-from desktop_provision_activity import container_artifact_dir
+from desktop_provision_activity import session_artifact_root
 from load_tool import _SESSION_TOOLS, discover_tools_activity
 from skills_config import discovered_skills
 from run_worker import agent_identity, assemble_model_factories
@@ -451,14 +450,14 @@ async def catalog(session_id: str | None = None) -> dict[str, Any]:
 
 
 @app.post("/sessions")
-async def start_session(body: StartSession) -> dict[str, str]:
+async def start_session(body: StartSession) -> dict[str, str | None]:
     await validated_model(body.model_id)
     if not await task_queue_has_pollers():
         raise HTTPException(503, "No worker is polling the task queue")
 
     client = temporal()
     session_id = f"chat-{os.urandom(8).hex()}"
-    handle = await client.start_workflow(
+    await client.start_workflow(
         ChatWorkflow.run,
         ChatInput(
             model_id=body.model_id,
@@ -467,9 +466,9 @@ async def start_session(body: StartSession) -> dict[str, str]:
         id=session_id,
         task_queue=TASK_QUEUE,
     )
-    # Resolves as soon as the workflow has claimed its warm desktop.
-    desktop = await handle.execute_update(ChatWorkflow.desktop, rpc_timeout=DESKTOP_PROVISION_TIMEOUT)
-    return {"session_id": session_id, "desktop_url": desktop["novnc_url"]}
+    # The desktop is claimed lazily by the workflow's first browser tool call;
+    # its viewer URL is reported through GET /sessions/{id}/desktop-control.
+    return {"session_id": session_id, "desktop_url": None}
 
 
 @app.post("/sessions/{session_id}/turns/stream")
@@ -714,7 +713,7 @@ async def _vnc_input(command: str, expected_answer: str | tuple[str, ...], *, ve
 def _desktop_mode(session_id: str) -> dict:
     # Read the atomically replaced file only. Host locks do not synchronize with
     # Linux flock on Colima, and even a read-only desktop_state context writes.
-    runtime = container_artifact_dir(desktop_container_name(session_id)) / "runtime.json"
+    runtime = session_artifact_root(session_id) / "runtime.json"
     try:
         fd = os.open(runtime, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, "rb") as source:
@@ -740,8 +739,18 @@ def _desktop_mode(session_id: str) -> dict:
 @app.get("/sessions/{session_id}/desktop-control")
 async def desktop_control_status(session_id: str, response: Response) -> dict:
     response.headers["Cache-Control"] = "no-store"
-    state = await asyncio.to_thread(_desktop_mode, session_id)
     workflow_state = {"run_id": None, "ready": False}
+    # The desktop is claimed on the session's first browser action, so a chat
+    # without one yet is a normal state, not an outage: report it as such and
+    # hand the viewer URL over as soon as the workflow holds a binding.
+    try:
+        desktop_url = await temporal().get_workflow_handle(session_id).query(ChatWorkflow.desktop_url)
+    except RPCError as error:
+        status = 404 if error.status == RPCStatusCode.NOT_FOUND else 502
+        raise HTTPException(status, str(error)) from error
+    if desktop_url is None:
+        return {**workflow_state, "mode": "recovery", "epoch": "0", "desktop_url": None}
+    state = await asyncio.to_thread(_desktop_mode, session_id)
     runtime_available = await task_queue_has_pollers(desktop=session_id)
     try:
         command = shlex.split(DESKTOP_VNC_GRANT_COMMAND.format(container=desktop_container_name(session_id)))
@@ -760,7 +769,10 @@ async def desktop_control_status(session_id: str, response: Response) -> dict:
     # A transfer that moved the native state between the two reads explains a
     # mismatched VNC receipt; report the in-flight mode, never a false recovery.
     mode = current["mode"] if runtime_available or transitioning else "recovery"
-    return {**workflow_state, "ready": available, "mode": mode, "epoch": str(current["epoch"])}
+    return {
+        **workflow_state, "ready": available, "mode": mode, "epoch": str(current["epoch"]),
+        "desktop_url": desktop_url,
+    }
 
 
 @app.post("/sessions/{session_id}/handoff", status_code=204)
@@ -790,7 +802,7 @@ async def desktop_image(session_id: str, artifact_id: str) -> Response:
     try:
         image = await asyncio.to_thread(
             observation_image, artifact_id, namespace=temporal().namespace, workflow_id=session_id,
-            root=container_artifact_dir(desktop_container_name(session_id)),
+            root=session_artifact_root(session_id),
         )
     except (ValueError, KeyError, OSError, StateConflict) as error:
         raise HTTPException(404, "Desktop observation unavailable") from error

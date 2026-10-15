@@ -1,0 +1,84 @@
+[     277ms] [ERROR] CodeMirror plugin crashed: TypeError: n is not iterable
+    at ln.style (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:91841)
+    at lp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:91975)
+    at hp.highlightRange (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:92543)
+    at cp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:92089)
+    at Vp.buildDeco (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:116398)
+    at new Vp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:115875)
+    at Be.create (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:7:19895)
+    at yn.update (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:7:20340)
+    at new I (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:5944)
+    at Lt (http://localhost:8233/_app/immutable/chunks/xfCppVrv.js:1:19269) @ http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:6
+[   45691ms] [ERROR] CodeMirror plugin crashed: TypeError: n is not iterable
+    at ln.style (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:91841)
+    at lp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:91975)
+    at hp.highlightRange (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:92543)
+    at cp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:92089)
+    at Vp.buildDeco (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:116398)
+    at new Vp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:115875)
+    at Be.create (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:7:19895)
+    at yn.update (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:7:20340)
+    at new I (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:5944)
+    at Lt (http://localhost:8233/_app/immutable/chunks/xfCppVrv.js:1:19269) @ http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:6
+[   45697ms] [ERROR] CodeMirror plugin crashed: TypeError: n is not iterable
+    at ln.style (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:91841)
+    at lp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:91975)
+    at hp.highlightRange (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:92543)
+    at cp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:92089)
+    at Vp.buildDeco (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:116398)
+    at new Vp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:115875)
+    at Be.create (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:7:19895)
+    at yn.update (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:7:20340)
+    at new I (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:5944)
+    at Lt (http://localhost:8233/_app/immutable/chunks/xfCppVrv.js:1:19269) @ http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:6
+[  106102ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11/runs/019ff242-945a-7e4c-bca3-95909dc91293/events?maximumPageSize=100:0
+[ 2953420ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11/history?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293&waitNewEvent=true&next_page_token=CiQwMTlmZjI0Mi05NDVhLTdlNGMtYmNhMy05NTkwOWRjOTEyOTMQIxgjKAFCTAokMDE5ZmYyNDItOTQ1YS03ZTRjLWJjYTMtOTU5MDlkYzkxMjkzEiQwMTlmZjI0Mi05NDVhLTdmMGItYmYzYy02ZDRiOGM2YjMzYzhSAggiWgIQEA%3D%3D:0
+[ 2953428ms] TypeError: Failed to fetch
+    at window.fetch (http://localhost:8233/_app/immutable/chunks/BLoy34xJ.js:2:3324)
+    at x (http://localhost:8233/_app/immutable/chunks/Dl4jEEoD.js:1:1640)
+    at hn (http://localhost:8233/_app/immutable/chunks/Dl4jEEoD.js:1:1713)
+    at async k (http://localhost:8233/_app/immutable/chunks/DbijJU-y.js:1:380)
+    at async B (http://localhost:8233/_app/immutable/chunks/DjISuDG5.js:1:1475)
+    at async _e (http://localhost:8233/_app/immutable/nodes/9.C9V-0W6u.js:2:32091)
+[ 2960147ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 2970147ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 2980147ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 2990146ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3000146ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3010313ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3020154ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3030151ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3040147ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3050146ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3060168ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3070150ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3080149ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3090147ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3100147ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3110146ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3120146ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3130146ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3140145ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3150146ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3160148ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3170144ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3180148ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3190145ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3200145ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3210149ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3220144ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3230148ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3240144ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3250148ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3260143ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3270146ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3280147ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3290146ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3300145ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3310146ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3320150ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3330164ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3340178ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3350188ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3360188ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0
+[ 3370193ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:8233/api/v1/namespaces/default/workflows/chat-d4c2e3d62f64dc11?execution.runId=019ff242-945a-7e4c-bca3-95909dc91293:0

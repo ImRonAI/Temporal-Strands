@@ -1,0 +1,33 @@
+[     284ms] [ERROR] CodeMirror plugin crashed: TypeError: n is not iterable
+    at ln.style (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:91841)
+    at lp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:91975)
+    at hp.highlightRange (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:92543)
+    at cp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:92089)
+    at Vp.buildDeco (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:116398)
+    at new Vp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:115875)
+    at Be.create (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:7:19895)
+    at yn.update (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:7:20340)
+    at new I (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:5944)
+    at Lt (http://localhost:8233/_app/immutable/chunks/xfCppVrv.js:1:19269) @ http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:6
+[   16093ms] [ERROR] CodeMirror plugin crashed: TypeError: n is not iterable
+    at ln.style (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:91841)
+    at lp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:91975)
+    at hp.highlightRange (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:92543)
+    at cp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:92089)
+    at Vp.buildDeco (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:116398)
+    at new Vp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:115875)
+    at Be.create (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:7:19895)
+    at yn.update (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:7:20340)
+    at new I (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:5944)
+    at Lt (http://localhost:8233/_app/immutable/chunks/xfCppVrv.js:1:19269) @ http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:6
+[   16100ms] [ERROR] CodeMirror plugin crashed: TypeError: n is not iterable
+    at ln.style (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:91841)
+    at lp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:91975)
+    at hp.highlightRange (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:92543)
+    at cp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:92089)
+    at Vp.buildDeco (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:116398)
+    at new Vp (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:115875)
+    at Be.create (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:7:19895)
+    at yn.update (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:7:20340)
+    at new I (http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:10:5944)
+    at Lt (http://localhost:8233/_app/immutable/chunks/xfCppVrv.js:1:19269) @ http://localhost:8233/_app/immutable/chunks/CeszOHdL.js:6

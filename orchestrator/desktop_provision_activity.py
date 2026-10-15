@@ -143,11 +143,17 @@ async def provision_desktop(session_id: str) -> dict[str, str]:
         timeout=DESKTOP_TEARDOWN_TIMEOUT.total_seconds(),
     )).strip()
     if not existing:
-        idle = await list_idle_containers()
-        if idle:
-            source = idle[0]
-            await _docker("rename", source, container, timeout=DESKTOP_TEARDOWN_TIMEOUT.total_seconds())
+        # `docker rename` is atomic on the daemon, so it doubles as the claim:
+        # a concurrent session may take a container between `ps` and `rename`,
+        # in which case the rename fails and the next idle one is tried.
+        for source in await list_idle_containers():
+            try:
+                await _docker("rename", source, container, timeout=DESKTOP_TEARDOWN_TIMEOUT.total_seconds())
+            except RuntimeError:
+                logger.info("Idle desktop %s was claimed by another session; trying the next one", source)
+                continue
             os.replace(container_artifact_dir(source), container_artifact_dir(container))
+            break
         else:
             logger.warning("Desktop pool empty; cold-starting %s", container)
             await _docker(*_run_args(container, None), timeout=DESKTOP_PROVISION_TIMEOUT.total_seconds())

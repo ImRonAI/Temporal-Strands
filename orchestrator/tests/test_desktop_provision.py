@@ -32,6 +32,8 @@ class FakeDocker:
                 name = name_filter.removeprefix("name=^").removesuffix("$")
                 return name if name in self.ports else ""
             case ("rename", source, target):
+                if source not in self.idle:
+                    raise RuntimeError("Error response from daemon: No such container: " + source)
                 self.idle.remove(source)
                 self.ports[target] = self.ports.pop(source, 50000)
                 return ""
@@ -107,6 +109,77 @@ async def test_provision_cold_starts_only_when_the_pool_is_empty(docker, tmp_pat
         provision.DESKTOP_IMAGE,
     ]
     assert result["queue"] == "desktop-browser-chat-2"
+
+
+def _claimed_between_ps_and_rename(docker: FakeDocker, *lost: str):
+    """A ``_docker`` where concurrent sessions take ``lost`` right after this one lists the pool."""
+
+    async def racing(*args: str, timeout: float) -> str:
+        out = await docker(*args, timeout=timeout)
+        if args[:2] == ("ps", "--filter"):
+            for name in lost:
+                if name in docker.idle:
+                    docker.idle.remove(name)
+                    docker.ports.pop(name, None)
+        return out
+
+    return racing
+
+
+@pytest.mark.asyncio
+async def test_provision_takes_the_next_idle_container_when_the_first_is_claimed_concurrently(
+    docker, tmp_path, monkeypatch,
+):
+    docker.idle.append("gwen-desktop-idle-bbbb")
+    docker.ports["gwen-desktop-idle-bbbb"] = 51235
+    (tmp_path / "gwen-desktop-idle-bbbb").mkdir()
+    monkeypatch.setattr(provision, "_docker", _claimed_between_ps_and_rename(docker, "gwen-desktop-idle-aaaa"))
+
+    result = await provision.provision_desktop("chat-4")
+
+    container = desktop_container_name("chat-4")
+    assert result == {
+        "container": container,
+        "queue": desktop_task_queue("chat-4"),
+        "novnc_url": "http://localhost:51235/vnc.html?autoconnect=true&resize=scale&reconnect=true",
+    }
+    # The lost rename was tolerated and the second idle container was claimed instead.
+    renames = [call for call in docker.calls if call[0] == "rename"]
+    assert renames == [
+        ("rename", "gwen-desktop-idle-aaaa", container),
+        ("rename", "gwen-desktop-idle-bbbb", container),
+    ]
+    assert not any(call[0] == "run" for call in docker.calls)
+    assert (tmp_path / container / provision.QUEUE_FILE).read_text() == "desktop-browser-chat-4"
+    assert not (tmp_path / "gwen-desktop-idle-bbbb").exists()
+    # The other session's container and its artifacts were left alone.
+    assert (tmp_path / "gwen-desktop-idle-aaaa").exists()
+
+
+@pytest.mark.asyncio
+async def test_provision_cold_starts_when_every_idle_container_is_claimed_concurrently(
+    docker, tmp_path, monkeypatch,
+):
+    docker.idle.append("gwen-desktop-idle-bbbb")
+    docker.ports["gwen-desktop-idle-bbbb"] = 51235
+    (tmp_path / "gwen-desktop-idle-bbbb").mkdir()
+    monkeypatch.setattr(
+        provision, "_docker",
+        _claimed_between_ps_and_rename(docker, "gwen-desktop-idle-aaaa", "gwen-desktop-idle-bbbb"),
+    )
+
+    result = await provision.provision_desktop("chat-5")
+
+    container = desktop_container_name("chat-5")
+    assert [call for call in docker.calls if call[0] == "rename"] == [
+        ("rename", "gwen-desktop-idle-aaaa", container),
+        ("rename", "gwen-desktop-idle-bbbb", container),
+    ]
+    run = next(call for call in docker.calls if call[0] == "run")
+    assert run[run.index("--name") + 1] == container
+    assert result["container"] == container
+    assert result["queue"] == "desktop-browser-chat-5"
+    assert (tmp_path / container / provision.QUEUE_FILE).read_text() == "desktop-browser-chat-5"
 
 
 @pytest.mark.asyncio

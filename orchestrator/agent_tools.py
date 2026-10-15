@@ -22,7 +22,7 @@ from use_agent_activity import use_agent_activity
 from use_skill_activity import use_skill_activity
 import think_activity
 from config import (
-    BROWSER_RETRY_POLICY, DESKTOP_BROWSER_TASK_QUEUE, DESKTOP_TASK_TIMEOUT,
+    BROWSER_RETRY_POLICY, DESKTOP_BROWSER_TASK_QUEUE, DESKTOP_TASK_TIMEOUT, desktop_task_queue,
     DESKTOP_JOB_HEARTBEAT_TIMEOUT, GRAPH_START_TO_CLOSE, GRAPH_HEARTBEAT_TIMEOUT,
     GRAPH_RETRY_POLICY, MCP_START_TO_CLOSE, MODEL_HEARTBEAT, MODEL_RETRY_POLICY,
     PYTHON_REPL_START_TO_CLOSE, PYTHON_REPL_HEARTBEAT_TIMEOUT, PYTHON_REPL_RETRY_POLICY,
@@ -52,6 +52,30 @@ _DESKTOP_ACTIVITY_OPTIONS = dict(
     retry_policy=BROWSER_RETRY_POLICY,
     cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
 )
+
+
+def desktop_activity_options(session_id: str) -> dict[str, Any]:
+    """``_DESKTOP_ACTIVITY_OPTIONS`` routed to the session's own desktop queue."""
+    return dict(
+        task_queue=desktop_task_queue(session_id),
+        start_to_close_timeout=DESKTOP_TASK_TIMEOUT,
+        heartbeat_timeout=DESKTOP_JOB_HEARTBEAT_TIMEOUT,
+        retry_policy=BROWSER_RETRY_POLICY,
+        cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+    )
+
+
+DESKTOP_TOOL_NAMES = frozenset(
+    {"browser", *(activity.__name__ for activity in COMPUTER_USE_ACTIVITIES)}
+)
+
+
+def desktop_tools(session_id: str) -> tuple[Any, ...]:
+    """Browser + computer-use tools bound to the session's desktop container."""
+    return (
+        activity_as_tool(browser_activity, **desktop_activity_options(session_id)),
+        *(activity_as_tool(action, **desktop_activity_options(session_id)) for action in COMPUTER_USE_ACTIVITIES),
+    )
 _PYTHON_REPL_ACTIVITY_OPTIONS = dict(
     start_to_close_timeout=PYTHON_REPL_START_TO_CLOSE,
     heartbeat_timeout=PYTHON_REPL_HEARTBEAT_TIMEOUT,

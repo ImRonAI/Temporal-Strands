@@ -27,9 +27,10 @@ while (Date.now() < deadline) {
     if (health.status !== "ok") missing.push("healthy API")
     if (!Array.isArray(health.models) || !health.models.length) missing.push("model catalog")
     const { stdout } = await exec("docker", [
-      "--context", context, "inspect", "--format", "{{.State.Health.Status}}", "gwen-desktop",
+      "--context", context, "ps", "--filter", "label=io.gwen.desktop.pool=idle",
+      "--filter", "health=healthy", "--format", "{{.Names}}",
     ], { timeout: Math.min(5_000, Math.max(1, deadline - Date.now())) })
-    if (stdout.trim() !== "healthy") missing.push(`desktop container (${stdout.trim()})`)
+    if (!stdout.trim()) missing.push("warm desktop container")
     if (!missing.length) {
       console.log(`[startup] Backend, ${health.models.length} models, and Linux desktop ready. Starting http://localhost:3001`)
       process.exit(0)

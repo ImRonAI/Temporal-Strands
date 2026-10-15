@@ -73,18 +73,20 @@ from config import (
     CATALOG_CACHE_TTL,
     CATALOG_WORKFLOW_TIMEOUT,
     DEFAULT_MODEL_ID,
-    DESKTOP_BROWSER_TASK_QUEUE,
     DESKTOP_VNC_GRANT_COMMAND,
     DESKTOP_VNC_COMMAND_TIMEOUT,
     DESKTOP_HANDOFF_TIMEOUT,
+    DESKTOP_PROVISION_TIMEOUT,
     HANDOFF_ROLLOVER_RETRY_BACKOFF,
     PROVIDER_DISPLAY_NAMES,
     READINESS_POLLER_CACHE,
     READINESS_POLLER_RPC_TIMEOUT,
     SERVER_HTTP_TIMEOUT,
     TASK_QUEUE,
+    desktop_container_name,
+    desktop_task_queue,
 )
-from browser_activity import artifact_root
+from desktop_provision_activity import container_artifact_dir
 from load_tool import _SESSION_TOOLS, discover_tools_activity
 from skills_config import discovered_skills
 from run_worker import agent_identity, assemble_model_factories
@@ -128,45 +130,49 @@ _state: dict[str, Any] = {"client": None, "system_prompt": ""}
 
 
 _poller_cache: dict[str, Any] = {"checked_at": 0.0, "ok": False}
-_desktop_poller_cache: dict[str, Any] = {"checked_at": 0.0, "ok": False}
 
 
-async def task_queue_has_pollers(*, desktop: bool = False) -> bool:
-    """Cached DescribeTaskQueue probe for workflow or desktop activity pollers.
+async def _queue_has_pollers(queue: str, *, activity_queue: bool) -> bool:
+    client = _state["client"]
+    if client is None:
+        return False
+    try:
+        from temporalio.api.taskqueue.v1 import TaskQueue
+        from temporalio.api.enums.v1 import TaskQueueType
+        from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
+
+        response = await asyncio.wait_for(
+            client.workflow_service.describe_task_queue(
+                DescribeTaskQueueRequest(
+                    namespace=client.namespace,
+                    task_queue=TaskQueue(name=queue),
+                    task_queue_type=(TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY if activity_queue
+                                     else TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW),
+                )
+            ),
+            timeout=READINESS_POLLER_RPC_TIMEOUT.total_seconds(),
+        )
+        return len(response.pollers) > 0
+    except Exception as error:  # noqa: BLE001 - fail closed, never crash
+        logger.warning("task-queue poller probe failed for %r: %s", queue, error)
+        return False
+
+
+async def task_queue_has_pollers(*, desktop: str | None = None) -> bool:
+    """DescribeTaskQueue probe for the host worker, or a session's desktop worker.
 
     Fail closed: no Temporal client, an RPC error, or a slow RPC all report
-    False. Cached for READINESS_POLLER_CACHE so health/session gating stays
-    cheap under load.
+    False. The host probe is cached for READINESS_POLLER_CACHE so health and
+    session gating stay cheap; a desktop probe names the session and is live.
     """
+    if desktop is not None:
+        return await _queue_has_pollers(desktop_task_queue(desktop), activity_queue=True)
     now = time.monotonic()
-    cache = _desktop_poller_cache if desktop else _poller_cache
-    if now - cache["checked_at"] < READINESS_POLLER_CACHE.total_seconds():
-        return bool(cache["ok"])
-    client = _state["client"]
-    ok = False
-    if client is not None:
-        try:
-            from temporalio.api.taskqueue.v1 import TaskQueue
-            from temporalio.api.enums.v1 import TaskQueueType
-            from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
-
-            response = await asyncio.wait_for(
-                client.workflow_service.describe_task_queue(
-                    DescribeTaskQueueRequest(
-                        namespace=client.namespace,
-                        task_queue=TaskQueue(name=DESKTOP_BROWSER_TASK_QUEUE if desktop else TASK_QUEUE),
-                        task_queue_type=(TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY if desktop
-                                         else TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW),
-                    )
-                ),
-                timeout=READINESS_POLLER_RPC_TIMEOUT.total_seconds(),
-            )
-            ok = len(response.pollers) > 0
-        except Exception as error:  # noqa: BLE001 - fail closed, never crash
-            logger.warning("task-queue poller probe failed: %s", error)
-            ok = False
-    cache["checked_at"] = now
-    cache["ok"] = ok
+    if now - _poller_cache["checked_at"] < READINESS_POLLER_CACHE.total_seconds():
+        return bool(_poller_cache["ok"])
+    ok = await _queue_has_pollers(TASK_QUEUE, activity_queue=False)
+    _poller_cache["checked_at"] = now
+    _poller_cache["ok"] = ok
     return ok
 
 
@@ -371,10 +377,9 @@ async def health() -> dict[str, Any]:
     """
     temporal_ok = _state["client"] is not None
     pollers_ok = await task_queue_has_pollers()
-    # The Linux desktop worker is a separate poller on its own queue. It does
-    # not gate chat readiness (status stays "ok" without it) but the UI and
-    # startup scripts need to know whether browser/computer-use can execute.
-    desktop_ok = await task_queue_has_pollers(desktop=True)
+    # Desktops are per-session containers claimed from a warm pool, so the
+    # readiness signal here is "the image exists"; the startup script checks it.
+    desktop_ok = True
     models = await model_catalog()
     default_model = None
     if models:
@@ -453,7 +458,7 @@ async def start_session(body: StartSession) -> dict[str, str]:
 
     client = temporal()
     session_id = f"chat-{os.urandom(8).hex()}"
-    await client.start_workflow(
+    handle = await client.start_workflow(
         ChatWorkflow.run,
         ChatInput(
             model_id=body.model_id,
@@ -462,7 +467,9 @@ async def start_session(body: StartSession) -> dict[str, str]:
         id=session_id,
         task_queue=TASK_QUEUE,
     )
-    return {"session_id": session_id}
+    # Resolves as soon as the workflow has claimed its warm desktop.
+    desktop = await handle.execute_update(ChatWorkflow.desktop, rpc_timeout=DESKTOP_PROVISION_TIMEOUT)
+    return {"session_id": session_id, "desktop_url": desktop["novnc_url"]}
 
 
 @app.post("/sessions/{session_id}/turns/stream")
@@ -707,8 +714,9 @@ async def _vnc_input(command: str, expected_answer: str | tuple[str, ...], *, ve
 def _desktop_mode(session_id: str) -> dict:
     # Read the atomically replaced file only. Host locks do not synchronize with
     # Linux flock on Colima, and even a read-only desktop_state context writes.
+    runtime = container_artifact_dir(desktop_container_name(session_id)) / "runtime.json"
     try:
-        fd = os.open(artifact_root() / "runtime.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        fd = os.open(runtime, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, "rb") as source:
             if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
                 raise ValueError("Desktop state must be a regular file")
@@ -722,7 +730,9 @@ def _desktop_mode(session_id: str) -> dict:
             raise ValueError("Invalid desktop state")
     except (OSError, ValueError) as error:
         raise HTTPException(503, "Desktop unavailable or invalid state") from error
-    if state.get("owner") != {"namespace": temporal().namespace, "workflow_id": session_id}:
+    # The container is the session's own; before its first action the worker
+    # has not recorded an owner yet, and that is still this session's desktop.
+    if state.get("owner") not in (None, {"namespace": temporal().namespace, "workflow_id": session_id}):
         raise HTTPException(409, "This chat does not own the desktop")
     return state
 
@@ -732,9 +742,9 @@ async def desktop_control_status(session_id: str, response: Response) -> dict:
     response.headers["Cache-Control"] = "no-store"
     state = await asyncio.to_thread(_desktop_mode, session_id)
     workflow_state = {"run_id": None, "ready": False}
-    runtime_available = await task_queue_has_pollers(desktop=True)
+    runtime_available = await task_queue_has_pollers(desktop=session_id)
     try:
-        command = shlex.split(DESKTOP_VNC_GRANT_COMMAND)
+        command = shlex.split(DESKTOP_VNC_GRANT_COMMAND.format(container=desktop_container_name(session_id)))
         command = command[:command.index("-R")] + ["-Q", "viewonly,deny"]
         # Pollers may linger after worker loss; require a fresh native receipt too.
         await _vnc_input(
@@ -780,6 +790,7 @@ async def desktop_image(session_id: str, artifact_id: str) -> Response:
     try:
         image = await asyncio.to_thread(
             observation_image, artifact_id, namespace=temporal().namespace, workflow_id=session_id,
+            root=container_artifact_dir(desktop_container_name(session_id)),
         )
     except (ValueError, KeyError, OSError, StateConflict) as error:
         raise HTTPException(404, "Desktop observation unavailable") from error

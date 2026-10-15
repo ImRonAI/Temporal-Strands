@@ -257,7 +257,7 @@ def test_native_input_and_browser_errors_fence_following_actions(desktop, action
     desktop.capture.assert_not_called()
     with browser.desktop_state() as state:
         assert state["mode"] == "recovery"
-    with pytest.raises(ApplicationError, match="owned, paused, or requires recovery"):
+    with pytest.raises(ApplicationError, match="paused for human control or requires recovery"):
         cua.execute_computer_use("click", {})
     target.assert_called_once()
 

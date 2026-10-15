@@ -55,12 +55,19 @@ class ObservationRef(BaseModel):
         return self
 
 
+def default_artifact_root() -> Path:
+    """DESKTOP_ARTIFACT_ROOT: inside a desktop container, that session's bind mount."""
+    return Path(os.environ.get("DESKTOP_ARTIFACT_ROOT", str(Path(tempfile.gettempdir()) / "kilo" / "gwen-desktop-artifacts")))
+
+
 @contextmanager
-def _artifact_directory(namespace: str, workflow_id: str, *, create: bool = False) -> Iterator[tuple[int, int]]:
+def _artifact_directory(
+    namespace: str, workflow_id: str, *, create: bool = False, root: Path | None = None,
+) -> Iterator[tuple[int, int]]:
     if any(not isinstance(value, str) or not value or "\0" in value for value in (namespace, workflow_id)):
         raise ValueError("Observation requires a namespace and workflow ID")
     scope = hashlib.sha256(f"{namespace}\0{workflow_id}".encode()).hexdigest()
-    root = Path(os.environ.get("DESKTOP_ARTIFACT_ROOT", str(Path(tempfile.gettempdir()) / "kilo" / "gwen-desktop-artifacts")))
+    root = root or default_artifact_root()
     if create:
         root.mkdir(mode=0o700, exist_ok=True)
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -167,15 +174,21 @@ def store_observation(
     return ref
 
 
-def resolve_observation(ref: ObservationRef, *, namespace: str, workflow_id: str, for_display: bool = False) -> bytes:
-    """Read exact stored pixels only after scope, runtime and integrity checks."""
+def resolve_observation(
+    ref: ObservationRef, *, namespace: str, workflow_id: str, for_display: bool = False, root: Path | None = None,
+) -> bytes:
+    """Read exact stored pixels only after scope, runtime and integrity checks.
+
+    ``root`` is the session desktop's artifact directory; host callers pass the
+    per-session container directory, the desktop worker uses its own mount.
+    """
     ref = ObservationRef.model_validate(ref.model_dump())
     artifact = UUID(ref.artifact_id)
     if artifact.version != 4 or str(artifact) != ref.artifact_id:
         raise ValueError("Observation artifact must be a canonical UUID4")
     _check_image_size(ref.width, ref.height)
-    with _artifact_directory(namespace, workflow_id) as (root, directory):
-        runtime = _check_runtime(root, ref, namespace, workflow_id, for_display=for_display)
+    with _artifact_directory(namespace, workflow_id, root=root) as (root_fd, directory):
+        runtime = _check_runtime(root_fd, ref, namespace, workflow_id, for_display=for_display)
         manifest = json.loads(_read_artifact(directory, f"{ref.artifact_id}.json", 16_384))
         if manifest != {
             "namespace": namespace, "workflow_id": workflow_id, "observation": ref.model_dump(mode="json"),
@@ -191,22 +204,22 @@ def resolve_observation(ref: ObservationRef, *, namespace: str, workflow_id: str
             image.verify()
         with Image.open(io.BytesIO(data)) as image:
             image.load()
-        if _check_runtime(root, ref, namespace, workflow_id, for_display=for_display) != runtime:
+        if _check_runtime(root_fd, ref, namespace, workflow_id, for_display=for_display) != runtime:
             raise StateConflict("Desktop runtime changed while resolving observation")
         return data
 
 
-def observation_image(artifact_id: str, *, namespace: str, workflow_id: str) -> bytes:
+def observation_image(artifact_id: str, *, namespace: str, workflow_id: str, root: Path | None = None) -> bytes:
     """Display immutable evidence from this owner's history, not fresh model input."""
     artifact = UUID(artifact_id)
     if artifact.version != 4 or str(artifact) != artifact_id:
         raise ValueError("Observation artifact must be a canonical UUID4")
-    with _artifact_directory(namespace, workflow_id) as (_, directory):
+    with _artifact_directory(namespace, workflow_id, root=root) as (_, directory):
         manifest = json.loads(_read_artifact(directory, f"{artifact_id}.json", 16_384))
     ref = ObservationRef.model_validate(manifest["observation"])
     if ref.artifact_id != artifact_id:
         raise ValueError("Observation artifact does not match manifest")
-    return resolve_observation(ref, namespace=namespace, workflow_id=workflow_id, for_display=True)
+    return resolve_observation(ref, namespace=namespace, workflow_id=workflow_id, for_display=True, root=root)
 
 
 def latest_observation(messages: list[dict[str, Any]]) -> tuple[str, str, ObservationRef] | None:

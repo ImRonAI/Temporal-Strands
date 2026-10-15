@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { DynamicToolUIPart } from "ai"
+import type { DynamicToolUIPart, UIMessage } from "ai"
 
 import {
   COMPUTER_USE_TOOL_NAMES, DESKTOP_FRAMEBUFFER, DESKTOP_NOVNC_URL, computerUseFailed,
@@ -91,6 +91,17 @@ describe("computerUsePreview", () => {
     expect(computerUsePreview([part], true)).toMatchObject({
       open: true, url: "https://example.test", action: "navigate", livePreviewUrl: DESKTOP_NOVNC_URL, viewerType: "novnc",
     })
+  })
+
+  it("points the viewer at the session's own desktop from the data-session part", () => {
+    const session = { type: "data-session", id: "session", data: {
+      sessionId: "chat-1", desktopUrl: "http://localhost:51234/vnc.html?autoconnect=true",
+    } } as unknown as UIMessage["parts"][number]
+    const part: DynamicToolUIPart = { type: "dynamic-tool", toolName: "navigate", toolCallId: "cu-1",
+      state: "input-available", input: { url: "https://example.test" } }
+    expect(computerUsePreview([session, part], true).livePreviewUrl).toBe("http://localhost:51234/vnc.html?autoconnect=true")
+    // Histories recorded before per-session desktops keep the static viewer.
+    expect(computerUsePreview([part], true).livePreviewUrl).toBe(DESKTOP_NOVNC_URL)
   })
 
   it("keeps the viewer and most recent page between actions and after streaming", () => {

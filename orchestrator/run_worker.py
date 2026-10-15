@@ -82,6 +82,7 @@ from dream_workflow import DreamWorkflow
 from gemini_model import GeminiModel
 from perplexity_model import PRESET_PREFIX, PerplexityModel
 import computer_use_activity
+from desktop_provision_activity import DESKTOP_PROVISION_ACTIVITIES
 import subagent_support
 from graph_activity import graph_activity
 from graph_tool import configure_models
@@ -426,6 +427,9 @@ WORKER_ACTIVITIES = [
         run_loaded_tool,
         python_repl_activity.python_repl,
         think_activity.think,
+        # Per-session desktop containers are claimed/released from the host via
+        # the docker CLI; the activities inside them stay on the desktop worker.
+        *DESKTOP_PROVISION_ACTIVITIES,
 ]
 
 

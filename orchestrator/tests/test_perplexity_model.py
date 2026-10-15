@@ -217,16 +217,21 @@ async def collect(model: PerplexityModel, messages=None, **kwargs) -> list[dict[
 
 @pytest.fixture
 def desktop_image(tmp_path, monkeypatch):
-    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(tmp_path))
-    (tmp_path / "runtime.json").write_text(json.dumps({
+    # The model activity runs on the host, where each session's desktop has its
+    # own artifact directory; the desktop worker wrote there under its mount.
+    desktop = tmp_path / "gwen-desktop-chat-1"
+    desktop.mkdir()
+    (desktop / "runtime.json").write_text(json.dumps({
         "epoch": 7, "owner": {"namespace": "test", "workflow_id": "chat-1"}, "mode": "agent",
     }))
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(desktop))
     ref = store_observation(
         Image.new("RGB", (16, 12), "blue"), namespace="test", workflow_id="chat-1",
         operation_id="capture-1", desktop_epoch=7,
     )
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(tmp_path))
     monkeypatch.setattr(perplexity_model.activity, "info", lambda: SimpleNamespace(namespace="test", workflow_id="chat-1"))
-    return ref, resolve_observation(ref, namespace="test", workflow_id="chat-1")
+    return ref, resolve_observation(ref, namespace="test", workflow_id="chat-1", root=desktop)
 
 
 def desktop_messages(ref, name="take_screenshot"):

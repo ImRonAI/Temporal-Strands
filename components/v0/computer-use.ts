@@ -195,6 +195,15 @@ export function computerUsePreview(
 
   let latest: ComputerUsePreview | null = null
   let panelId = ""
+  // Each session owns its own Linux desktop; the orchestrator reports that
+  // desktop's noVNC viewer on the data-session part. The static URL is only
+  // the fallback for histories recorded before per-session desktops.
+  let viewerUrl = DESKTOP_NOVNC_URL
+  for (const part of parts) {
+    if (part.type !== "data-session") continue
+    const url = (part as { data?: { desktopUrl?: unknown } }).data?.desktopUrl
+    if (typeof url === "string" && url) viewerUrl = url
+  }
 
   for (const part of parts) {
     if (!isDynamicToolUIPart(part)) continue
@@ -206,7 +215,7 @@ export function computerUsePreview(
       open: false,
       sessionId: panelId,
       url: fields.url || previous.url,
-      livePreviewUrl: DESKTOP_NOVNC_URL,
+      livePreviewUrl: viewerUrl,
       action: fields.action,
       intent: fields.intent || previous.intent,
       observation: fields.observation ?? previous.observation,

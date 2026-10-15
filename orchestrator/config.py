@@ -33,24 +33,51 @@ class RegisteredModel:
     id: str
     provider: str
     label: str
-# Desktop browser routing: the stock strands browser activity executes only on
-# the desktop worker, which polls this queue from inside the Linux desktop
-# (Xvfb). Native Temporal task-queue routing — no custom platform code.
+# Desktop browser routing: every chat session gets its own Linux desktop
+# container, whose worker polls a session-specific task queue. The stock
+# strands browser activity and the computer-use activities execute only there.
+# Native Temporal task-queue routing — one queue per desktop, no shared lock.
 DESKTOP_BROWSER_TASK_QUEUE = "desktop-browser"
+
+
+def desktop_task_queue(session_id: str) -> str:
+    """The task queue the desktop container provisioned for ``session_id`` polls."""
+    return f"{DESKTOP_BROWSER_TASK_QUEUE}-{session_id}"
+
+
+def desktop_container_name(session_id: str) -> str:
+    return f"gwen-desktop-{session_id}"
+
+
+# Host-side provisioning of per-session desktop containers (host worker only).
+DESKTOP_DOCKER_CONTEXT = os.environ.get("DESKTOP_DOCKER_CONTEXT", "colima")
+DESKTOP_IMAGE = os.environ.get("DESKTOP_IMAGE", "gwen-desktop:native")
+# Address the container's worker dials for Temporal (Colima's host alias).
+DESKTOP_TEMPORAL_ADDRESS = os.environ.get("DESKTOP_TEMPORAL_ADDRESS", "host.lima.internal:7233")
+# Browser-reachable host for the per-session noVNC port the container binds.
+DESKTOP_NOVNC_HOST = os.environ.get("DESKTOP_NOVNC_HOST", "localhost")
+# Container start + health gate (Xvfb, XFCE, Chromium readiness check, worker poll).
+DESKTOP_PROVISION_TIMEOUT = timedelta(seconds=90)
+DESKTOP_PROVISION_HEARTBEAT = timedelta(seconds=30)
+DESKTOP_PROVISION_RETRY_POLICY = RetryPolicy(maximum_attempts=2)
+DESKTOP_TEARDOWN_TIMEOUT = timedelta(seconds=30)
+DESKTOP_HEALTH_POLL_INTERVAL = timedelta(seconds=1)
+# Idle pool container: how often its worker checks for a session claim.
+DESKTOP_QUEUE_POLL_INTERVAL = timedelta(milliseconds=250)
+# Warm desktops kept ready by the host pool keeper.
+DESKTOP_POOL_SIZE = int(os.environ.get("DESKTOP_POOL_SIZE", "1"))
+DESKTOP_POOL_REFILL_INTERVAL = timedelta(seconds=3)
 # Deployment command prefix retained for the API's read-only native VNC probe.
 # Control transfers execute only inside the desktop worker, never on the host.
 # x11vnc remote control multiplexes every -R/-Q through one X property
 # (X11VNC_REMOTE); a concurrent probe clobbers a transfer's receipt. The probe
 # therefore takes the worker's handoff.lock (flock(2), same Linux kernel) via
 # util-linux flock inside the container, bounded below the command timeout.
+# ``{container}`` is the session's container name.
 DESKTOP_VNC_GRANT_COMMAND = os.environ.get(
     "DESKTOP_VNC_GRANT_COMMAND",
-    "docker --context colima exec gwen-desktop flock -w 10 /var/lib/gwen-desktop-artifacts/handoff.lock "
+    "docker --context " + DESKTOP_DOCKER_CONTEXT + " exec {container} flock -w 10 /var/lib/gwen-desktop-artifacts/handoff.lock "
     "x11vnc -display :99 -R script:noviewonly;nodeny -Q viewonly,deny",
-)
-DESKTOP_VNC_REVOKE_COMMAND = os.environ.get(
-    "DESKTOP_VNC_REVOKE_COMMAND",
-    "docker --context colima exec gwen-desktop x11vnc -display :99 -R script:viewonly;deny;disconnect:all;clear_all;fakebuttonevent:1,0;fakebuttonevent:2,0;fakebuttonevent:3,0 -Q viewonly,client_count,pointer_mask",
 )
 DESKTOP_VNC_REVOKE_SCRIPT = "script:viewonly;deny;disconnect:all;clear_all;fakebuttonevent:1,0;fakebuttonevent:2,0;fakebuttonevent:3,0"
 DESKTOP_VNC_GRANT_SCRIPT = "script:nodeny;noviewonly"

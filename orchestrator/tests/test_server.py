@@ -55,6 +55,16 @@ def seed_catalog(
     return fetch
 
 
+def _desktop_handle():
+    """A started-workflow handle whose ``desktop`` update reports a claimed container."""
+    handle = MagicMock()
+    handle.execute_update = AsyncMock(return_value={
+        "container": "gwen-desktop-chat-1", "queue": "desktop-browser-chat-1",
+        "novnc_url": "http://localhost:51234/vnc.html?autoconnect=true",
+    })
+    return handle
+
+
 @pytest.fixture(autouse=True)
 def _clear_catalog_cache() -> Any:
     yield
@@ -451,13 +461,14 @@ def test_health_lists_provider_catalog(
         "default_model",
     }
     assert "model_ids" not in body
-    # The desktop worker is reported separately and never gates chat readiness.
+    # Desktops are per-session containers claimed on first use; health only
+    # reports the host worker and never probes a desktop queue.
     assert body["status"] == "ok"
     assert body["temporal"] is True
     assert body["worker"] is True
     assert body["pollers"] is True
-    assert body["desktop"] is False
-    assert pollers.await_args_list == [call(), call(desktop=True)]
+    assert body["desktop"] is True
+    assert pollers.await_args_list == [call()]
     assert body["models"] == [
         {
             "id": "preset:high",
@@ -537,7 +548,7 @@ def test_failed_refresh_serves_last_known_catalog_while_worker_polls(
     fetch = seed_catalog(monkeypatch, [_MODEL_A])
     monkeypatch.setattr(server, "task_queue_has_pollers", AsyncMock(return_value=True))
     temporal_client = MagicMock()
-    temporal_client.start_workflow = AsyncMock()
+    temporal_client.start_workflow = AsyncMock(return_value=_desktop_handle())
     monkeypatch.setitem(server._state, "client", temporal_client)
 
     assert client.get("/health").json()["models"] == [_MODEL_A]
@@ -593,7 +604,7 @@ def test_start_session_refreshes_catalog_once_on_miss(
     fetch = seed_catalog(monkeypatch, [_MODEL_A])
     monkeypatch.setattr(server, "task_queue_has_pollers", AsyncMock(return_value=True))
     temporal_client = MagicMock()
-    temporal_client.start_workflow = AsyncMock()
+    temporal_client.start_workflow = AsyncMock(return_value=_desktop_handle())
     monkeypatch.setitem(server._state, "client", temporal_client)
 
     # Prime the cache with the stale single-model catalog.

@@ -50,6 +50,8 @@ from config import (
     VISION_INCAPABLE_MODELS, VISION_PROXY_EFFORT, VISION_PROXY_MAX_OUTPUT_TOKENS, VISION_PROXY_MODEL,
 )
 from desktop_observation import latest_observation, resolve_observation
+from desktop_provision_activity import container_artifact_dir
+from config import desktop_container_name
 from workspace_state import StateConflict
 
 logger = logging.getLogger(__name__)
@@ -602,6 +604,7 @@ class PerplexityModel(OpenAIResponsesModel):
                         raise ValueError("Desktop observation requires a workflow identity")
                     png = await asyncio.to_thread(
                         resolve_observation, ref, namespace=info.namespace, workflow_id=info.workflow_id,
+                        root=container_artifact_dir(desktop_container_name(info.workflow_id)),
                     )
             except (OSError, ValueError, StateConflict, RuntimeError) as error:
                 raise _error("Desktop observation unavailable; obtain a fresh screenshot", non_retryable=True) from error

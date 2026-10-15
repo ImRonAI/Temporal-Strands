@@ -481,13 +481,14 @@ tools = [],
               `Orchestrator unreachable (${startRes.status}). Is the worker + Temporal dev server running? See orchestrator/README.md.`
             )
           }
-          const started = (await startRes.json()) as { session_id: string }
+          const started = (await startRes.json()) as { session_id: string; desktop_url?: string }
           activeSessionId = started.session_id
-          // Tell the client which session to reuse on the next turn.
+          // Tell the client which session to reuse on the next turn, and where
+          // that session's own Linux desktop (noVNC) is served from.
           writer.write({
             type: "data-session",
             id: "session",
-            data: { sessionId: activeSessionId },
+            data: { sessionId: activeSessionId, desktopUrl: started.desktop_url },
           })
         }
 

@@ -86,11 +86,12 @@ def desktop_state():
 
 
 def initialize_desktop() -> None:
+    """Fresh desktop: one container serves one session, so it starts unowned."""
     if platform.system() != "Linux" or not os.environ.get("DISPLAY"):
         raise RuntimeError("Desktop activities require the isolated Linux X display")
     with desktop_state() as state:
-        owner = state.get("owner")
-        state.update(epoch=time.time_ns(), owner=owner, mode="recovery" if owner else "agent")
+        state.clear()
+        state.update(epoch=time.time_ns(), owner=None, mode="agent")
 
 
 @contextmanager
@@ -141,9 +142,11 @@ def desktop_action():
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise ApplicationError("Desktop action already in flight", non_retryable=True) from error
+        # The container is this session's alone; the only fence is the human
+        # handoff mode. ``owner`` records the session for the status endpoint.
         with desktop_state() as state:
-            if state.get("mode") != "agent" or state.get("owner") not in (None, owner):
-                raise ApplicationError("Desktop is owned, paused, or requires recovery", non_retryable=True)
+            if state.get("mode") != "agent":
+                raise ApplicationError("Desktop is paused for human control or requires recovery", non_retryable=True)
             state["owner"] = owner
             epoch = state["epoch"]
         try:

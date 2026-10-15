@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from temporalio import activity
 from temporalio.client import WorkflowUpdateFailedError
 from temporalio.contrib.strands import StrandsPlugin
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
@@ -16,7 +17,7 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from browser_activity import desktop_control
-from config import DEFAULT_MODEL_ID, DESKTOP_BROWSER_TASK_QUEUE, MODEL_START_TO_CLOSE
+from config import DEFAULT_MODEL_ID, MODEL_START_TO_CLOSE, desktop_container_name, desktop_task_queue
 from load_tool import load_tool_activity
 from workflow import ChatInput, ChatWorkflow
 
@@ -87,12 +88,26 @@ async def test_handoff_reaches_real_desktop_activity_and_preserves_rejection() -
         ) as env:
             server._state["client"] = env.client
             queue = f"handoff-proof-{uuid4().hex}"
+            # Per-session desktops: the host claims a container for this
+            # session, then every desktop update dispatches to that session's
+            # own queue. Docker is not part of this proof; the claim is stubbed
+            # with the real activity name and result shape.
+            @activity.defn(name="provision_desktop")
+            async def claimed_desktop(session_id: str) -> dict[str, str]:
+                return {"container": desktop_container_name(session_id),
+                        "queue": desktop_task_queue(session_id), "novnc_url": "http://viewer.test/vnc.html"}
+
+            @activity.defn(name="teardown_desktop")
+            async def released_desktop(session_id: str) -> None:
+                return None
+
             with ThreadPoolExecutor(max_workers=2) as executor:
                 async with Worker(
                     env.client, task_queue=queue, workflows=[ChatWorkflow],
-                    activities=[load_tool_activity], workflow_runner=UnsandboxedWorkflowRunner(),
+                    activities=[load_tool_activity, claimed_desktop, released_desktop],
+                    workflow_runner=UnsandboxedWorkflowRunner(),
                 ), Worker(
-                    env.client, task_queue=DESKTOP_BROWSER_TASK_QUEUE,
+                    env.client, task_queue=desktop_task_queue(queue),
                     activities=[desktop_control], activity_executor=executor,
                 ):
                     handle = await env.client.start_workflow(
@@ -125,13 +140,13 @@ async def test_handoff_reaches_real_desktop_activity_and_preserves_rejection() -
                              if event.HasField("activity_task_scheduled_event_attributes")
                              and event.activity_task_scheduled_event_attributes.activity_type.name == "desktop_control"]
                     assert len(calls) == 3
-                    assert all(call.task_queue.name == DESKTOP_BROWSER_TASK_QUEUE for call in calls)
+                    assert all(call.task_queue.name == desktop_task_queue(queue) for call in calls)
                     actions = [json.loads(call.input.payloads[0].data) for call in calls]
                     assert actions == ["take", "release", "prepare_resume"]
                     (EVIDENCE / "handoff-history.json").write_text(history.to_json())
                     (EVIDENCE / "handoff-result.json").write_text(json.dumps({
                         "responses": observed, "activity_actions": actions,
-                        "task_queue": DESKTOP_BROWSER_TASK_QUEUE,
+                        "task_queue": desktop_task_queue(queue),
                     }, indent=2))
     finally:
         server._state["client"] = previous_client

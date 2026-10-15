@@ -127,32 +127,29 @@ if [[ -n "$PORTS" && -f "$lock" ]]; then
   fi
 fi
 
-# The desktop worker is the same failure in a container. `run-desktop.sh`
-# starts `docker run --rm --name gwen-desktop`; if `dev:all` is killed rather
-# than shut down, docker is orphaned, the container keeps polling the
-# desktop-browser queue with old code and holds :6080, and the next startup
-# refuses the taken name (run-desktop.sh deliberately never stops or removes
-# anything). Only this exact project container name is touched, in the same
-# Docker context run-desktop.sh uses. Docker being absent is not an error.
+# Desktops are per-session containers (gwen-desktop-<session>) plus warm idle
+# ones (gwen-desktop-idle-*), all started with --rm by the host worker / pool
+# keeper. If `dev:all` is killed rather than shut down they are orphaned and
+# keep polling with old code, so stop every container carrying this project's
+# name prefix, in the same Docker context the orchestrator uses. Docker being
+# absent is not an error.
 export PATH="$PATH:/Applications/Docker.app/Contents/Resources/bin"
-DESKTOP_CONTAINER="gwen-desktop"
+DESKTOP_CONTAINER_PREFIX="gwen-desktop-"
 DESKTOP_CONTEXT="${DESKTOP_DOCKER_CONTEXT:-colima}"
 
 if command -v docker >/dev/null 2>&1 && docker --context "$DESKTOP_CONTEXT" info >/dev/null 2>&1; then
-  state=$(docker --context "$DESKTOP_CONTEXT" container inspect --format '{{.State.Status}}' "$DESKTOP_CONTAINER" 2>/dev/null || true)
-  if [ -n "$state" ]; then
-    echo "  desktop container $DESKTOP_CONTAINER ($state) -> stopping"
+  containers=$(docker --context "$DESKTOP_CONTEXT" ps -a --filter "name=^${DESKTOP_CONTAINER_PREFIX}" --format '{{.Names}}' 2>/dev/null || true)
+  for container in $containers; do
+    echo "  desktop container $container -> stopping"
     # TERM reaches start-desktop.sh through tini; its cleanup is bounded at
     # ~10s, so allow that before Docker escalates to KILL.
-    docker --context "$DESKTOP_CONTEXT" stop -t 15 "$DESKTOP_CONTAINER" >/dev/null 2>&1 || true
-    # `--rm` removes it on stop; a container created without --rm (or one
-    # that was already exited) still needs removing so the name is free.
-    docker --context "$DESKTOP_CONTEXT" rm -f "$DESKTOP_CONTAINER" >/dev/null 2>&1 || true
-    if docker --context "$DESKTOP_CONTEXT" container inspect "$DESKTOP_CONTAINER" >/dev/null 2>&1; then
-      echo "  ERROR: $DESKTOP_CONTAINER still exists in context $DESKTOP_CONTEXT; cannot safely restart" >&2
+    docker --context "$DESKTOP_CONTEXT" stop -t 15 "$container" >/dev/null 2>&1 || true
+    docker --context "$DESKTOP_CONTEXT" rm -f "$container" >/dev/null 2>&1 || true
+    if docker --context "$DESKTOP_CONTEXT" container inspect "$container" >/dev/null 2>&1; then
+      echo "  ERROR: $container still exists in context $DESKTOP_CONTEXT; cannot safely restart" >&2
       exit 1
     fi
-  fi
+  done
 fi
 
 for port in $PORTS; do

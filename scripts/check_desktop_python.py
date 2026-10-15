@@ -267,6 +267,8 @@ def check(files: dict[str, str]) -> list[dict]:
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         symbols[(path, target.id)] = node.value
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                symbols[(path, node.name)] = node
         imports[path] = aliases
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
@@ -311,6 +313,14 @@ def check(files: dict[str, str]) -> list[dict]:
     def options(node, path):
         node = resolve(node, path)
         result = {}
+        # A call to a module-level helper returning dict(...) is read through
+        # to that literal (desktop_activity_options(session_id) in agent_tools).
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id != "dict":
+            helper = symbols.get((path, node.func.id))
+            if isinstance(helper, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                returns = [n.value for n in ast.walk(helper) if isinstance(n, ast.Return) and n.value is not None]
+                if len(returns) == 1:
+                    node = returns[0]
         if isinstance(node, ast.Dict):
             for key, value in zip(node.keys, node.values):
                 if key is None:
@@ -365,7 +375,11 @@ def check(files: dict[str, str]) -> list[dict]:
         for call in browser:
             args = call_options(call, binding_path)
             queue = args.get("task_queue")
-            if not isinstance(queue, ast.Constant) or queue.value != "desktop-browser":
+            # Per-session desktops: the shared-prefix constant, or the
+            # desktop_task_queue(session_id) derivation that prefixes it. Any
+            # other queue (or none, which means the host) fails the rule.
+            per_session = (isinstance(queue, ast.Call) and dotted(queue.func, {}).rsplit(".", 1)[-1] == "desktop_task_queue")
+            if not per_session and (not isinstance(queue, ast.Constant) or queue.value != "desktop-browser"):
                 report(workflow_path, call, "native-browser-routing", "Browser activity must route to the desktop-browser worker, not the host")
             retry = args.get("retry_policy")
             attempt = call_options(retry, binding_path).get("maximum_attempts") if isinstance(retry, ast.Call) else None
@@ -410,9 +424,17 @@ def check(files: dict[str, str]) -> list[dict]:
             report(desktop_path, tree, "desktop-worker", "Missing native Temporal Worker")
         for node in workers:
             opts = call_options(node, desktop_path)
-            queue = opts.get("task_queue")
-            if not isinstance(queue, ast.Constant) or queue.value != "desktop-browser" or "activity_executor" not in opts:
-                report(desktop_path, node, "desktop-worker", "Desktop worker needs the desktop-browser queue and a native executor for sync activities")
+            # Per-session desktops: the queue is assigned by the host's claim
+            # (wait_for_queue_assignment) and must be the local name it returned,
+            # never a literal shared queue or an unrelated expression. Read the
+            # raw keyword: resolve() would follow the name to a different scope.
+            raw = next((kw.value for kw in node.keywords if kw.arg == "task_queue"), None)
+            assigned = isinstance(raw, ast.Name) and any(
+                isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == raw.id for t in n.targets)
+                and any(isinstance(m, ast.Name) and m.id == "wait_for_queue_assignment" for m in ast.walk(n.value))
+                for n in ast.walk(tree))
+            if not assigned or "activity_executor" not in opts:
+                report(desktop_path, node, "desktop-worker", "Desktop worker must poll the host-assigned session queue with a native executor for sync activities")
 
     return findings
 

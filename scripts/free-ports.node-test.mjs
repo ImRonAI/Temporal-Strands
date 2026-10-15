@@ -27,21 +27,30 @@ if (process.env.MOCK_DAEMON === "down") process.exit(1)
 if (args[0] !== "--context" || args[1] !== "mock-desktop") process.exit(99)
 const command = args.slice(2)
 if (command[0] === "info") process.exit(0)
+// MOCK_STATE lists existing gwen-desktop-* container names, one per line.
+const existing = () => fs.existsSync(process.env.MOCK_STATE)
+  ? fs.readFileSync(process.env.MOCK_STATE, "utf8").split("\\n").filter(Boolean) : []
+const forget = (name) => fs.writeFileSync(process.env.MOCK_STATE, existing().filter((n) => n !== name).join("\\n"))
+if (command[0] === "ps") {
+  if (!command.includes("-a") || !command.includes("name=^gwen-desktop-")) process.exit(99)
+  console.log(existing().join("\\n"))
+  process.exit(0)
+}
 if (command[0] === "container" && command[1] === "inspect") {
-  if (command.at(-1) !== "gwen-desktop") process.exit(99)
-  if (!fs.existsSync(process.env.MOCK_STATE)) process.exit(1)
-  console.log(fs.readFileSync(process.env.MOCK_STATE, "utf8"))
+  if (!command.at(-1).startsWith("gwen-desktop-")) process.exit(99)
+  if (!existing().includes(command.at(-1))) process.exit(1)
+  console.log("exited")
   process.exit(0)
 }
 if (command[0] === "stop") {
-  if (command.at(-1) !== "gwen-desktop") process.exit(99)
-  if (process.env.MOCK_STOP_REMOVES === "yes") fs.rmSync(process.env.MOCK_STATE, { force: true })
+  if (!command.at(-1).startsWith("gwen-desktop-")) process.exit(99)
+  if (process.env.MOCK_STOP_REMOVES === "yes") forget(command.at(-1))
   process.exit(0)
 }
 if (command[0] === "rm") {
-  if (command.at(-1) !== "gwen-desktop") process.exit(99)
+  if (!command.at(-1).startsWith("gwen-desktop-")) process.exit(99)
   if (process.env.MOCK_RM_FAILS === "yes") process.exit(1)
-  fs.rmSync(process.env.MOCK_STATE, { force: true })
+  forget(command.at(-1))
   process.exit(0)
 }
 process.exit(99)
@@ -125,42 +134,42 @@ exit 1
   assert.match(result.stdout, /stopping services owned by this checkout: 987654322/)
 })
 
-test("no desktop container: inspect only, nothing stopped or removed", () => {
+test("no desktop containers: list only, nothing stopped or removed", () => {
   const result = fixture().run()
   assert.equal(result.status, 0, result.stderr)
-  assert.deepEqual(commands(result), ["info", "container"])
+  assert.deepEqual(commands(result), ["info", "ps"])
   assert.doesNotMatch(result.stdout, /desktop container/)
   assert.match(result.stdout, /ports clear/)
 })
 
-test("orphaned --rm container is stopped so run-desktop.sh can reuse the name", () => {
+test("every orphaned per-session and warm desktop container is stopped", () => {
   const f = fixture()
-  writeFileSync(f.state, "running")
+  writeFileSync(f.state, "gwen-desktop-chat-1\ngwen-desktop-idle-ab12\n")
   const result = f.run()
   assert.equal(result.status, 0, result.stderr)
-  assert.match(result.stdout, /desktop container gwen-desktop \(running\) -> stopping/)
-  assert.deepEqual(commands(result), ["info", "container", "stop", "rm", "container"])
-  const stop = result.calls[2]
-  assert.deepEqual(stop.slice(2), ["stop", "-t", "15", "gwen-desktop"])
+  assert.match(result.stdout, /desktop container gwen-desktop-chat-1 -> stopping/)
+  assert.match(result.stdout, /desktop container gwen-desktop-idle-ab12 -> stopping/)
+  assert.deepEqual(commands(result), ["info", "ps", "stop", "rm", "container", "stop", "rm", "container"])
+  assert.deepEqual(result.calls[2].slice(2), ["stop", "-t", "15", "gwen-desktop-chat-1"])
   assert.ok(result.calls.every((args) => args[0] === "--context" && args[1] === "mock-desktop"))
   assert.doesNotMatch(result.stderr, /WARNING/)
 })
 
 test("an exited container that survives stop is removed by name", () => {
   const f = fixture()
-  writeFileSync(f.state, "exited")
+  writeFileSync(f.state, "gwen-desktop-chat-1\n")
   const result = f.run({ MOCK_STOP_REMOVES: "no" })
   assert.equal(result.status, 0, result.stderr)
-  assert.deepEqual(commands(result), ["info", "container", "stop", "rm", "container"])
+  assert.deepEqual(commands(result), ["info", "ps", "stop", "rm", "container"])
   assert.doesNotMatch(result.stderr, /WARNING/)
 })
 
 test("a container that cannot be removed fails the reset instead of continuing", () => {
   const f = fixture()
-  writeFileSync(f.state, "running")
+  writeFileSync(f.state, "gwen-desktop-chat-1\n")
   const result = f.run({ MOCK_STOP_REMOVES: "no", MOCK_RM_FAILS: "yes" })
   assert.equal(result.status, 1)
-  assert.match(result.stderr, /ERROR: gwen-desktop still exists in context mock-desktop/)
+  assert.match(result.stderr, /ERROR: gwen-desktop-chat-1 still exists in context mock-desktop/)
 })
 
 test("an unreachable Docker daemon is skipped without failing the cleanup", () => {
@@ -231,10 +240,10 @@ test("unrelated listener aborts before stopping services or Docker", () => {
 
 test("concurrently teardown only removes desktop, never sweeps the new host launcher", () => {
   const f = fixture()
-  writeFileSync(f.state, "running")
+  writeFileSync(f.state, "gwen-desktop-chat-1\n")
   writeFileSync(join(f.root, "bin/lsof"), '#!/bin/bash\nprintf "987654321\\n"\n', { mode: 0o755 })
   const result = f.run({}, ["--desktop-only"])
   assert.equal(result.status, 0, result.stderr)
-  assert.deepEqual(commands(result), ["info", "container", "stop", "rm", "container"])
+  assert.deepEqual(commands(result), ["info", "ps", "stop", "rm", "container"])
   assert.doesNotMatch(result.stdout, /stopping services/)
 })

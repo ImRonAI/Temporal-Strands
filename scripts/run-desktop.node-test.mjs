@@ -9,7 +9,7 @@ const sources = [
   ".dockerignore", "desktop/Dockerfile", "desktop/requirements.txt",
   "desktop/start-desktop.sh", "desktop/seccomp.json",
   "browser_activity.py", "computer_use_activity.py", "desktop_observation.py",
-  "workspace_state.py", "desktop_worker.py", "config.py", "telemetry.py",
+  "workspace_state.py", "desktop_worker.py", "desktop_provision_activity.py", "config.py", "telemetry.py",
 ]
 const temporaryRoots = []
 afterEach(() => {
@@ -54,7 +54,7 @@ process.exit(99)
   const log = join(root, "docker.jsonl")
   const image = join(root, "image-label")
   const archive = join(root, "context.tar")
-  function run(mode = "start", overrides = {}) {
+  function run(mode = "prepare", overrides = {}) {
     writeFileSync(log, "")
     const result = spawnSync("bash", [join(root, "scripts/run-desktop.sh"), mode], {
       encoding: "utf8",
@@ -87,15 +87,18 @@ function commands(result) {
 test("pnpm exposes explicit preparation without adding a build to startup", () => {
   const { scripts } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
   assert.equal(scripts["build:desktop"], "bash scripts/run-desktop.sh build")
-  assert.match(scripts["dev:desktop"], /bash scripts\/run-desktop.sh$/)
+  // Per-session desktops: the dev service is the warm-pool keeper, which
+  // claims/starts containers from the prepared image; run-desktop.sh only
+  // builds and verifies that image now.
+  assert.match(scripts["dev:desktop"], /desktop_pool\.py$/)
   assert.doesNotMatch(scripts["dev:all"], /build:desktop/)
 })
 
-test("missing image fails clearly and never builds or runs", () => {
+test("prepare builds a missing image; nothing here ever runs a container", () => {
   const result = fixture().run()
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /image .*missing.*mock-desktop.*pnpm build:desktop/)
-  assert.deepEqual(commands(result), ["info", "image"])
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(commands(result), ["info", "image", "buildx", "build"])
+  assert.ok(!commands(result).includes("run"))
 })
 
 test("explicit build uses only the source allowlist, host UID and BuildKit when available", () => {
@@ -134,53 +137,7 @@ test("BuildKit errors fail instead of retrying with the legacy builder", () => {
   assert.equal(result.calls.at(-1).buildkit, "1")
 })
 
-test("verified startup never builds and retains isolated non-root runtime flags", () => {
-  const f = fixture()
-  assert.equal(f.run("build").status, 0)
-  writeFileSync(join(f.root, "orchestrator/not-allowlisted.txt"), "unrelated source change")
-  const result = f.run()
-  assert.equal(result.status, 0, result.stderr)
-  assert.deepEqual(commands(result), ["info", "image", "container", "run"])
-  assert.ok(result.calls.every(({ buildkit }) => buildkit === "inherited"))
-  assert.deepEqual(result.calls.at(-1).args.slice(3), [
-    "--pull=never", "--rm", "--name", "gwen-desktop", "--user", "501",
-    "--shm-size=1g", "--cap-drop=ALL", "--security-opt", "no-new-privileges",
-    "--security-opt", `seccomp=${f.root}/orchestrator/desktop/seccomp.json`,
-    "-p", "127.0.0.1:6080:6080",
-    "--mount", `type=bind,source=${f.root}/artifacts,target=/var/lib/gwen-desktop-artifacts`,
-    "-e", "DESKTOP_ARTIFACT_ROOT=/var/lib/gwen-desktop-artifacts",
-    "-e", "TEMPORAL_ADDRESS=mock-temporal:7233", "sha256:verified",
-  ])
-})
-
-test("each allowlisted dependency change blocks stale startup without building", () => {
-  const f = fixture()
-  assert.equal(f.run("build").status, 0)
-  for (const source of sources) {
-    const path = join(f.root, "orchestrator", source)
-    const original = readFileSync(path)
-    writeFileSync(path, "changed source")
-    const result = f.run()
-    assert.equal(result.status, 1, source)
-    assert.match(result.stderr, /mismatch.*pnpm build:desktop/)
-    assert.deepEqual(commands(result), ["info", "image"])
-    writeFileSync(path, original)
-  }
-})
-
-test("UID changes and unlabelled images require explicit preparation", () => {
-  const f = fixture()
-  assert.equal(f.run("build").status, 0)
-  for (const overrides of [{ MOCK_UID: "502" }, {}]) {
-    if (!overrides.MOCK_UID) writeFileSync(f.image, "<no value>")
-    const result = f.run("start", overrides)
-    assert.equal(result.status, 1)
-    assert.match(result.stderr, /pnpm build:desktop/)
-    assert.deepEqual(commands(result), ["info", "image"])
-  }
-})
-
-test("prepare rebuilds stale sources and reuses a verified image on the next start", () => {
+test("prepare rebuilds stale sources and reuses a verified image otherwise", () => {
   const f = fixture()
   const initial = f.run("prepare")
   assert.equal(initial.status, 0, initial.stderr)
@@ -192,24 +149,25 @@ test("prepare rebuilds stale sources and reuses a verified image on the next sta
   const rebuilt = f.run("prepare")
   assert.equal(rebuilt.status, 0, rebuilt.stderr)
   assert.ok(commands(rebuilt).includes("build"))
-  assert.equal(f.run("start").status, 0)
-})
-
-test("container name collisions fail without stopping or removing any container", () => {
-  const f = fixture()
-  assert.equal(f.run("build").status, 0)
-  const result = f.run("start", { MOCK_COLLISION: "yes" })
-  assert.equal(result.status, 1)
-  assert.match(result.stderr, /gwen-desktop is already in use.*will not stop or remove/)
-  assert.deepEqual(commands(result), ["info", "image", "container"])
 })
 
 test("root and invalid modes fail before touching Docker", () => {
   const f = fixture()
-  for (const [mode, env] of [["start", { MOCK_UID: "0" }], ["build", { MOCK_UID: "0" }], ["unknown", {}]]) {
+  for (const [mode, env] of [["prepare", { MOCK_UID: "0" }], ["build", { MOCK_UID: "0" }], ["start", {}], ["unknown", {}]]) {
     const result = f.run(mode, env)
     assert.equal(result.status, 1)
     assert.deepEqual(result.calls, [])
     assert.match(result.stderr, /non-root|Usage:/)
+  }
+})
+
+test("a UID change or unlabelled image makes prepare rebuild rather than reuse", () => {
+  const f = fixture()
+  assert.equal(f.run("build").status, 0)
+  for (const overrides of [{ MOCK_UID: "502" }, {}]) {
+    if (!overrides.MOCK_UID) writeFileSync(f.image, "<no value>")
+    const result = f.run("prepare", overrides)
+    assert.equal(result.status, 0, result.stderr)
+    assert.ok(commands(result).includes("build"))
   }
 })

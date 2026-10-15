@@ -77,21 +77,21 @@ def test_image_has_an_allowlisted_source_context_and_desktop_dependencies():
 async def test_worker_uses_native_pydantic_converter_and_single_activity_slot(monkeypatch, tmp_path, readiness_failure):
     import desktop_worker
     from computer_use_activity import COMPUTER_USE_TOOL_NAMES
-    from config import DESKTOP_BROWSER_TASK_QUEUE
+    from desktop_provision_activity import QUEUE_FILE
 
     monkeypatch.setenv("TEMPORAL_ADDRESS", "test-temporal:7233")
     monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(tmp_path))
+    # The host's provision activity has already claimed this container.
+    (tmp_path / QUEUE_FILE).write_text("desktop-browser-chat-42")
     client = object()
     connect = AsyncMock(return_value=client)
     monkeypatch.setattr(desktop_worker.Client, "connect", connect)
     monkeypatch.setattr(desktop_worker, "telemetry_plugins", lambda: [])
     verify = MagicMock(side_effect=RuntimeError("Display unavailable") if readiness_failure else None)
     initialize = MagicMock()
-    reclaim = AsyncMock(return_value=False)
     monkeypatch.setattr(desktop_worker, "verify_browser_runtime", verify)
     monkeypatch.setattr(desktop_worker, "initialize_desktop", initialize)
-    monkeypatch.setattr(desktop_worker, "reclaim_orphaned_desktop", reclaim)
-    stopped = SimpleNamespace(set=MagicMock(), wait=AsyncMock())
+    stopped = SimpleNamespace(set=MagicMock(), wait=AsyncMock(), is_set=MagicMock(return_value=False))
     monkeypatch.setattr(desktop_worker.asyncio, "Event", lambda: stopped)
     monkeypatch.setattr(asyncio.get_running_loop(), "add_signal_handler", MagicMock())
     worker = MagicMock(return_value=AsyncMock())
@@ -101,7 +101,6 @@ async def test_worker_uses_native_pydantic_converter_and_single_activity_slot(mo
         with pytest.raises(RuntimeError, match="Display unavailable"):
             await desktop_worker.main()
         initialize.assert_not_called()
-        reclaim.assert_not_awaited()
         worker.assert_not_called()
         return
 
@@ -110,12 +109,11 @@ async def test_worker_uses_native_pydantic_converter_and_single_activity_slot(mo
     connect.assert_awaited_once_with("test-temporal:7233", data_converter=pydantic_data_converter, plugins=[])
     verify.assert_called_once_with()
     initialize.assert_called_once_with()
-    # Ownership is re-evaluated after the epoch reset, before any poll.
-    reclaim.assert_awaited_once_with(client)
     worker.assert_called_once()
     assert worker.call_args.args == (client,)
     options = worker.call_args.kwargs
-    assert options["task_queue"] == DESKTOP_BROWSER_TASK_QUEUE
+    # Polls only the queue the host assigned to this session's container.
+    assert options["task_queue"] == "desktop-browser-chat-42"
     assert options["max_concurrent_activities"] == 1
     assert options["activity_executor"]._max_workers == 1
     assert {activity._Definition.must_from_callable(fn).name for fn in options["activities"]} == {
@@ -125,16 +123,17 @@ async def test_worker_uses_native_pydantic_converter_and_single_activity_slot(mo
 
 
 def test_both_tool_paths_route_natively_with_heartbeat_and_no_retry():
-    from computer_use_activity import COMPUTER_USE_ACTIVITIES, COMPUTER_USE_TOOL_NAMES
-    from config import DESKTOP_BROWSER_TASK_QUEUE, DESKTOP_JOB_HEARTBEAT_TIMEOUT, DESKTOP_TASK_TIMEOUT
-    from workflow import PERMANENT_COMMUNITY_TOOLS, _DESKTOP_ACTIVITY_OPTIONS
+    from computer_use_activity import COMPUTER_USE_TOOL_NAMES
+    from config import DESKTOP_JOB_HEARTBEAT_TIMEOUT, DESKTOP_TASK_TIMEOUT, desktop_task_queue
+    from agent_tools import desktop_tools
     import run_worker
 
-    tools = [next(tool for tool in PERMANENT_COMMUNITY_TOOLS if tool.tool_name == "browser")]
-    tools.extend(activity_as_tool(fn, **_DESKTOP_ACTIVITY_OPTIONS) for fn in COMPUTER_USE_ACTIVITIES)
+    tools = desktop_tools("chat-42")
+    assert {tool.tool_name for tool in tools} == {"browser", *COMPUTER_USE_TOOL_NAMES}
     for tool in tools:
         assert tool.tool_type == "temporal_activity"
-        assert tool._options["task_queue"] == DESKTOP_BROWSER_TASK_QUEUE
+        # Every desktop tool executes on this session's own container.
+        assert tool._options["task_queue"] == desktop_task_queue("chat-42") == "desktop-browser-chat-42"
         assert tool._options["retry_policy"].maximum_attempts == 1
         assert tool._options.get("start_to_close_timeout") == DESKTOP_TASK_TIMEOUT
         assert tool._options.get("schedule_to_start_timeout") is None
@@ -144,6 +143,8 @@ def test_both_tool_paths_route_natively_with_heartbeat_and_no_retry():
         assert tool._options["cancellation_type"] == workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED
     host_names = {activity._Definition.must_from_callable(fn).name for fn in run_worker.WORKER_ACTIVITIES}
     assert not host_names & {"browser", *COMPUTER_USE_TOOL_NAMES}
+    # The host claims and releases containers; it never runs GUI input.
+    assert {"provision_desktop", "teardown_desktop"} <= host_names
 
 
 def test_stock_browser_explicitly_preserves_chromium_sandbox():
@@ -296,25 +297,25 @@ def test_desktop_action_heartbeats_while_gui_work_blocks(runtime, monkeypatch):
     assert len(beats) >= 2
 
 
-@pytest.mark.parametrize("field,value", [("namespace", "other-namespace"), ("workflow_id", "other-owner")])
-def test_action_rejects_other_workflows_and_namespaces(runtime, field, value):
+def test_action_records_the_session_as_owner_without_a_cross_session_lock(runtime):
+    """One container per session: the owner field is a record, not a gate."""
+    with browser.desktop_state() as state:
+        assert state["owner"] is None
     with browser.desktop_action():
         pass
-    setattr(runtime, field, value)
-    with pytest.raises(ApplicationError, match="owned, paused, or requires recovery") as error:
-        with browser.desktop_action():
-            pytest.fail("Foreign owner entered the action")
-    assert error.value.non_retryable
     with browser.desktop_state() as state:
         assert state["owner"] == {"namespace": "test", "workflow_id": "owner"}
         assert state["mode"] == "agent"
+    # A later action from the same session proceeds; there is no one to reject.
+    with browser.desktop_action():
+        pass
 
 
 @pytest.mark.parametrize("mode", ["stopping", "human", "relinquishing", "steering", "resuming", "recovery"])
 def test_non_agent_modes_fence_input_without_changing_ownership(runtime, mode):
     with browser.desktop_state() as state:
         state["mode"] = mode
-    with pytest.raises(ApplicationError, match="owned, paused, or requires recovery") as error:
+    with pytest.raises(ApplicationError, match="paused for human control or requires recovery") as error:
         with browser.desktop_action():
             pytest.fail("Paused desktop admitted input")
     assert error.value.non_retryable
@@ -338,7 +339,7 @@ def test_inflight_action_keeps_lock_during_stopping_until_cleanup(runtime):
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     finally:
         os.close(descriptor)
-    with pytest.raises(ApplicationError, match="owned, paused, or requires recovery"):
+    with pytest.raises(ApplicationError, match="paused for human control or requires recovery"):
         with browser.desktop_action():
             pytest.fail("Stopping desktop admitted new input")
 
@@ -356,118 +357,22 @@ def test_action_exception_releases_lock_but_requires_recovery(runtime, exception
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     finally:
         os.close(descriptor)
-    with pytest.raises(ApplicationError, match="owned, paused, or requires recovery"):
+    with pytest.raises(ApplicationError, match="paused for human control or requires recovery"):
         with browser.desktop_action():
             pytest.fail("Failed action was blindly retried")
 
 
-def test_worker_restart_changes_epoch_and_requires_recovery_for_existing_owner(runtime, monkeypatch):
+def test_worker_start_resets_to_a_fresh_unowned_agent_desktop(runtime, monkeypatch):
+    """A container serves exactly one session and is discarded on stop, so
+    start-up never inherits ownership or recovery from a previous life."""
     with browser.desktop_action() as epoch:
         with browser.desktop_state() as state:
             state["session_name"] = "shared-browser-session"
+            state["mode"] = "recovery"
     monkeypatch.setattr(browser.time, "time_ns", lambda: epoch + 1)
     browser.initialize_desktop()
     with browser.desktop_state() as state:
-        assert state["epoch"] == epoch + 1
-        assert state["owner"] == {"namespace": "test", "workflow_id": "owner"}
-        assert state["mode"] == "recovery"
-        assert state["session_name"] == "shared-browser-session"
-
-def _owner_probe_client(monkeypatch, *, status=None, error=None):
-    """Temporal client whose describe() reports ``status`` or raises ``error``."""
-    from temporalio.client import Client
-
-    handle = MagicMock()
-    if error is not None:
-        handle.describe = AsyncMock(side_effect=error)
-    else:
-        handle.describe = AsyncMock(return_value=SimpleNamespace(status=status))
-    client = MagicMock(spec=Client)
-    client.namespace = "test"
-    client.get_workflow_handle.return_value = handle
-    return client, handle
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("closed_status", ["COMPLETED", "FAILED", "CANCELED", "TERMINATED", "TIMED_OUT", "NOT_FOUND"])
-async def test_startup_reclaims_desktop_from_closed_or_unknown_owner(runtime, monkeypatch, closed_status):
-    """A closed owner can never release; the restarted worker must not stay in recovery forever."""
-    import desktop_worker
-    from temporalio.client import WorkflowExecutionStatus
-    from temporalio.service import RPCError, RPCStatusCode
-
-    with browser.desktop_action():
-        with browser.desktop_state() as state:
-            state["session_name"] = "shared-browser-session"
-    browser.initialize_desktop()  # container restart: existing owner -> recovery
-    with browser.desktop_state() as state:
-        assert state["mode"] == "recovery"
-        epoch = state["epoch"]
-    if closed_status == "NOT_FOUND":
-        client, handle = _owner_probe_client(
-            monkeypatch, error=RPCError("not found", RPCStatusCode.NOT_FOUND, b""))
-    else:
-        client, handle = _owner_probe_client(monkeypatch, status=WorkflowExecutionStatus[closed_status])
-
-    assert await desktop_worker.reclaim_orphaned_desktop(client) is True
-
-    client.get_workflow_handle.assert_called_once_with("owner")
-    handle.describe.assert_awaited_once()
-    with browser.desktop_state() as state:
-        assert state["owner"] is None
-        assert state["mode"] == "agent"
-        assert "session_name" not in state
-        assert state["epoch"] == epoch  # epoch reset belongs to initialize_desktop alone
-    with browser.desktop_action():
-        pass  # a fresh owner may act again
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["running", "continued_as_new", "rpc_error", "other_namespace"])
-async def test_startup_keeps_recovery_when_owner_may_still_be_live(runtime, monkeypatch, kind):
-    import desktop_worker
-    from temporalio.client import WorkflowExecutionStatus
-    from temporalio.service import RPCError, RPCStatusCode
-
-    with browser.desktop_action():
-        pass
-    browser.initialize_desktop()
-    if kind == "rpc_error":
-        client, _ = _owner_probe_client(
-            monkeypatch, error=RPCError("unavailable", RPCStatusCode.UNAVAILABLE, b""))
-    elif kind == "other_namespace":
-        client, _ = _owner_probe_client(monkeypatch, status=WorkflowExecutionStatus.COMPLETED)
-        client.namespace = "elsewhere"
-    else:
-        status = WorkflowExecutionStatus.RUNNING if kind == "running" else WorkflowExecutionStatus.CONTINUED_AS_NEW
-        client, _ = _owner_probe_client(monkeypatch, status=status)
-
-    assert await desktop_worker.reclaim_orphaned_desktop(client) is False
-
-    if kind == "other_namespace":
-        client.get_workflow_handle.assert_not_called()
-    with browser.desktop_state() as state:
-        assert state["owner"] == {"namespace": "test", "workflow_id": "owner"}
-        assert state["mode"] == "recovery"
-    with pytest.raises(ApplicationError, match="owned, paused, or requires recovery"):
-        with browser.desktop_action():
-            pytest.fail("Recovery must still fence agent input")
-
-
-@pytest.mark.asyncio
-async def test_startup_reclaim_is_a_no_op_without_an_owner(runtime):
-    import desktop_worker
-    from temporalio.client import Client
-
-    client = MagicMock(spec=Client)
-    client.namespace = "test"
-    assert await desktop_worker.reclaim_orphaned_desktop(client) is False
-    client.get_workflow_handle.assert_not_called()
-    with browser.desktop_state() as state:
-        assert state["owner"] is None and state["mode"] == "agent"
-
-
-
+        assert state == {"epoch": epoch + 1, "owner": None, "mode": "agent"}
 
 def test_state_exception_does_not_commit_partial_changes_and_releases_lock(runtime):
     with pytest.raises(RuntimeError, match="abort state update"):

@@ -77,12 +77,21 @@ _ACTIVITY_OPTIONS = dict(
 
 
 def _bound_tool(name: str) -> Any | None:
-    """Existing bindings whose native invocation contracts must be preserved."""
-    from agent_tools import COMPUTER_USE_TOOLS, PERMANENT_COMMUNITY_TOOLS
+    """Existing bindings whose native invocation contracts must be preserved.
+
+    Desktop tools (browser + computer-use) are bound to the calling session's
+    own desktop task queue; the module-level tuples only serve schemas.
+    """
+    from agent_tools import COMPUTER_USE_TOOLS, PERMANENT_COMMUNITY_TOOLS, desktop_tools
     from strands_tools.think import think
 
     if name == "think":
         return think
+    desktop_names = {"browser", *(tool.tool_name for tool in COMPUTER_USE_TOOLS)}
+    if name in desktop_names and workflow.in_workflow():
+        for bound in desktop_tools(workflow.info().workflow_id):
+            if bound.tool_name == name:
+                return bound
     for bound in (*COMPUTER_USE_TOOLS, *PERMANENT_COMMUNITY_TOOLS):
         if bound.tool_name == name and (
             bound in COMPUTER_USE_TOOLS or name in {"graph", "browser", "use_agent"}

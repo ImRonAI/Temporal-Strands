@@ -1044,6 +1044,44 @@ describe("POST multimodal attachments", () => {
   })
 })
 
+describe("POST per-session desktop viewer", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  // Compatibility test for per-session desktops: every chat session owns its
+  // own Linux desktop container with its own noVNC port, so the orchestrator's
+  // POST /sessions answers {session_id, desktop_url}. The panel cannot find
+  // that viewer unless the route carries desktop_url on the data-session part.
+  it("forwards the orchestrator's desktop_url on the data-session part", async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/sessions")) {
+        return Response.json({ session_id: "session-9", desktop_url: "http://localhost:51234/vnc.html?autoconnect=true" })
+      }
+      return new Response(`data: ${JSON.stringify({ done: true, reply: "ok" })}\n\n`, {
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    const response = await POST(new Request("http://localhost/api/orchestrator", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "perplexity/kimi-k3",
+        messages: [{ id: "message-1", role: "user", parts: [{ type: "text", text: "hello" }] }],
+      }),
+    }))
+    const text = await response.text()
+    const session = text.split("\n").map((line) => line.replace(/^data: /, "")).filter(Boolean)
+      .map((line) => { try { return JSON.parse(line) } catch { return null } })
+      .find((frame) => frame?.type === "data-session")
+    expect(session?.data).toEqual({
+      sessionId: "session-9",
+      desktopUrl: "http://localhost:51234/vnc.html?autoconnect=true",
+    })
+  })
+})
+
 describe("POST per-turn model switching", () => {
   afterEach(() => {
     vi.unstubAllGlobals()

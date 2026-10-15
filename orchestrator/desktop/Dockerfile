@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends xauth \
     && rm -rf /var/lib/apt/lists/*
 
 # Source only; credentials and provider keys never enter this image.
-COPY browser_activity.py desktop_worker.py config.py telemetry.py ./
+COPY browser_activity.py desktop_worker.py desktop_provision_activity.py config.py telemetry.py ./
 COPY computer_use_activity.py desktop_observation.py workspace_state.py ./
 COPY desktop/start-desktop.sh ./desktop/start-desktop.sh
 

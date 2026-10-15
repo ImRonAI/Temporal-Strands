@@ -19,6 +19,10 @@ from temporalio.contrib.strands import TemporalAgent
 from temporalio.contrib.workflow_streams import WorkflowStream, WorkflowStreamState
 
 from config import (
+    DESKTOP_PROVISION_HEARTBEAT,
+    DESKTOP_PROVISION_RETRY_POLICY,
+    DESKTOP_PROVISION_TIMEOUT,
+    DESKTOP_TEARDOWN_TIMEOUT,
     MCP_START_TO_CLOSE,
     MODEL_HEARTBEAT,
     MODEL_RETRY_POLICY,
@@ -33,11 +37,14 @@ from config import (
 
 with workflow.unsafe.imports_passed_through():
     from agent_tools import (
-        _DESKTOP_ACTIVITY_OPTIONS,
+        DESKTOP_TOOL_NAMES,
         PERMANENT_COMMUNITY_TOOLS,
+        desktop_activity_options,
         temporal_mcp_clients,
     )
     from browser_activity import desktop_control
+    from desktop_hook import DesktopHook
+    from desktop_provision_activity import provision_desktop, teardown_desktop
     from delegation_hook import DelegationHook
     from selection_hook import SelectionHook, TurnSelection
     from load_tool import (
@@ -55,11 +62,22 @@ AGENT_RUNS_TOPIC = "agent_runs"
 
 
 @dataclass
+class DesktopBinding:
+    """The session's own Linux desktop: its task queue and viewer URL."""
+
+    container: str
+    queue: str
+    novnc_url: str
+
+
+@dataclass
 class ChatInput:
     model_id: str
     system_prompt: str
     messages: Messages = field(default_factory=list)
     stream_state: WorkflowStreamState | None = None
+    # Carried across Continue-As-New so rollover never re-provisions.
+    desktop: DesktopBinding | None = None
 
 
 @workflow.defn
@@ -76,18 +94,43 @@ class ChatWorkflow:
         self._done = False
         self._forwarded_offset = input.stream_state.base_offset if input.stream_state else 0
         self._handoff_lock = asyncio.Lock()
+        self._desktop = input.desktop
+        self._desktop_lock = asyncio.Lock()
 
     @workflow.update
     async def desktop_control(self, action: str) -> dict:
+        await self.ensure_desktop()
+        options = desktop_activity_options(workflow.info().workflow_id)
         async with self._handoff_lock:
             if action == "give":
-                await workflow.execute_activity(
-                    desktop_control, "prepare_resume", **_DESKTOP_ACTIVITY_OPTIONS,
-                )
+                await workflow.execute_activity(desktop_control, "prepare_resume", **options)
                 action = "resume"
-            return await workflow.execute_activity(
-                desktop_control, action, **_DESKTOP_ACTIVITY_OPTIONS,
-            )
+            return await workflow.execute_activity(desktop_control, action, **options)
+
+    async def ensure_desktop(self) -> DesktopBinding:
+        """Claim this session's desktop on first use; a no-op afterwards.
+
+        A chat that never browses never pays for a container. Concurrent first
+        callers share one provisioning activity via the lock.
+        """
+        if self._desktop is None:
+            async with self._desktop_lock:
+                if self._desktop is None:
+                    bound = await workflow.execute_activity(
+                        provision_desktop,
+                        workflow.info().workflow_id,
+                        start_to_close_timeout=DESKTOP_PROVISION_TIMEOUT,
+                        heartbeat_timeout=DESKTOP_PROVISION_HEARTBEAT,
+                        retry_policy=DESKTOP_PROVISION_RETRY_POLICY,
+                    )
+                    self._desktop = DesktopBinding(**bound)
+        return self._desktop
+
+    @workflow.update
+    async def desktop(self) -> dict:
+        """The session's desktop binding, provisioning it if this is the first ask."""
+        bound = await self.ensure_desktop()
+        return {"container": bound.container, "queue": bound.queue, "novnc_url": bound.novnc_url}
 
     @workflow.update
     def truncate_stream(self, up_to_offset: int) -> None:
@@ -180,6 +223,7 @@ class ChatWorkflow:
     @workflow.run
     async def run(self, input: ChatInput) -> None:
         is_gemini = input.model_id.startswith("gemini")
+        session_id = workflow.info().workflow_id
         discover_tools, unload_tools = catalog_tools(self._loaded.paths)
         starters = {}
         for name in ("environment", "http_request", "journal"):
@@ -218,6 +262,7 @@ class ChatWorkflow:
             SELECTION_STARTER_TOOLS
         ) - SELECTION_META_TOOLS
         self._agent.hooks.add_hook(SelectionHook(self._selection, mcp_tool_names))
+        self._agent.hooks.add_hook(DesktopHook(DESKTOP_TOOL_NAMES, self.ensure_desktop))
         for name, result in starters.items():
             register_community_tool(self._agent, result["path"], name, result["tool_spec"])
         replay_catalog(self._agent, input.messages, self._loaded.paths)
@@ -228,6 +273,13 @@ class ChatWorkflow:
         self._stream.detach_pollers()
         await workflow.wait_condition(workflow.all_handlers_finished)
         if self._done or self._agent is None:
+            if self._desktop is not None:
+                await workflow.execute_activity(
+                    teardown_desktop,
+                    session_id,
+                    start_to_close_timeout=DESKTOP_TEARDOWN_TIMEOUT,
+                    retry_policy=DESKTOP_PROVISION_RETRY_POLICY,
+                )
             return
         self._stream.truncate(self._forwarded_offset)
         workflow.continue_as_new(
@@ -236,5 +288,6 @@ class ChatWorkflow:
                 system_prompt=self._system_prompt,
                 messages=list(self._agent.messages),
                 stream_state=self._stream.get_state(),
+                desktop=self._desktop,
             )
         )

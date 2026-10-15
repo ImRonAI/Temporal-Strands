@@ -4,6 +4,7 @@
 !desktop_observation.py
 !workspace_state.py
 !desktop_worker.py
+!desktop_provision_activity.py
 !config.py
 !telemetry.py
 !desktop/

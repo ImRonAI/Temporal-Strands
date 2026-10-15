@@ -17,7 +17,7 @@ THINK_TOOL = activity_as_tool(think_activity.think, start_to_close_timeout=THINK
 tools = [THINK_TOOL]
 stream.continue_as_new(lambda state: [ChatInput(session_id=self._session_id, messages=messages, stream_state=state, resume_prompt=self._resume_prompt)])
 `
-const worker = `Worker(client, task_queue=DESKTOP_BROWSER_TASK_QUEUE, activity_executor=ThreadPoolExecutor(max_workers=1))`
+const worker = `queue = await loop.run_in_executor(executor, wait_for_queue_assignment, stopped)\nWorker(client, task_queue=queue, activity_executor=ThreadPoolExecutor(max_workers=1))`
 const fixture = {
   "orchestrator/config.py": config,
   "orchestrator/workflow.py": workflow,

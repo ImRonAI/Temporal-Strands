@@ -229,8 +229,51 @@ class ChatWorkflow:
 
     @workflow.run
     async def run(self, input: ChatInput) -> None:
-        is_gemini = input.model_id.startswith("gemini")
         session_id = workflow.info().workflow_id
+        # The desktop binding travels with Continue-As-New; every other way
+        # out of this run (end_chat, a raised error, operator cancellation)
+        # is the session's last run and must stop its container.
+        continuing = False
+        try:
+            await self._build_agent(input)
+            await workflow.wait_condition(
+                lambda: self._done or workflow.info().is_continue_as_new_suggested()
+            )
+            self._stream.detach_pollers()
+            await workflow.wait_condition(workflow.all_handlers_finished)
+            if self._done or self._agent is None:
+                return
+            self._stream.truncate(self._forwarded_offset)
+            continuing = True
+            workflow.continue_as_new(
+                ChatInput(
+                    model_id=self._model_id,
+                    system_prompt=self._system_prompt,
+                    messages=list(self._agent.messages),
+                    stream_state=self._stream.get_state(),
+                    desktop=self._desktop,
+                )
+            )
+        finally:
+            # temporalio 1.31.0 has no cancellation-disabled scope; the SDK's
+            # documented cleanup pattern (README "Asyncio Cancellation",
+            # samples-python hello_cancellation.py) is to run cleanup
+            # activities after asyncio.CancelledError reaches the workflow and
+            # let it re-raise afterwards. Activity awaits are shielded by the
+            # SDK, so this runs to completion on the cancelled primary task.
+            # One container = one session, so a plain stop is sufficient here:
+            # nothing else inherits the display, and all_handlers_finished has
+            # already waited for an in-flight turn before end_chat reaches this.
+            if self._desktop is not None and not continuing:
+                await workflow.execute_activity(
+                    teardown_desktop,
+                    session_id,
+                    start_to_close_timeout=DESKTOP_TEARDOWN_TIMEOUT,
+                    retry_policy=DESKTOP_PROVISION_RETRY_POLICY,
+                )
+
+    async def _build_agent(self, input: ChatInput) -> None:
+        is_gemini = input.model_id.startswith("gemini")
         discover_tools, unload_tools = catalog_tools(self._loaded.paths)
         starters = {}
         for name in ("environment", "http_request", "journal"):
@@ -273,31 +316,3 @@ class ChatWorkflow:
         for name, result in starters.items():
             register_community_tool(self._agent, result["path"], name, result["tool_spec"])
         replay_catalog(self._agent, input.messages, self._loaded.paths)
-
-        await workflow.wait_condition(
-            lambda: self._done or workflow.info().is_continue_as_new_suggested()
-        )
-        self._stream.detach_pollers()
-        await workflow.wait_condition(workflow.all_handlers_finished)
-        if self._done or self._agent is None:
-            # One container = one session, so a plain stop is sufficient here:
-            # nothing else inherits the display, and all_handlers_finished has
-            # already waited for an in-flight turn before end_chat reaches this.
-            if self._desktop is not None:
-                await workflow.execute_activity(
-                    teardown_desktop,
-                    session_id,
-                    start_to_close_timeout=DESKTOP_TEARDOWN_TIMEOUT,
-                    retry_policy=DESKTOP_PROVISION_RETRY_POLICY,
-                )
-            return
-        self._stream.truncate(self._forwarded_offset)
-        workflow.continue_as_new(
-            ChatInput(
-                model_id=self._model_id,
-                system_prompt=self._system_prompt,
-                messages=list(self._agent.messages),
-                stream_state=self._stream.get_state(),
-                desktop=self._desktop,
-            )
-        )

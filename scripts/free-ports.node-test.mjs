@@ -66,6 +66,8 @@ process.exit(99)
         ...process.env,
         PATH: `${join(root, "bin")}:${process.env.PATH}`,
         DESKTOP_DOCKER_CONTEXT: "mock-desktop",
+        // Removal is synchronous in the mock daemon; skip the real grace wait.
+        DESKTOP_REMOVE_GRACE_SECONDS: "0",
         MOCK_LOG: log, MOCK_STATE: state,
         MOCK_DAEMON: "up", MOCK_STOP_REMOVES: "yes", MOCK_RM_FAILS: "no",
         ...overrides,

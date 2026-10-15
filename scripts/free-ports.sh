@@ -145,7 +145,20 @@ if command -v docker >/dev/null 2>&1 && docker --context "$DESKTOP_CONTEXT" info
     # ~10s, so allow that before Docker escalates to KILL.
     docker --context "$DESKTOP_CONTEXT" stop -t 15 "$container" >/dev/null 2>&1 || true
     docker --context "$DESKTOP_CONTEXT" rm -f "$container" >/dev/null 2>&1 || true
-    if docker --context "$DESKTOP_CONTEXT" container inspect "$container" >/dev/null 2>&1; then
+    # `--rm` removal is asynchronous after stop: the daemon can still answer
+    # inspect for a moment. Wait briefly for the name to free up before
+    # declaring it stuck.
+    gone=0
+    attempt=0
+    while [ "$attempt" -le "${DESKTOP_REMOVE_GRACE_SECONDS:-10}" ]; do
+      if ! docker --context "$DESKTOP_CONTEXT" container inspect "$container" >/dev/null 2>&1; then
+        gone=1
+        break
+      fi
+      attempt=$((attempt + 1))
+      [ "$attempt" -le "${DESKTOP_REMOVE_GRACE_SECONDS:-10}" ] && sleep 1
+    done
+    if [ "$gone" -ne 1 ]; then
       echo "  ERROR: $container still exists in context $DESKTOP_CONTEXT; cannot safely restart" >&2
       exit 1
     fi

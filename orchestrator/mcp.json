@@ -1,5 +1,9 @@
 {
   "mcpServers": {
+    "agent-sops": {
+      "command": ".venv/bin/strands-agents-sops",
+      "args": ["mcp", "--sop-paths", "sops"]
+    },
     "shell": {
       "command": ".venv/bin/strands-shell",
       "args": ["--mcp"]

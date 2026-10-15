@@ -294,6 +294,9 @@ vi.mock("@/components/v0/project-ide-panel", () => ({
 vi.mock("@/components/v0/site-header", () => ({
   SiteHeader: () => <header data-testid="site-header" />,
 }))
+vi.mock("@/components/v0/use-catalog", () => ({
+  useCatalog: () => ({ catalog: null, status: "loading", error: null }),
+}))
 
 // ---------------------------------------------------------------------------
 // Subject under test (imported after mocks)
@@ -543,7 +546,7 @@ describe("AgentChat submit behavior", () => {
     expect(h.chat.sendMessage).toHaveBeenCalledTimes(1)
     expect(h.chat.sendMessage).toHaveBeenCalledWith(
       { text: "next step", files: [] },
-      { body: { model: DEFAULT_MODEL, sessionId: "sess-42" } },
+      { body: { model: DEFAULT_MODEL, reasoningEffort: undefined, tools: [], skills: [], sessionId: "sess-42" } },
     )
   })
 
@@ -552,7 +555,7 @@ describe("AgentChat submit behavior", () => {
     capturedComposerSubmit()({ text: "compare me" })
     expect(h.chat.sendMessage).toHaveBeenCalledWith(
       { text: "compare me", files: undefined },
-      { body: { model: "gemini-3.8-flash", sessionId: undefined } },
+      { body: { model: "gemini-3.8-flash", reasoningEffort: undefined, tools: [], skills: [], sessionId: undefined } },
     )
   })
 
@@ -591,7 +594,7 @@ describe("AgentChat submit behavior", () => {
     onClick(suggestion)
     expect(h.chat.sendMessage).toHaveBeenCalledWith(
       { text: suggestion },
-      { body: { model: DEFAULT_MODEL, sessionId: undefined } },
+      { body: { model: DEFAULT_MODEL, reasoningEffort: undefined, tools: [], skills: [], sessionId: undefined } },
     )
   })
 
@@ -605,6 +608,37 @@ describe("AgentChat submit behavior", () => {
     expect(composer.status).toBe("streaming")
     expect(composer.model).toBe(DEFAULT_MODEL)
     expect(composer.onStop).toBe(h.chat.stop)
+  })
+})
+
+describe("AgentChat tool selection", () => {
+  it("passes empty selection props and the catalog to both Composer render sites", () => {
+    setChat({ messages: [] })
+    render()
+    expect(h.composerProps.length).toBeGreaterThan(0)
+    for (const props of h.composerProps) {
+      expect(props.selectedTools).toEqual([])
+      expect(props.selectedSkills).toEqual([])
+      expect(typeof props.onSelectionChange).toBe("function")
+      expect(props.catalog).toBeNull()
+      expect(props.catalogStatus).toBe("loading")
+    }
+  })
+
+  it("exposes a selection handler that accepts tools and skills on the composer", () => {
+    setChat({ messages: [] })
+    render()
+    const composer = h.composerProps.at(-1)
+    expect(composer).toBeDefined()
+    const onSelectionChange = composer!.onSelectionChange as (next: { tools: string[]; skills: string[] }) => void
+    // SSR cannot drive state updates or submit: `submit` returns early until
+    // model settings hydrate (the same pre-existing contract the six failing
+    // submit-behavior tests document). The turn-body assertion for a checked
+    // tool + skill therefore lives in the live browser app test (step 12), not
+    // here. This locks the wiring surface: empty initial arrays and a handler.
+    expect(composer!.selectedTools).toEqual([])
+    expect(composer!.selectedSkills).toEqual([])
+    expect(() => onSelectionChange({ tools: ["journal"], skills: ["office"] })).not.toThrow()
   })
 })
 
@@ -760,7 +794,7 @@ describe("AgentChat session lifetime", () => {
     ;(composer.onSubmit as (m: { text: string; files: unknown[] }) => void)({ text: "continue", files: [] })
     expect(h.chat.sendMessage).toHaveBeenCalledWith(
       { text: "continue", files: [] },
-      { body: { model: DEFAULT_MODEL, sessionId: "sess-durable" } },
+      { body: { model: DEFAULT_MODEL, reasoningEffort: undefined, tools: [], skills: [], sessionId: "sess-durable" } },
     )
   })
 })

@@ -17,8 +17,8 @@ One place for the three things every nested-agent activity needs:
    activity boundary (skill Pattern 2). :func:`parent_agent` rebuilds a plain
    ``Agent`` so ``graph_tool._select_tools`` can read ``parent.tool_registry``.
 
-Think does not use this module; it runs on the session ``TemporalAgent`` in
-``workflow.py`` with the Orchestrator as parent ``agent=``.
+Think does not use this module; the installed async tool receives the session
+Orchestrator through native Strands injection and uses durable TemporalAgent cycles.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 from collections.abc import Callable, Mapping
 from enum import Enum
 from pathlib import Path
@@ -219,19 +220,17 @@ def sanitize_stream_payload(raw: Any, name_key: str = "skill_name") -> dict[str,
 
 
 # Worker-factory keys that belong on the outer TemporalAgent request only.
-_OUTER_MODEL_PARAMS = frozenset({"background", "store", "tools", "skills"})
+_OUTER_MODEL_PARAMS = frozenset({"background", "store"})
 
 
 def in_process_model(model: Any) -> Any:
     """The factory Model, stripped for a plain ``Agent`` inside an activity.
 
     Official ``create_agent_with_model`` / ``use_agent`` inherit a plain Model.
-    The worker factory also attaches Agent API native tools, builtin skills,
-    and ``background``+``store`` for the outer TemporalAgent. Merging those
-    with Strands function tools is the live ``invalid request`` /
-    ``An error occurred during streaming`` failure on graph nodes
-    (chat-975a5afb58315ff9). The activity is already durable — drop the outer
-    envelope so the node request is the official function-tool surface.
+    Keep Agent API native tools and builtin skills: the installed Responses
+    provider merges those tools with Strands function tools. Only remove
+    ``background`` and ``store`` from the outer request envelope; the provider
+    derives request storage from ``stateful=False`` for the activity's model.
     """
     getter = getattr(model, "get_config", None)
     if not callable(getter):
@@ -256,21 +255,27 @@ async def parent_agent(model: Any) -> Any:
     boundary. Official ``create_agent_with_model`` inherits
     ``parent.tool_registry`` by name (omit ``tools`` → every key; unknown
     name → warning, not an import). Rebuild that parent with the tools that
-    actually run inside this activity: official ``load_tool`` records from
-    the session. Names that were not loaded are not on the registry.
+    actually run inside this activity: installed starter tools plus official
+    ``load_tool`` records from the session.
     """
     from strands import Agent
+    from strands_tools import environment, http_request, journal
     from strands_tools.load_tool import load_tool as official_load_tool
 
     from load_tool import tool_file_path
 
     parent = Agent(
         model=model,
-        tools=[],
+        tools=[journal, environment, http_request],
         system_prompt="",
         callback_handler=None,
     )
-    have: set[str] = set()
+    # Official load_tool asks for consent via loop.run_until_complete. This
+    # activity is already on a running loop, so use the tool's documented
+    # non-interactive skips (the worker sets the same pair at boot).
+    os.environ.setdefault("BYPASS_TOOL_CONSENT", "true")
+    os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
+    have: set[str] = set(parent.tool_registry.registry)
     for rec in await session_loaded_tools():
         if rec["name"] in have:
             continue

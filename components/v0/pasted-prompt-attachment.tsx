@@ -122,11 +122,11 @@ export function PastedPromptPreview({ prompt, onTextChange, onClose }: PastedPro
   return (
     <Artifact
       aria-label={`Preview of ${title}`}
-      className="app-elevated relative h-[15rem] w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border shadow-[0_24px_80px_-28px_oklch(0.05_0.01_285/0.95),0_0_0_1px_oklch(0.7_0.14_284/0.08)]"
+      className="app-elevated relative h-[15rem] w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border shadow-lift"
       data-testid="pasted-prompt-preview"
     >
       <div aria-hidden="true" className="hairline-indigo pointer-events-none absolute inset-x-8 top-0 z-10 h-px" />
-      <ArtifactHeader className="border-b border-white/8 bg-transparent px-3 py-2">
+      <ArtifactHeader className="border-b border-border bg-transparent px-3 py-2">
         <div className="min-w-0">
           <ArtifactTitle className="truncate font-editorial text-sm tracking-normal">{title}</ArtifactTitle>
           <ArtifactDescription className="text-[11px] tabular-nums tracking-wide">
@@ -147,11 +147,11 @@ export function PastedPromptPreview({ prompt, onTextChange, onClose }: PastedPro
       </ArtifactHeader>
       <ArtifactContent className="flex min-h-0 flex-1 flex-col bg-transparent p-0">
         <WebPreview className="min-h-0 flex-1 rounded-none border-0 bg-transparent" defaultUrl="">
-          <WebPreviewNavigation className="h-10 gap-1.5 border-white/8 bg-black/20 px-2.5">
+          <WebPreviewNavigation className="h-10 gap-1.5 border-border bg-secondary/70 px-2.5">
             <WebPreviewUrl
               aria-label="Search pasted text"
               autoComplete="off"
-              className="h-8 min-w-0 flex-1 rounded-full border-white/10 bg-white/[0.03] px-3 text-[13px] shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.06)]"
+              className="h-8 min-w-0 flex-1 rounded-full border-border bg-secondary/60 px-3 text-[13px] shadow-[inset_0_1px_0_0_oklch(1_0_0)]"
               onChange={(event) => {
                 setQuery(event.currentTarget.value)
                 setActiveIndex(0)
@@ -172,7 +172,7 @@ export function PastedPromptPreview({ prompt, onTextChange, onClose }: PastedPro
             />
             <span
               aria-live="polite"
-              className="shrink-0 rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] tabular-nums tracking-wide text-muted-foreground"
+              className="shrink-0 rounded-full border border-border bg-secondary/60 px-2 py-1 text-[10px] tabular-nums tracking-wide text-muted-foreground"
             >
               {status}
             </span>
@@ -253,7 +253,7 @@ export function PastedPromptAttachment({
       <AttachmentHoverCardTrigger closeDelay={300} delay={150}>
         <Attachment
           aria-label={`${title}, ${prompt.text.length} characters`}
-          className="h-auto w-max max-w-[22rem] items-center gap-2 rounded-xl border border-white/10 bg-transparent px-2 py-1.5 app-glass shadow-[0_16px_40px_-24px_oklch(0.05_0.01_285/0.9)] transition-[border-color,box-shadow] duration-300 hover:border-blurple-bright/35 hover:shadow-[0_18px_44px_-18px_oklch(0.499_0.214_278/0.55)]"
+          className="h-auto w-max max-w-[22rem] items-center gap-2 rounded-xl border border-border bg-transparent px-2 py-1.5 app-glass shadow-lift transition-[border-color,box-shadow] duration-300 hover:border-blurple-bright/35 hover:shadow-[0_18px_44px_-18px_oklch(0.499_0.214_278/0.55)]"
           data-testid="pasted-prompt-attachment"
           data={attachment}
           onClick={() => {
@@ -269,7 +269,7 @@ export function PastedPromptAttachment({
           title={title}
           onRemove={onRemove}
         >
-          <AttachmentPreview className="size-7 rounded-lg bg-blurple/15 text-blurple-bright ring-1 ring-blurple-bright/25" />
+          <AttachmentPreview className="size-7 rounded-lg bg-coral/10 text-blurple-bright ring-1 ring-blurple-bright/25" />
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-medium tracking-tight">{title}</p>
             <p className="text-[10px] tabular-nums tracking-wide text-muted-foreground">

@@ -1111,6 +1111,85 @@ describe("POST per-turn model switching", () => {
     const body = JSON.parse((turnCall?.[1] as RequestInit).body as string)
     expect(body.model_id).toBe("anthropic/claude-fable-5")
   })
+
+  // Compatibility test for the per-turn tool/skill allowlist: the
+  // orchestrator's /turns/stream endpoint accepts optional tools and skills
+  // string arrays restricting which native tools and skills the agent may
+  // use this turn. The backend cannot satisfy that contract unless the route
+  // forwards the useChat body's tools/skills on the turn POST.
+  it("forwards the request body tools and skills arrays on the turn POST", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(`data: ${JSON.stringify({ done: true, reply: "ok" })}\n\n`, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    await POST(
+      new Request("http://localhost/api/orchestrator", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "session-1",
+          model: "anthropic/claude-fable-5",
+          tools: ["journal"],
+          skills: ["office"],
+          messages: [
+            {
+              id: "message-1",
+              role: "user",
+              parts: [{ type: "text", text: "hello" }],
+            },
+          ],
+        }),
+      })
+    )
+
+    const turnCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).includes("/turns/stream")
+    )
+    expect(turnCall).toBeDefined()
+    const body = JSON.parse((turnCall?.[1] as RequestInit).body as string)
+    expect(body.tools).toEqual(["journal"])
+    expect(body.skills).toEqual(["office"])
+  })
+
+  it("sends empty tools and skills arrays when the body omits them", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(`data: ${JSON.stringify({ done: true, reply: "ok" })}\n\n`, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    await POST(
+      new Request("http://localhost/api/orchestrator", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "session-1",
+          model: "anthropic/claude-fable-5",
+          messages: [
+            {
+              id: "message-1",
+              role: "user",
+              parts: [{ type: "text", text: "hello" }],
+            },
+          ],
+        }),
+      })
+    )
+
+    const turnCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).includes("/turns/stream")
+    )
+    expect(turnCall).toBeDefined()
+    const body = JSON.parse((turnCall?.[1] as RequestInit).body as string)
+    expect(body.tools).toEqual([])
+    expect(body.skills).toEqual([])
+  })
 })
 
 describe("POST connector availability", () => {
@@ -1202,6 +1281,30 @@ describe("POST connector availability", () => {
     const chunks = await postNative([call])
     expect(chunks.filter((chunk) => chunk.type === "data-native-tool")).toEqual([
       { type: "data-native-tool", id: "mcp-remote-1", data: call },
+    ])
+  })
+
+  // The worker forwards completed output items as the bare item
+  // (perplexity_model._native_payload), so every documented tool result —
+  // including the image_search item and the sandbox's call_id-keyed results —
+  // arrives as a renderable data-native-tool part with a stable id.
+  it("forwards bare image search and sandbox items with stable ids", async () => {
+    const images = {
+      type: "image_search_results",
+      call_id: "img_1",
+      queries: ["saturn rings"],
+      results: [{ image_url: "https://i.example/s.jpg", origin_url: "https://nasa.gov", width: 800, height: 600, title: "Saturn" }],
+    }
+    const imageQueries = { type: "response.reasoning.image_search_queries", call_id: "img_1", queries: ["saturn rings"] }
+    const sandbox = {
+      type: "sandbox_results", call_id: "sb_1", language: "python", code: "print(1)", status: "completed",
+      results: [{ stdout: "1\n", stderr: "", exit_code: 0, duration_ms: 3, status: "completed" }],
+    }
+    const chunks = await postNative([imageQueries, images, sandbox])
+    expect(chunks.filter((chunk) => chunk.type === "data-native-tool")).toEqual([
+      { type: "data-native-tool", id: "native-response.reasoning.image_search_queries-0", data: imageQueries },
+      { type: "data-native-tool", id: "native-image_search_results-1", data: images },
+      { type: "data-native-tool", id: "sandbox-sb_1", data: sandbox },
     ])
   })
 })

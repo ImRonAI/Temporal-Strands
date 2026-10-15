@@ -35,7 +35,9 @@ import { ComputerUsePreviewPanel } from "@/components/v0/computer-use-preview"
 import { Composer } from "@/components/v0/composer"
 import { SentPastedPrompt } from "@/components/v0/pasted-prompt-attachment"
 import { pastedPromptText } from "@/components/v0/pasted-prompt"
-import { reasoningLevels } from "@/components/v0/model-picker"
+import { ModelPicker, reasoningLevels } from "@/components/v0/model-picker"
+import { useCatalog } from "@/components/v0/use-catalog"
+import type { ToolSelection } from "@/components/v0/tool-selector"
 import { projectIdePreview } from "@/components/v0/project-ide"
 import { ProjectIdePanel } from "@/components/v0/project-ide-panel"
 
@@ -62,19 +64,20 @@ export function desktopFitStyle(aspect: number): CSSProperties {
 const EASE: [number, number, number, number] = [0.16, 1, 0.3, 1]
 
 const SUGGESTIONS = [
-  "A pricing page with a yearly toggle",
-  "An analytics dashboard with charts",
-  "A waitlist landing page",
-  "A Kanban board with drag and drop",
-  "A settings page with tabs",
+  "Plan a cozy weekend trip to Lisbon",
+  "Research the best laptops under $1,000",
+  "Build me a habit-tracker web app",
+  "Summarize today's top tech news",
+  "Help me write a thank-you note",
 ]
 
 const HEADLINE: { word: string; accent?: boolean }[] = [
-  { word: "What" },
-  { word: "should" },
+  { word: "Hey," },
+  { word: "what" },
+  { word: "can" },
   { word: "we" },
-  { word: "ship", accent: true },
-  { word: "today?" },
+  { word: "tackle", accent: true },
+  { word: "together?" },
 ]
 
 /** Fade-rise-blur block used for every hero element; delay is the only
@@ -106,7 +109,7 @@ function Reveal({
  *  with a whisper of rotation. One-time, mount-only. */
 function Headline({ reduce }: { reduce: boolean }) {
   return (
-    <h1 className="text-balance text-center font-editorial text-[2.75rem] leading-[1.05] text-foreground sm:text-[4.5rem]">
+    <h1 className="text-balance text-center font-editorial text-[2.6rem] leading-[1.04] tracking-[-0.035em] text-foreground sm:text-[4.25rem]">
       {HEADLINE.map(({ word, accent }, i) => (
         <span
           key={word}
@@ -116,7 +119,7 @@ function Headline({ reduce }: { reduce: boolean }) {
             className={cn(
               "inline-block",
               accent &&
-                "italic text-blurple-bright [text-shadow:0_0_48px_oklch(0.499_0.214_278/0.45)]"
+                "text-sunrise pr-[0.06em] italic"
             )}
             initial={reduce ? false : { y: "115%", rotate: 3 }}
             animate={{ y: "0%", rotate: 0 }}
@@ -177,7 +180,10 @@ export function AgentChat({
   const [efforts, setEfforts] = useState<Record<string, string>>({})
   const selectedEffort = efforts[model] ?? "default"
   const reasoningEffort = reasoningLevels(model).includes(selectedEffort) ? selectedEffort : undefined
-  const turnBody = { model, reasoningEffort }
+  // Per-turn tool/skill allowlist, session-scoped React state: every turn body
+  // carries the checked names and ChatWorkflow's SelectionHook enforces them.
+  const [selection, setSelection] = useState<ToolSelection>({ tools: [], skills: [] })
+  const turnBody = { model, reasoningEffort, tools: selection.tools, skills: selection.skills }
   const reduce = useReducedMotion() ?? false
   // Reused across turns so they land as Updates on the same durable
   // orchestrator session (see orchestrator/workflow.py) instead of starting
@@ -220,6 +226,9 @@ export function AgentChat({
     }
     return undefined
   })()
+  // Real tool and skill catalogs for the composer selector; with a session id
+  // the orchestrator also merges that workflow's loaded tools into "session".
+  const { catalog, status: catalogStatus } = useCatalog(streamedSessionId)
 
   // The durable ChatWorkflow deliberately outlives this tab. Closing the
   // laptop, losing Wi-Fi, or navigating away must never end a deployed
@@ -406,6 +415,17 @@ export function AgentChat({
 
   useImperativeHandle(ref, () => ({ submit, stop }))
 
+  const modelControls = (
+    <>
+      <ModelPicker
+        value={model}
+        onValueChange={changeModel}
+        reasoningEffort={reasoningEffort ?? "default"}
+        onReasoningEffortChange={(value) => setEfforts({ ...efforts, [model]: value })}
+      />
+    </>
+  )
+
   return (
     <div className="@container/chat flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       {!paneId && <BlurpleBackground settled={hasConversation} />}
@@ -499,7 +519,7 @@ export function AgentChat({
                           messages stretch instead; user bubbles keep w-fit.
                           Pasted prompts stay outside this bubble so the card
                           keeps the same glass treatment it had in the composer. */}
-                      {showBubble ? <MessageContent className="group-[.is-assistant]:w-full group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:border group-[.is-user]:border-border group-[.is-user]:bg-secondary/90 group-[.is-user]:text-prose group-[.is-user]:shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.06)]">
+                      {showBubble ? <MessageContent className="group-[.is-assistant]:w-full group-[.is-user]:rounded-[1.4rem] group-[.is-user]:rounded-br-md group-[.is-user]:border group-[.is-user]:border-coral/15 group-[.is-user]:bg-[linear-gradient(160deg,oklch(0.975_0.025_45),oklch(0.96_0.035_38))] group-[.is-user]:text-prose group-[.is-user]:text-foreground group-[.is-user]:shadow-soft">
                         {message.role === "assistant" && (
                           <AgentActivity
                             parts={message.parts}
@@ -524,7 +544,7 @@ export function AgentChat({
                               // that must be live.
                               <MessageResponse
                                 key={`${message.id}-${i}`}
-                                className="text-prose [&_a]:text-blurple-bright [&_a]:underline-offset-4 [&_a]:decoration-blurple-bright/40 [&_code]:text-[0.875em] [&_h1]:font-editorial [&_h1]:text-3xl [&_h1]:tracking-normal [&_h2]:font-editorial [&_h2]:text-2xl [&_h2]:tracking-normal [&_blockquote]:border-blurple-bright/40"
+                                className="text-prose text-foreground/90 [&_a]:font-medium [&_a]:text-blurple-bright [&_a]:underline-offset-4 [&_a]:decoration-blurple-bright/35 [&_strong]:text-foreground [&_code]:text-[0.875em] [&_h1]:font-editorial [&_h1]:text-3xl [&_h1]:tracking-normal [&_h2]:font-editorial [&_h2]:text-2xl [&_h2]:tracking-normal [&_blockquote]:border-blurple-bright/40"
                                 isAnimating={
                                   status === "streaming" &&
                                   messageIndex === messages.length - 1
@@ -591,7 +611,7 @@ export function AgentChat({
                 >
                   <Alert
                     variant="destructive"
-                    className="app-glass-edge border-destructive/30 bg-card/90 shadow-[0_12px_40px_-16px_oklch(0.05_0.01_285/0.9)] backdrop-blur-xl"
+                    className="rounded-2xl border-destructive/25 bg-white/90 shadow-lift backdrop-blur-xl"
                     data-testid="chat-error"
                   >
                     <AlertTitle>Request failed</AlertTitle>
@@ -610,7 +630,7 @@ export function AgentChat({
                   exit={{ opacity: 0, y: 8, scale: 0.99 }}
                   transition={{ duration: 0.35, ease: EASE }}
                 >
-                  <Alert className="border-blurple-bright/30 bg-card/90 shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.08),0_12px_40px_-14px_oklch(0.499_0.214_278/0.5)] backdrop-blur-xl">
+                  <Alert className="rounded-2xl border-coral/25 bg-white/90 shadow-lift backdrop-blur-xl">
                     <AlertTitle>Approval needed</AlertTitle>
                     <AlertDescription>
                       <div className="flex w-full flex-col gap-3">
@@ -710,11 +730,17 @@ export function AgentChat({
                   onTextChange={setText}
                   onSubmit={submit}
                   model={model}
+                  modelControls={modelControls}
                   onModelChange={changeModel}
                   reasoningEffort={reasoningEffort ?? "default"}
                   onReasoningEffortChange={(value) => setEfforts({ ...efforts, [model]: value })}
                   status={status}
                    onStop={stop}
+                  selectedTools={selection.tools}
+                  selectedSkills={selection.skills}
+                  onSelectionChange={setSelection}
+                  catalog={catalog}
+                  catalogStatus={catalogStatus}
                   globalDrop={!paneId}
                   placeholder="Ask for a change, or start something new…"
                   previewActive={showProjectIde || showBrowserPreview}
@@ -743,7 +769,7 @@ export function AgentChat({
                 // graphite, not dead viewer canvas.
                 <motion.div
                   key={browserPreview.sessionId}
-                  className="@container/desktop order-2 flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center overflow-hidden bg-[oklch(0.12_0.007_285)] p-2 @min-[64rem]/chat:p-3"
+                  className="@container/desktop order-2 flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center overflow-hidden bg-[oklch(0.975_0.008_55/0.7)] p-2 @min-[64rem]/chat:p-3"
                   data-testid="desktop-slot"
                   initial={reduce ? false : { opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -827,18 +853,21 @@ export function AgentChat({
             }
           >
             <Reveal reduce={reduce} delay={0.05}>
-              <span className="mb-8 inline-flex items-center gap-2 rounded-full border border-border bg-white/[0.025] px-3 py-1 text-xs font-medium tracking-[0.04em] text-muted-foreground shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.06)] backdrop-blur-sm">
-                <span className="size-1.5 animate-pulse-soft rounded-full bg-blurple-bright" />
-                Now in beta
+              <span className="mb-8 inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/70 py-1 pl-1.5 pr-3.5 text-[13px] font-medium text-foreground/80 shadow-soft backdrop-blur-md">
+                <span className="grid size-5 place-items-center rounded-full bg-sunrise text-[11px] leading-none text-white shadow-glow">
+                  <span className="size-1.5 animate-pulse-soft rounded-full bg-white" />
+                </span>
+                Your super agent for anything
               </span>
             </Reveal>
 
             <Headline reduce={reduce} />
 
             <Reveal reduce={reduce} delay={0.55}>
-              <p className="mt-6 max-w-md text-pretty text-center text-prose text-muted-foreground">
-                Describe an interface in plain language. v0 turns it into clean,
-                production-ready React — components, styling, and all.
+              <p className="mt-6 max-w-[34rem] text-balance text-center text-[1.075rem] leading-relaxed text-muted-foreground">
+                Ask Gwen anything — research, plans, code, browsing, the
+                everyday stuff. She&apos;ll figure out the steps and see it
+                through with you.
               </p>
             </Reveal>
 
@@ -848,11 +877,17 @@ export function AgentChat({
                 onTextChange={setText}
                 onSubmit={submit}
                 model={model}
+                modelControls={modelControls}
                 onModelChange={changeModel}
                 reasoningEffort={reasoningEffort ?? "default"}
                 onReasoningEffortChange={(value) => setEfforts({ ...efforts, [model]: value })}
                 status={status}
                 onStop={stop}
+                selectedTools={selection.tools}
+                selectedSkills={selection.skills}
+                onSelectionChange={setSelection}
+                catalog={catalog}
+                catalogStatus={catalogStatus}
               />
 
               {/* Suggestions is a horizontally scrolling ScrollArea whose inner
@@ -862,7 +897,7 @@ export function AgentChat({
                   overflowed with the last chip clipped off-screen behind a
                   hidden scrollbar. Wrapping instead keeps every chip reachable
                   and lets them actually center. */}
-              <div className="mt-5">
+              <div className="mt-6 [&_[data-slot=scroll-area-scrollbar]]:hidden">
                 <Suggestions className="!w-full flex-wrap justify-center">
                   {SUGGESTIONS.map((suggestion, i) => (
                     <motion.span
@@ -881,7 +916,7 @@ export function AgentChat({
                       <Suggestion
                         suggestion={suggestion}
                         onClick={runSuggestion}
-                        className="border-border bg-card/60 text-sm text-muted-foreground shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.05)] backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-blurple-bright/40 hover:bg-blurple/15 hover:text-foreground hover:shadow-[0_6px_24px_-8px_oklch(0.499_0.214_278/0.6)]"
+                        className="h-9 rounded-full border-white/90 bg-white/70 px-4 text-[13.5px] font-medium text-foreground/75 shadow-soft backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 hover:border-coral/30 hover:bg-white hover:text-foreground hover:shadow-[0_10px_28px_-12px_oklch(0.645_0.2_33/0.45)]"
                       />
                     </motion.span>
                   ))}
@@ -890,8 +925,8 @@ export function AgentChat({
             </Reveal>
 
             <Reveal reduce={reduce} delay={1.05}>
-              <p className="mt-16 max-w-sm text-center text-xs leading-relaxed tracking-[0.02em] text-muted-foreground/65">
-                Trusted by design engineers shipping at the edge of the web.
+              <p className="mt-14 max-w-md text-balance text-center text-xs leading-relaxed tracking-[0.02em] text-muted-foreground/70">
+                Made for curious people everywhere. Gwen&apos;s always happy to help.
               </p>
             </Reveal>
           </motion.section>

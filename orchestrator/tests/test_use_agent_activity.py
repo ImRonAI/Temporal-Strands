@@ -226,8 +226,8 @@ async def test_agent_error_returns_error_result() -> None:
 
 @pytest.mark.asyncio
 async def test_tools_filter_the_rebuilt_parent_registry() -> None:
-    """Official use_agent rule: named tools come from the parent's registry
-    (what the orchestrator loaded onto itself). Omit tools and it gets none."""
+    """Official use_agent rule: named tools come from the parent's registry.
+    Omit tools and the sub-agent receives every tool on that parent."""
     from strands import Agent
 
     from load_tool import STRANDS_TOOLS_DIR
@@ -235,7 +235,7 @@ async def test_tools_filter_the_rebuilt_parent_registry() -> None:
     model = ScriptedModel("done")
     stream = FakeStreamClient()
     a, b, c = patches(model, stream)
-    loaded = [{"path": str(STRANDS_TOOLS_DIR / "calculator.py"), "name": "calculator"}]
+    loaded = [{"path": str(STRANDS_TOOLS_DIR / "sleep.py"), "name": "sleep"}]
 
     async def query(name: str, *_: Any, **__: Any) -> Any:
         return {"model_id": "fake/text", "loaded_tools": loaded}[name]
@@ -254,10 +254,10 @@ async def test_tools_filter_the_rebuilt_parent_registry() -> None:
         )
         with patch("use_agent_activity.Agent", side_effect=capture):
             result = await use_agent_activity(
-                prompt="p", system_prompt="s", tools=["calculator", "file_read"]
+                prompt="p", system_prompt="s", tools=["sleep", "file_read"]
             )
     assert result["status"] == "success"
-    assert set(built[-1].tool_registry.registry) == {"calculator"}
+    assert set(built[-1].tool_registry.registry) == {"sleep"}
 
     with a, b, c:
         subagent_support.activity.client.return_value.get_workflow_handle.return_value.query = AsyncMock(
@@ -266,7 +266,9 @@ async def test_tools_filter_the_rebuilt_parent_registry() -> None:
         with patch("use_agent_activity.Agent", side_effect=capture):
             result = await use_agent_activity(prompt="p", system_prompt="s")
     assert result["status"] == "success"
-    assert set(built[-1].tool_registry.registry) == set()
+    # Omitting tools hands over the whole rebuilt parent registry: the session's
+    # loaded tools plus the three permanent starters.
+    assert set(built[-1].tool_registry.registry) == {"sleep", "environment", "http_request", "journal"}
 
 
 def _write_skill(root: Path, name: str) -> None:

@@ -21,7 +21,13 @@ if ! docker --context "$context" info >/dev/null 2>&1; then
   command -v colima >/dev/null || { echo "colima is required to start '$context'" >&2; exit 1; }
   echo "==> Starting Colima profile '$profile' with its saved configuration..."
   colima start --profile "$profile"
-  docker --context "$context" info >/dev/null
+  if ! docker --context "$context" info >/dev/null 2>&1; then
+    echo "Colima profile '$profile' is running but Docker is still unreachable." >&2
+    echo "Its VM connection may be stale. When safe to interrupt containers in this profile, run:" >&2
+    echo "  colima stop --profile '$profile' && colima start --profile '$profile'" >&2
+    echo "This preserves images and volumes. Startup has not reset project state; it will not restart a shared VM automatically." >&2
+    exit 1
+  fi
 fi
 
 echo "==> Resetting local test sessions and previous Gwen workers..."

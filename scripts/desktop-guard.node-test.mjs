@@ -49,7 +49,7 @@ test("automatic mutation retries and missing native executor fail", () => {
 
 test("Think removal and lost continuation context fail", () => {
   assert.ok(rules({ ...fixture, "orchestrator/workflow.py": workflow.replace("tools = [THINK_TOOL]", "tools = []") }).includes("preserve-think"))
-  assert.ok(rules({ ...fixture, "orchestrator/workflow.py": workflow.replace("THINK_TOOL = activity_as_tool(think_activity.think, start_to_close_timeout=THINK_START_TO_CLOSE)", "from strands_tools.think import think as native_think\nTHINK_TOOL = native_think") }).includes("preserve-think"))
+  assert.deepEqual(rules({ ...fixture, "orchestrator/workflow.py": workflow.replace("THINK_TOOL = activity_as_tool(think_activity.think, start_to_close_timeout=THINK_START_TO_CLOSE)", "from strands_tools.think import think as native_think\nTHINK_TOOL = native_think") }), [])
   for (const loss of ["session_id=self._session_id", "messages=messages", "stream_state=state", "resume_prompt=self._resume_prompt"]) {
     const changed = workflow.replace(loss, "discarded=None")
     assert.ok(rules({ ...fixture, "orchestrator/workflow.py": changed }).includes("continue-context"), loss)

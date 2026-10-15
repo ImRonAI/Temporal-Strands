@@ -146,7 +146,7 @@ export function NodeToolActions({ tools }: { tools: GraphToolAction[] }) {
     <div className="space-y-1" data-testid="node-tool-actions">
       {tools.map((tool) => (
         <Task
-          className="app-glass-edge rounded-md border bg-white/[0.02] px-2 py-1.5"
+          className="app-glass-edge rounded-md border bg-secondary/60 px-2 py-1.5"
           defaultOpen={false}
           key={tool.id}
         >
@@ -165,7 +165,7 @@ export function NodeToolActions({ tools }: { tools: GraphToolAction[] }) {
                 <span className="block text-[10px] text-muted-foreground uppercase tracking-wide">
                   Input
                 </span>
-                <pre className="mt-0.5 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded bg-white/[0.03] p-1.5 font-mono text-[11px]">
+                <pre className="mt-0.5 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded bg-secondary/60 p-1.5 font-mono text-[11px]">
                   {tool.input}
                 </pre>
               </TaskItem>
@@ -175,7 +175,7 @@ export function NodeToolActions({ tools }: { tools: GraphToolAction[] }) {
                 <span className="block text-[10px] text-muted-foreground uppercase tracking-wide">
                   Output
                 </span>
-                <pre className="mt-0.5 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded bg-white/[0.03] p-1.5 font-mono text-[11px]">
+                <pre className="mt-0.5 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded bg-secondary/60 p-1.5 font-mono text-[11px]">
                   {tool.output}
                 </pre>
               </TaskItem>
@@ -257,7 +257,7 @@ export function FormationNode({ data }: { data: FormationNodeData }) {
     return (
       <div
         aria-label={`${data.label} — ${kindLabel(data.kind)}, ${data.status}. Contains member nodes.`}
-        className="app-glass-edge size-full rounded-lg border border-dashed border-blurple-bright/30 bg-white/[0.015]"
+        className="app-glass-edge size-full rounded-lg border border-dashed border-blurple-bright/30 bg-secondary/60"
         data-node-kind={data.kind}
         data-node-status={data.status}
         role="group"
@@ -279,7 +279,7 @@ export function FormationNode({ data }: { data: FormationNodeData }) {
     <Node
       aria-expanded={inspecting}
       aria-label={nodeAriaLabel(data)}
-      className="app-glass cursor-pointer border transition-shadow duration-300 focus-visible:ring-2 focus-visible:ring-ring/60 hover:shadow-[0_0_28px_-6px_oklch(0.499_0.214_278/0.65)]"
+      className="app-glass cursor-pointer border transition-shadow duration-300 focus-visible:ring-2 focus-visible:ring-ring/60 hover:shadow-[0_14px_36px_-14px_oklch(0.645_0.2_33/0.4)]"
       data-inspecting={inspecting || undefined}
       handles={data.handles}
       onBlur={(event) => {
@@ -295,7 +295,7 @@ export function FormationNode({ data }: { data: FormationNodeData }) {
       role="button"
       tabIndex={0}
     >
-      <NodeHeader className="app-glass-edge bg-white/[0.03]">
+      <NodeHeader className="app-glass-edge bg-secondary/60">
         <NodeTitle>{data.label}</NodeTitle>
         <NodeDescription>
           {kindLabel(data.kind)}

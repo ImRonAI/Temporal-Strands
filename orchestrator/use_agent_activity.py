@@ -10,9 +10,9 @@ other sub-agent activity here does:
   against the worker's registered factories); ``model_id`` may name any other
   registered factory id explicitly. No provider zoo, no environment switching.
 - Tools: rebuild a plain parent Agent (TemporalAgent cannot cross the
-  activity boundary), then ``graph_tool._select_tools`` keeps only the
-  registry names passed in ``tools``. Omit ``tools`` and the sub-agent
-  gets none. Unknown names are skipped.
+  activity boundary), then ``graph_tool._select_tools``. Omit ``tools`` and
+  the sub-agent receives every tool on that parent. A list selects those
+  names. Unknown names are skipped.
 - Skills: opt-in. ``skills`` attaches the official ``strands.AgentSkills``
   plugin scoped to the assigned names (progressive disclosure via its
   ``skills`` tool); omitted means no skill catalog on the sub-agent.
@@ -70,9 +70,10 @@ async def use_agent_activity(
         system_prompt: The sub-agent's persona and instructions.
         agent_name: Optional display label for the sub-agent (defaults to
             "sub-agent"); shown in the live activity stream.
-        tools: Registry names to assign. Omit this and the sub-agent has no
-            tools. Load a discoverable community tool with load_tool first,
-            then pass its registry name. Unknown names are skipped.
+        tools: Registry names to assign. Omit this and the sub-agent receives
+            every community tool loaded on this session. Name the tools it
+            needs to give it only those. An empty list gives it no parent
+            tools. Unknown names are skipped.
         model_id: Leave blank to inherit the parent TemporalAgent's model.
             A registered factory name (the same string TemporalAgent(model=)
             takes) runs the sub-agent on that model instead.

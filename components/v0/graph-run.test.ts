@@ -82,6 +82,21 @@ describe("foldGraphEvent", () => {
     expect(snap.edges).toEqual([{ from: "research", to: "team" }])
   })
 
+  it("folds the SDK's raw 'multiagent' node_type for undeclared nested executors", () => {
+    // The SDK emits node_type "multiagent" for Graph/Swarm nodes; the backend
+    // normally enriches frames with the declared type from graph_topology,
+    // but a raw frame must still fold into a running node.
+    const snap = createGraphRunSnapshot("graph-tool-1")
+    foldGraphEvent(snap, {
+      type: "multiagent_node_start",
+      node_id: "team",
+      node_type: "multiagent",
+      label: "team",
+      parent_id: null,
+    })
+    expect(snap.nodes["team"]).toMatchObject({ kind: "multiagent", status: "running" })
+  })
+
   it("keeps duplicate leaf ids under different parents distinct", () => {
     const snap = createGraphRunSnapshot("graph-tool-1")
     foldGraphEvent(snap, {

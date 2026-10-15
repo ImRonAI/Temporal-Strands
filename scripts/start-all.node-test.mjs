@@ -13,14 +13,16 @@ function fixture() {
   roots.push(root)
   for (const dir of ["scripts", "bin", "node_modules", "orchestrator/.venv/bin"]) mkdirSync(join(root, dir), { recursive: true })
   copyFileSync(new URL("./start-all.sh", import.meta.url), join(root, "scripts/start-all.sh"))
-  writeFileSync(join(root, "orchestrator/.venv/bin/python"), "#!/bin/sh\nexit 0\n", { mode: 0o755 })
+  writeFileSync(join(root, "orchestrator/.venv/bin/python"), "#!/bin/sh\nprintf 'python %s\\n' \"$*\" >> \"$MOCK_LOG\"\nexit 0\n", { mode: 0o755 })
   writeFileSync(join(root, "scripts/free-ports.sh"), "printf 'clean\\n' >> \"$MOCK_LOG\"\nexit \"${MOCK_CLEAN_EXIT:-0}\"\n")
   writeFileSync(join(root, "scripts/reset-dev-state.mjs"), 'import { appendFileSync } from "node:fs"; appendFileSync(process.env.MOCK_LOG, "reset-state\\n")\n')
   writeFileSync(join(root, "scripts/run-desktop.sh"), "printf 'desktop %s\\n' \"$*\" >> \"$MOCK_LOG\"\nexit \"${MOCK_BUILD_EXIT:-0}\"\n")
   for (const name of ["pnpm", "uv", "temporal", "docker", "colima"]) {
     writeFileSync(join(root, "bin", name), `#!/bin/bash
 printf '${name} %s\\n' "$*" >> "$MOCK_LOG"
-if [[ '${name}' == docker && "$*" == *info && "$MOCK_DAEMON_DOWN" == yes && ! -e "$MOCK_UP" ]]; then exit 1; fi
+if [[ '${name}' == docker && "$*" == *info ]]; then
+  if [[ "$MOCK_DAEMON_STUCK" == yes || ( "$MOCK_DAEMON_DOWN" == yes && ! -e "$MOCK_UP" ) ]]; then exit 1; fi
+fi
 if [[ '${name}' == colima ]]; then touch "$MOCK_UP"; fi
 if [[ '${name}' == pnpm && "$1" == install ]]; then exit "\${MOCK_INSTALL_EXIT:-0}"; fi
 if [[ '${name}' == pnpm && "$1" == exec ]]; then
@@ -62,6 +64,17 @@ test("a stopped daemon starts before the single cleanup", () => {
     "docker --context colima info", "colima start --profile default",
     "docker --context colima info", "clean", "reset-state",
   ])
+})
+
+test("an already-running but unreachable Colima VM reports recovery before changing project state", () => {
+  const result = fixture()({ MOCK_DAEMON_STUCK: "yes" })
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /Colima.*Docker.*unreachable/)
+  assert.match(result.stderr, /colima stop --profile 'default'/)
+  assert.match(result.stderr, /images and volumes/)
+  assert.ok(result.calls.every((call) => !/clean|reset-state|pnpm install|desktop prepare|concurrently/.test(call)))
+  assert.equal(result.calls.filter((call) => call.startsWith("colima ")).length, 1,
+    "Never automatically restart a shared VM or delete its data")
 })
 
 for (const [name, env, forbidden] of [

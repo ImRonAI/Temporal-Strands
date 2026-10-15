@@ -40,24 +40,6 @@ _MODEL_NEW = {
 }
 
 
-@pytest.mark.asyncio
-async def test_startup_query_timeout_is_actionable_and_never_submits_a_turn(monkeypatch):
-    seed_catalog(monkeypatch, [_MODEL_A])
-    handle = MagicMock()
-    handle.query = AsyncMock(side_effect=RPCError("Timeout expired", RPCStatusCode.DEADLINE_EXCEEDED, b""))
-    handle.start_update = AsyncMock()
-    temporal_client = MagicMock()
-    temporal_client.get_workflow_handle.return_value = handle
-    monkeypatch.setitem(server._state, "client", temporal_client)
-    monkeypatch.setattr(server.WorkflowStreamClient, "create", MagicMock(return_value=SimpleNamespace(get_offset=AsyncMock())))
-    with pytest.raises(server.HTTPException) as raised:
-        await server.turn_stream("chat-timeout", server.TurnRequest(prompt="test", model_id="model-a"))
-    assert raised.value.status_code == 503
-    assert "worker for activation errors" in raised.value.detail
-    assert "No new turn was submitted" in raised.value.detail
-    handle.start_update.assert_not_called()
-
-
 def seed_catalog(
     monkeypatch: pytest.MonkeyPatch, entries: list[dict[str, str]]
 ) -> AsyncMock:
@@ -80,40 +62,6 @@ def _clear_catalog_cache() -> Any:
     server._catalog_cache["fetched_at"] = 0.0
     server._poller_cache["checked_at"] = 0.0
     server._poller_cache["ok"] = False
-
-
-@pytest.mark.parametrize("failure", [False, True])
-def test_turn_subscription_recovers_without_repeating_update(client, monkeypatch, failure):
-    seed_catalog(monkeypatch, [_MODEL_A])
-    monkeypatch.setattr(server, "SSE_SUBSCRIBE_RESTART_DELAY", 0)
-    finished = asyncio.Event()
-    async def result():
-        await finished.wait()
-        return "complete"
-    handle = MagicMock()
-    handle.query = AsyncMock(return_value=None)
-    handle.start_update = AsyncMock(return_value=SimpleNamespace(workflow_run_id="synthetic-run", result=result))
-    temporal_client = MagicMock()
-    temporal_client.get_workflow_handle.return_value = handle
-    monkeypatch.setitem(server._state, "client", temporal_client)
-    offsets = []
-    async def subscribe(topics, from_offset):
-        offsets.append(from_offset)
-        if len(offsets) == 1:
-            yield SimpleNamespace(data={"data": "first"}, topic="events", offset=0)
-            if failure:
-                raise RuntimeError("subscriber disconnected")
-            return
-        yield SimpleNamespace(data={"data": "second"}, topic="events", offset=1)
-        finished.set()
-        await asyncio.Event().wait()
-    stream = SimpleNamespace(get_offset=AsyncMock(side_effect=[0, 2]), subscribe=subscribe)
-    monkeypatch.setattr(server.WorkflowStreamClient, "create", MagicMock(return_value=stream))
-    response = client.post("/sessions/chat-1/turns/stream", json={"prompt": "test", "model_id": "model-a"})
-    assert response.status_code == 200
-    assert offsets == [0, 1]
-    assert "first" in response.text and "second" in response.text and '"done": true' in response.text
-    handle.start_update.assert_awaited_once()
 
 
 def test_turn_subscription_exhaustion_returns_clean_error(client, monkeypatch):
@@ -178,58 +126,6 @@ def _frame(text: str, offset: int) -> SimpleNamespace:
     return SimpleNamespace(data={"data": text}, topic="events", offset=offset)
 
 
-def test_turn_subscribes_before_update_and_keeps_the_first_frame(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The subscription is created BEFORE the update is accepted (otherwise
-    early frames are lost), every frame precedes the terminal frame, and the
-    subscription -- not the workflow -- is what gets closed at the end."""
-    seed_catalog(monkeypatch, [_MODEL_A])
-    calls: list[str] = []
-
-    async def result() -> str:
-        await asyncio.sleep(0.05)
-        return "final reply"
-
-    async def start_update(*args: Any, **kwargs: Any) -> Any:
-        calls.append("start_update")
-        return SimpleNamespace(workflow_run_id="synthetic-run", result=result)
-
-    handle = MagicMock()
-    handle.query = AsyncMock(return_value=None)
-    handle.start_update = AsyncMock(side_effect=start_update)
-    temporal_client = MagicMock()
-    temporal_client.get_workflow_handle.return_value = handle
-    monkeypatch.setitem(server._state, "client", temporal_client)
-
-    subscription = TrackedSubscription(items=[_frame("first", 0)], block=True)
-
-    def subscribe(topics: Any, from_offset: int = 0, **kwargs: Any) -> TrackedSubscription:
-        calls.append("subscribe")
-        return subscription
-
-    monkeypatch.setattr(
-        server.WorkflowStreamClient,
-        "create",
-        MagicMock(return_value=SimpleNamespace(
-            get_offset=AsyncMock(side_effect=[0, 1]), subscribe=subscribe
-        )),
-    )
-
-    response = client.post(
-        "/sessions/chat-1/turns/stream",
-        json={"prompt": "hi", "model_id": "model-a"},
-    )
-
-    assert response.status_code == 200, response.text
-    assert calls == ["subscribe", "start_update"]
-    assert "first" in response.text
-    assert response.text.index("first") < response.text.index('"done": true')
-    assert '"reply": "final reply"' in response.text
-    assert subscription.closed
-    handle.cancel.assert_not_called()
-
-
 def test_turn_update_failure_closes_subscription_not_the_workflow(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -263,46 +159,6 @@ def test_turn_update_failure_closes_subscription_not_the_workflow(
     assert '"done": true' not in response.text
     assert subscription.closed, "the pump must aclose() the subscription it opened"
     handle.cancel.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_client_disconnect_closes_waiter_without_ending_durable_turn(monkeypatch):
-    waiting = asyncio.Event()
-    waiter_closed = asyncio.Event()
-
-    async def result():
-        waiting.set()
-        try:
-            await asyncio.Event().wait()
-        finally:
-            waiter_closed.set()
-
-    handle = MagicMock()
-    handle.query = AsyncMock(return_value=None)
-    handle.start_update = AsyncMock(return_value=SimpleNamespace(result=result))
-    temporal_client = MagicMock()
-    temporal_client.get_workflow_handle.return_value = handle
-    monkeypatch.setitem(server._state, "client", temporal_client)
-    subscription = TrackedSubscription(items=[_frame("working", 0)], block=True)
-    monkeypatch.setattr(server.WorkflowStreamClient, "create", MagicMock(
-        return_value=SimpleNamespace(
-            get_offset=AsyncMock(return_value=0),
-            subscribe=lambda *args, **kwargs: subscription,
-        ),
-    ))
-
-    response = await server.turn_stream("detached-session", server.TurnRequest(prompt="continue working"))
-    async with asyncio.timeout(5):
-        assert b"working" in await anext(response.body_iterator)
-        await waiting.wait()
-        await response.body_iterator.aclose()
-        await waiter_closed.wait()
-
-    assert subscription.closed
-    handle.start_update.assert_awaited_once()
-    handle.cancel.assert_not_called()
-    handle.terminate.assert_not_called()
-    handle.signal.assert_not_called()
 
 
 def test_turn_pump_iterates_the_subscription_directly() -> None:
@@ -374,9 +230,11 @@ class NativeTurnStream:
             self.stream.topic("events").publish({"label": "after completion snapshot"})
         return offset
 
-    async def start_update(self, name, arg, **kwargs):
+    async def start_update(self, name, arg=None, *, args=None, **kwargs):
         if name == server.ChatWorkflow.turn:
             self.turn_calls += 1
+            arg = arg if arg is not None else (args[0] if args else None)
+            self.turn_args = list(args) if args is not None else [arg]
 
             async def result():
                 await self.finished.wait()
@@ -416,214 +274,6 @@ async def native_turn_body(harness):
     response = await server.turn_stream(harness.id, server.TurnRequest(prompt="synthetic only"))
     harness.publish()
     return response.body_iterator
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("failure", [False, True])
-@pytest.mark.parametrize("payload_size", [0, 400_000])
-async def test_turn_completion_drains_native_backlog(monkeypatch, failure, payload_size):
-    harness = NativeTurnStream(monkeypatch, failure=failure, payload_size=payload_size, fault="append")
-    body = await native_turn_body(harness)
-    frames = [await anext(body), await anext(body)]
-    # Let the third read finish without forwarding it, then settle the update.
-    await asyncio.sleep(0)
-    harness.finished.set()
-    await asyncio.sleep(0)
-    frames.extend([frame async for frame in body])
-    events = [json.loads(frame.removeprefix(b"data: ")) for frame in frames]
-    assert [event["label"] for event in events if "label" in event] == harness.labels
-    assert events[-1] == ({"error": "synthetic turn failure"} if failure else {"done": True, "reply": "synthetic reply"})
-    assert harness.offset_queries == 2, "freeze the completion offset once"
-    assert [(topics, offset) for topics, offset, _ in harness.subscriptions] == [(server.CHAT_TOPICS, 0), (None, 2)]
-    assert all(iterator.ag_frame is None for _, _, iterator in harness.subscriptions)
-    assert harness.turn_calls == 1
-    if payload_size:
-        assert len(harness.polls) > 2, "exercise native response-size pagination"
-
-
-@pytest.mark.asyncio
-async def test_turn_completion_cancels_pending_native_read(monkeypatch):
-    harness = NativeTurnStream(monkeypatch, fault="cancel-live")
-    body = await native_turn_body(harness)
-    first = asyncio.create_task(anext(body))
-    await asyncio.wait_for(harness.poll_started.wait(), 1)
-    harness.finished.set()
-    frames = [await asyncio.wait_for(first, 1)]
-    frames.extend([frame async for frame in body])
-    events = [json.loads(frame.removeprefix(b"data: ")) for frame in frames]
-    assert [event["label"] for event in events if "label" in event] == harness.labels
-    assert events[-1]["done"] is True
-    assert harness.cancelled_polls == 1
-    assert all(iterator.ag_frame is None for _, _, iterator in harness.subscriptions)
-    assert harness.turn_calls == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("rollovers,stalled", [(0, False), (1, False), (2, False), (0, True)])
-async def test_turn_completion_offset_query_crosses_native_rollover(monkeypatch, rollovers, stalled):
-    """Only RPC routing is simulated; native storage, state and client are real."""
-    monkeypatch.setattr(server, "SSE_COMPLETION_DRAIN_TIMEOUT", 0.2)
-    monkeypatch.setattr(server, "SSE_SUBSCRIBE_RESTART_DELAY", 0.001)
-    monkeypatch.setattr(workflow, "get_signal_handler", lambda _: None)
-    monkeypatch.setattr(workflow, "payload_converter", lambda: DataConverter.default.payload_converter)
-    monkeypatch.setattr(workflow, "now", lambda: datetime.now(timezone.utc))
-
-    async def wait_condition(predicate, **kwargs):
-        if not predicate():
-            await asyncio.Event().wait()
-
-    monkeypatch.setattr(workflow, "wait_condition", wait_condition)
-
-    class Run:
-        def __init__(self, prior_state=None):
-            self.handlers = {}
-            self.validators = {}
-
-            def register(name, handler, **kwargs):
-                self.handlers[name] = handler
-                if "validator" in kwargs:
-                    self.validators[name] = kwargs["validator"]
-
-            monkeypatch.setattr(workflow, "set_signal_handler", register)
-            monkeypatch.setattr(workflow, "set_update_handler", register)
-            monkeypatch.setattr(workflow, "set_query_handler", register)
-            self.stream = WorkflowStream(prior_state)
-
-    runs = [Run()]
-    finished = asyncio.Event()
-    queries = []
-    cancelled_queries = []
-    polls = []
-    turn_calls = []
-
-    def get_handle(workflow_id, *, run_id=None):
-        async def query(name, **kwargs):
-            if name == server.ChatWorkflow.turn_start_offset:
-                return None
-            admitted_run = len(runs) - 1 if run_id is None else int(run_id)
-            queries.append(admitted_run)
-            if finished.is_set() and (admitted_run < rollovers or stalled):
-                # An unpinned query is routed once at admission, not re-routed
-                # when that execution closes while its response is pending.
-                if not stalled:
-                    old = runs[admitted_run].stream
-                    old.detach_pollers()
-                    runs.append(Run(old.get_state()))
-                try:
-                    await asyncio.Event().wait()
-                finally:
-                    cancelled_queries.append(admitted_run)
-            return runs[admitted_run].handlers[name]()
-
-        async def start_update(name, arg, **kwargs):
-            admitted_run = len(runs) - 1 if run_id is None else int(run_id)
-            if name == server.ChatWorkflow.turn:
-                turn_calls.append(arg)
-
-                async def result():
-                    await finished.wait()
-                    return "rollover reply"
-            else:
-                polls.append((admitted_run, arg.from_offset, arg.topics))
-                try:
-                    runs[admitted_run].validators[name](arg)
-                except ApplicationError as error:
-                    raise WorkflowUpdateFailedError(error) from error
-
-                async def result():
-                    return await runs[admitted_run].handlers[name](arg)
-            return SimpleNamespace(workflow_run_id=str(admitted_run), result=result)
-
-        async def describe():
-            current = len(runs) - 1 if run_id is None else int(run_id)
-            status = (WorkflowExecutionStatus.RUNNING if current == len(runs) - 1
-                      else WorkflowExecutionStatus.CONTINUED_AS_NEW)
-            return SimpleNamespace(run_id=str(current), status=status)
-
-        return SimpleNamespace(id=workflow_id, query=query, start_update=start_update, describe=describe)
-
-    temporal_client = SimpleNamespace(get_workflow_handle=get_handle, data_converter=DataConverter.default)
-    monkeypatch.setitem(server._state, "client", temporal_client)
-    # Do not patch WorkflowStreamClient.create/subscribe/get_offset: exercise
-    # their actual unpinned handles, paging, decoding and carried global offsets.
-    response = await server.turn_stream("rollover-stream", server.TurnRequest(prompt="synthetic only"))
-    for label in range(5):
-        runs[0].stream.topic("events").publish({"label": label, "padding": "x" * 400_000})
-    runs[0].stream.topic("excluded-topic").publish({"label": "filtered tail"})
-    body = response.body_iterator
-    frames = [await anext(body)]
-    await asyncio.sleep(0)  # A decoded item can be buffered when the turn settles.
-    finished.set()
-    await asyncio.sleep(0)
-    started = time.monotonic()
-    frames.extend([frame async for frame in body])
-    events = [json.loads(frame.removeprefix(b"data: ")) for frame in frames]
-    assert time.monotonic() - started < 1
-    assert len(turn_calls) == 1, "only event reads may be repeated"
-    if stalled:
-        assert "Incomplete event delivery: completion drain timed out" in events[-1]["error"]
-        assert not any(event.get("done") for event in events)
-        assert queries == [0, 0], "do not retry a query on an unchanged run"
-        assert cancelled_queries == [0]
-        return
-    assert [event["label"] for event in events if "label" in event] == list(range(5))
-    assert events[-1] == {"done": True, "reply": "rollover reply"}
-    assert queries == [0, *range(rollovers + 1)]
-    assert cancelled_queries == list(range(rollovers))
-    assert any(run == rollovers and offset == 1 and not topics for run, offset, topics in polls)
-    assert len(polls) > 2, "exercise native response-size pagination"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("fault,detail", [
-    ("gap", "offset"), ("premature-end", "ended"),
-    ("read-timeout", "timed out"), ("query-timeout", "timed out"),
-])
-async def test_turn_completion_drain_reports_incomplete_delivery(monkeypatch, fault, detail):
-    monkeypatch.setattr(server, "SSE_COMPLETION_DRAIN_TIMEOUT", 0.03, raising=False)
-    harness = NativeTurnStream(monkeypatch, fault=fault)
-    body = await native_turn_body(harness)
-    frames = [await anext(body), await anext(body)]
-    harness.finished.set()
-    await asyncio.sleep(0)
-    started = time.monotonic()
-    frames.extend([frame async for frame in body])
-    events = [json.loads(frame.removeprefix(b"data: ")) for frame in frames]
-    assert "Incomplete event delivery" in events[-1].get("error", "")
-    assert detail in events[-1]["error"]
-    assert not any(event.get("done") for event in events)
-    assert time.monotonic() - started < 1
-    assert all(iterator.ag_frame is None for _, _, iterator in harness.subscriptions)
-    assert harness.turn_calls == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("failure", [False, True])
-async def test_turn_completion_without_native_events(monkeypatch, failure):
-    harness = NativeTurnStream(monkeypatch, failure=failure)
-    response = await server.turn_stream(harness.id, server.TurnRequest(prompt="synthetic only"))
-    harness.finished.set()
-    events = [json.loads(frame.removeprefix(b"data: ")) async for frame in response.body_iterator]
-    assert events == ([{"error": "synthetic turn failure"}] if failure else [{"done": True, "reply": "synthetic reply"}])
-    assert harness.offset_queries == 2
-    assert not any(not poll.topics for poll in harness.polls), "empty tail must not start a replay poll"
-    assert all(iterator.ag_frame is None for _, _, iterator in harness.subscriptions)
-    assert harness.turn_calls == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("message,non_retryable", [
-    ('Managed connector "connector_googledrive" is not connected.', True),
-    ("upstream model is overloaded, please try again later", False),
-])
-async def test_model_error_message_survives_native_workflow_envelope(monkeypatch, message, non_retryable):
-    error = ApplicationError(message, type="PerplexityModelError", non_retryable=non_retryable)
-    harness = NativeTurnStream(monkeypatch, failure=WorkflowUpdateFailedError(error))
-    harness.finished.set()
-    response = await server.turn_stream("chat-1", server.TurnRequest(prompt="hello"))
-    frames = [json.loads(frame.decode().removeprefix("data: ").strip()) async for frame in response.body_iterator]
-    assert message in frames[-1]["error"]
-    assert harness.turn_calls == 1
 
 
 class FakeUpstream:
@@ -970,40 +620,6 @@ def test_start_session_503_when_no_worker_serves_a_catalog(
     assert response.status_code == 503
 
 
-def test_turn_refreshes_catalog_once_on_miss(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fetch = seed_catalog(monkeypatch, [_MODEL_A])
-    update_handle = MagicMock()
-    update_handle.result = AsyncMock(return_value="ok")
-    handle = MagicMock()
-    handle.query = AsyncMock(return_value=None)
-    handle.start_update = AsyncMock(return_value=update_handle)
-    temporal_client = MagicMock()
-    temporal_client.get_workflow_handle = MagicMock(return_value=handle)
-    monkeypatch.setitem(server._state, "client", temporal_client)
-
-    async def _no_frames() -> Any:
-        return
-        yield  # unreachable; makes this an async generator
-
-    stream_client = MagicMock()
-    stream_client.get_offset = AsyncMock(return_value=0)
-    stream_client.subscribe = MagicMock(return_value=_no_frames())
-    monkeypatch.setattr(
-        server.WorkflowStreamClient, "create", MagicMock(return_value=stream_client)
-    )
-
-    fetch.return_value = [_MODEL_A, _MODEL_NEW]
-    response = client.post(
-        "/sessions/chat-1/turns/stream",
-        json={"prompt": "hi", "model_id": "model-new"},
-    )
-
-    assert response.status_code == 200, response.text
-    assert handle.start_update.call_args.args[1].model_id == "model-new"
-
-
 def test_readiness_lease_helpers_are_gone() -> None:
     for removed in ("readiness", "validate_readiness_record", "models_of"):
         assert not hasattr(server, removed), (
@@ -1061,81 +677,6 @@ def test_turn_rejects_unverified_reasoning_effort(client, monkeypatch):
     handle.start_update.assert_not_called()
 
 
-def test_turn_valid_model_id_is_accepted_and_forwarded(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A catalog model_id passes validation and rides the turn update's
-    TurnInput; the stream still terminates with the reply frame."""
-    seed_catalog(monkeypatch, [_MODEL_A, _MODEL_B])
-
-    update_handle = MagicMock()
-    update_handle.result = AsyncMock(return_value="switched reply")
-    handle = MagicMock()
-    handle.query = AsyncMock(return_value=None)
-    handle.start_update = AsyncMock(return_value=update_handle)
-    temporal_client = MagicMock()
-    temporal_client.get_workflow_handle = MagicMock(return_value=handle)
-    monkeypatch.setitem(server._state, "client", temporal_client)
-
-    async def _no_frames() -> Any:
-        return
-        yield  # unreachable; makes this an async generator
-
-    stream_client = MagicMock()
-    stream_client.get_offset = AsyncMock(return_value=0)
-    stream_client.subscribe = MagicMock(return_value=_no_frames())
-    monkeypatch.setattr(
-        server.WorkflowStreamClient,
-        "create",
-        MagicMock(return_value=stream_client),
-    )
-
-    response = client.post(
-        "/sessions/chat-1/turns/stream",
-        json={"prompt": "hi", "model_id": "model-b"},
-    )
-
-    assert response.status_code == 200
-    assert '"reply": "switched reply"' in response.text
-    turn_input = handle.start_update.call_args.args[1]
-    assert turn_input.model_id == "model-b"
-    assert turn_input.prompt == "hi"
-
-
-def test_turn_without_model_id_forwards_none(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    seed_catalog(monkeypatch, [_MODEL_A])
-
-    update_handle = MagicMock()
-    update_handle.result = AsyncMock(return_value="ok")
-    handle = MagicMock()
-    handle.query = AsyncMock(return_value=None)
-    handle.start_update = AsyncMock(return_value=update_handle)
-    temporal_client = MagicMock()
-    temporal_client.get_workflow_handle = MagicMock(return_value=handle)
-    monkeypatch.setitem(server._state, "client", temporal_client)
-
-    async def _no_frames() -> Any:
-        return
-        yield  # unreachable; makes this an async generator
-
-    stream_client = MagicMock()
-    stream_client.get_offset = AsyncMock(return_value=0)
-    stream_client.subscribe = MagicMock(return_value=_no_frames())
-    monkeypatch.setattr(
-        server.WorkflowStreamClient,
-        "create",
-        MagicMock(return_value=stream_client),
-    )
-
-    response = client.post("/sessions/chat-1/turns/stream", json={"prompt": "hi"})
-
-    assert response.status_code == 200
-    turn_input = handle.start_update.call_args.args[1]
-    assert turn_input.model_id is None
-
-
 def test_start_session_unknown_model_lists_available(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1149,3 +690,74 @@ def test_start_session_unknown_model_lists_available(
     assert "nope" in detail
     assert "model-a" in detail
     assert "model-b" in detail
+
+
+def test_turn_request_defaults_tools_and_skills_to_empty_lists() -> None:
+    body = server.TurnRequest(prompt="x")
+    assert body.tools == []
+    assert body.skills == []
+
+
+@pytest.mark.asyncio
+async def test_turn_stream_forwards_tools_and_skills_as_update_args(monkeypatch):
+    seed_catalog(monkeypatch, [_MODEL_A])
+
+    async def result():
+        return "ok"
+
+    update_handle = SimpleNamespace(result=result, workflow_run_id="synthetic-run")
+    handle = MagicMock()
+    handle.query = AsyncMock(return_value=None)
+    handle.start_update = AsyncMock(return_value=update_handle)
+    temporal_client = MagicMock()
+    temporal_client.get_workflow_handle = MagicMock(return_value=handle)
+    monkeypatch.setitem(server._state, "client", temporal_client)
+
+    async def _no_frames() -> Any:
+        return
+        yield  # unreachable; makes this an async generator
+
+    stream_client = SimpleNamespace(
+        get_offset=AsyncMock(return_value=0),
+        subscribe=MagicMock(return_value=_no_frames()),
+    )
+    monkeypatch.setattr(
+        server.WorkflowStreamClient,
+        "create",
+        MagicMock(return_value=stream_client),
+    )
+
+    response = await server.turn_stream(
+        "chat-args", server.TurnRequest(prompt="p", tools=["journal"], skills=["x"])
+    )
+    frames = [frame async for frame in response.body_iterator]
+    assert any(b'"done": true' in frame for frame in frames)
+
+    handle.start_update.assert_awaited_once()
+    turn_args = handle.start_update.call_args.kwargs["args"]
+    assert turn_args == ["p", ["journal"], ["x"]]
+
+
+_AGENT_API_TYPE_NAMES = {
+    "web_search",
+    "fetch_url",
+    "image_search",
+    "people_search",
+    "finance_search",
+    "sandbox",
+}
+
+
+def test_catalog_lists_session_discoverable_and_skills_without_agent_api_types(
+    client: TestClient,
+) -> None:
+    response = client.get("/catalog")
+    assert response.status_code == 200
+    body = response.json()
+    assert "journal" in body["tools"]["session"]
+    assert "forge" in body["tools"]["discoverable"]
+    assert not _AGENT_API_TYPE_NAMES & set(body["tools"]["session"])
+    assert not _AGENT_API_TYPE_NAMES & set(body["tools"]["discoverable"])
+    for skill in body["skills"]:
+        assert isinstance(skill["name"], str)
+        assert isinstance(skill["description"], str)

@@ -221,8 +221,8 @@ export function DataObservationPanel({ observation, className }: DataObservation
       transition={reduce ? { duration: 0 } : { duration: 0.5, ease: EASE }}
     >
       {/* Header */}
-      <div className="ide-glass-edge flex items-center gap-2.5 border-b bg-white/[0.03] px-4 py-3">
-        <span className="flex size-7 items-center justify-center rounded-lg bg-blurple/30 shadow-[0_0_16px_-2px_oklch(0.499_0.214_278/0.7),inset_0_1px_0_0_oklch(0.9_0.05_285/0.25)]">
+      <div className="ide-glass-edge flex items-center gap-2.5 border-b bg-secondary/60 px-4 py-3">
+        <span className="flex size-7 items-center justify-center rounded-lg bg-coral/12 shadow-[0_6px_16px_-6px_oklch(0.645_0.2_33/0.45),inset_0_1px_0_0_oklch(1_0_0/0.6)]">
           <BarChart3Icon aria-hidden className="size-4 text-blurple-bright" />
         </span>
         <div className="min-w-0 flex-1">
@@ -281,7 +281,7 @@ export function DataObservationPanel({ observation, className }: DataObservation
                   {obs.title} — {obs.rows.length} rows from {obs.server}
                 </caption>
                 <thead className="sticky top-0">
-                  <tr className="border-white/10 border-b bg-white/[0.03]">
+                  <tr className="border-border border-b bg-secondary/60">
                     {obs.columns.map((col) => (
                       <th
                         key={col}
@@ -297,7 +297,7 @@ export function DataObservationPanel({ observation, className }: DataObservation
                   {obs.rows.map((row, i) => (
                     <motion.tr
                       key={i}
-                      className="border-white/5 border-b last:border-0"
+                      className="border-border border-b last:border-0"
                       initial={reduce || i > 11 ? false : { opacity: 0, x: -6 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={
@@ -323,7 +323,7 @@ export function DataObservationPanel({ observation, className }: DataObservation
                 </tbody>
               </table>
             </div>
-            <p className="border-white/5 border-t px-3 py-1.5 text-[10px] text-muted-foreground">
+            <p className="border-border border-t px-3 py-1.5 text-[10px] text-muted-foreground">
               {obs.rows.length} row{obs.rows.length === 1 ? "" : "s"}
               {obs.rowsMatched !== null && obs.rowsMatched !== obs.rows.length
                 ? ` · ${formatValue(obs.rowsMatched)} matched upstream`
@@ -340,7 +340,7 @@ export function DataObservationPanel({ observation, className }: DataObservation
                 {obs.title} — {obs.facets.length} data facets
               </caption>
               <thead>
-                <tr className="border-white/10 border-b bg-white/[0.03]">
+                <tr className="border-border border-b bg-secondary/60">
                   {["Variable", "Method", "Unit", "Source", "Date range", "Observations"].map(
                     (col) => (
                       <th
@@ -356,7 +356,7 @@ export function DataObservationPanel({ observation, className }: DataObservation
               </thead>
               <tbody>
                 {obs.facets.map((facet, i) => (
-                  <tr key={facet.id || i} className="border-white/5 border-b last:border-0">
+                  <tr key={facet.id || i} className="border-border border-b last:border-0">
                     <td className="px-3 py-1.5 text-foreground/85">{facet.variable ?? ""}</td>
                     {/* measurementMethod is the core distinction between
                         facets of one variable (e.g. AgeAdjustedPrevalence vs
@@ -419,7 +419,7 @@ export function DataObservationPanel({ observation, className }: DataObservation
       </div>
 
       {/* Provenance footer: verbatim attribution + validated links. */}
-      <div className="ide-glass-edge flex items-start justify-between gap-3 border-t bg-black/20 px-4 py-2">
+      <div className="ide-glass-edge flex items-start justify-between gap-3 border-t bg-secondary/70 px-4 py-2">
         <p className="min-w-0 text-[10px] text-muted-foreground leading-snug">
           {obs.attribution}
           {obs.sources.length > 0 ? (

@@ -142,11 +142,14 @@ async def test_perplexity_client_pins_base_url_and_retries(
 # --- model params ---------------------------------------------------------------
 
 
-def test_preset_params_have_no_max_output_tokens() -> None:
+def test_preset_params_carry_the_platform_output_ceiling() -> None:
+    """Presets merge request fields over their defaults, so the ceiling lifts
+    the fast/low presets' published 8192/32768 budgets without touching the
+    preset's own model, prompt, or tools."""
     tools = run_worker.native_tools()
     for preset_id in PRESET_IDS:
         params = run_worker.model_params(preset_id, tools)
-        assert "max_output_tokens" not in params
+        assert params["max_output_tokens"] == 128_000
         assert params["background"] is True
         assert params["store"] is True
         assert params["max_steps"] == 100
@@ -176,13 +179,84 @@ def test_max_output_tokens_for_provider_prefixes() -> None:
 
 
 def test_native_tool_types_are_the_documented_union_members() -> None:
+    """Native tools are Agent API request objects. The API executes them."""
     assert [tool["type"] for tool in run_worker.NATIVE_TOOLS] == [
         "web_search",
         "fetch_url",
+        "image_search",
         "people_search",
         "finance_search",
         "sandbox",
     ]
+    assert all(set(tool) == {"type"} for tool in run_worker.NATIVE_TOOLS)
+
+
+def test_validate_tools_accepts_every_documented_native_type() -> None:
+    """Every member of the OpenAPI ``Tool`` discriminator passes, including the
+    documented per-tool options."""
+    agent_api_tools._validate_tools([
+        {"type": "web_search", "search_type": "fast", "max_results": 10,
+         "max_tokens": 6000, "max_tokens_per_page": 1200,
+         "filters": {"search_domain_filter": [".gov"], "search_recency_filter": "month"}},
+        {"type": "image_search", "max_results": 30,
+         "filters": {"domain_filter": ["nasa.gov"], "format_filter": ["jpeg", "png"], "safe_search": True}},
+        {"type": "fetch_url", "max_urls": 10},
+        {"type": "people_search"},
+        {"type": "finance_search"},
+        {"type": "sandbox"},
+        {"type": "mcp", "server_label": "deepwiki", "server_url": "https://mcp.deepwiki.com/mcp",
+         "defer_loading": True, "allowed_tools": ["ask_question"]},
+        {"type": "connector", "id": "connector_github", "server_label": "github",
+         "allowed_tools": ["get_file_contents"]},
+        {"type": "function", "name": "lookup", "parameters": {"type": "object", "properties": {}}},
+    ])
+
+
+@pytest.mark.parametrize("tool,message", [
+    ({"type": "code_interpreter"}, "unknown tool type"),
+    ({"type": "image_search", "max_results": 31}, "image_search max_results must be 1-30"),
+    ({"type": "image_search", "filters": {"format_filter": ["tiff"]}}, "format_filter"),
+    ({"type": "image_search", "filters": {"domain_filter": [f"d{i}.example" for i in range(11)]}}, "at most 10"),
+    ({"type": "image_search", "filters": {"safe_search": "yes"}}, "safe_search must be a boolean"),
+    ({"type": "web_search", "search_type": "deep"}, "search_type"),
+    ({"type": "connector", "id": "connector_github", "server_label": "github", "allowed_tools": "x"}, "allowed_tools"),
+])
+def test_validate_tools_rejects_contract_violations(tool, message) -> None:
+    from temporalio.exceptions import ApplicationError
+
+    with pytest.raises(ApplicationError, match=message) as caught:
+        agent_api_tools._validate_tools([tool])
+    assert caught.value.non_retryable is True
+
+
+def test_validate_skills_accepts_the_documented_skill_shapes() -> None:
+    agent_api_tools._validate_skills([
+        *(dict(skill) for skill in BUILTIN_SKILLS),
+        {"type": "inline", "name": "fact-check", "description": "Verify claims.",
+         "instructions": "Check every claim against two sources."},
+        {"type": "custom", "id": "skill_abc123", "version": "latest"},
+        {"type": "custom", "id": "skill_def456", "version": "3"},
+    ])
+
+
+@pytest.mark.parametrize("skills,message", [
+    ([{"type": "builtin", "name": "office/odt"}], "unknown builtin skill"),
+    ([{"type": "inline", "name": "Fact_Check", "description": "d", "instructions": "i"}], "invalid inline skill name"),
+    ([{"type": "inline", "name": "office", "description": "d", "instructions": "i"}], "conflicts with a built-in"),
+    ([{"type": "inline", "name": "a", "description": "", "instructions": "i"}], "description must be"),
+    ([{"type": "inline", "name": "a", "description": "d", "instructions": "x" * 65_537}], "instructions must be"),
+    ([{"type": "custom", "id": "abc"}], "invalid custom skill id"),
+    ([{"type": "custom", "id": "skill_abc", "version": "v1"}], "version must be"),
+    ([{"type": "builtin", "name": "office"}] * 2, "listed more than once"),
+    ([{"type": "builtin", "name": "office"}] + [{"type": "custom", "id": f"skill_{i}"} for i in range(16)], "at most 16"),
+    ("office", "skills must be a list"),
+])
+def test_validate_skills_rejects_contract_violations(skills, message) -> None:
+    from temporalio.exceptions import ApplicationError
+
+    with pytest.raises(ApplicationError, match=message) as caught:
+        agent_api_tools._validate_skills(skills)
+    assert caught.value.non_retryable is True
 
 
 def test_mcp_tools_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -224,7 +298,6 @@ def test_connector_tools_are_the_documented_request_shape() -> None:
     assert connectors == [{"type": "connector", **connector} for connector in CONNECTORS]
     assert [(c["id"], c["server_label"]) for c in connectors] == [
         ("connector_github", "github"),
-        ("connector_linear", "linear"),
     ]
     for connector in connectors:
         assert set(connector) <= {"type", "id", "server_label", "server_description"}
@@ -241,14 +314,14 @@ def test_all_factories_share_native_tools(monkeypatch, caplog) -> None:
     tools = run_worker.native_tools()
     assert tools == [*run_worker.NATIVE_TOOLS, *run_worker.mcp_tools(), *run_worker.connector_tools()]
     assert [tool["type"] for tool in tools] == [
-        "web_search", "fetch_url", "people_search", "finance_search", "sandbox",
-        "mcp", "mcp", "connector", "connector",
+        "web_search", "fetch_url", "image_search", "people_search", "finance_search", "sandbox",
+        "mcp", "mcp", "connector",
     ]
     for factory in factories.values():
         assert factory().get_config()["params"]["tools"] == tools
     records = [r for r in caplog.records if "Registered Agent API connectors" in r.getMessage()]
     assert len(records) == 1 and records[0].levelname == "INFO"
-    assert "['github', 'linear']" in records[0].getMessage()
+    assert "['github']" in records[0].getMessage()
     assert not [r for r in caplog.records if r.levelno >= 30]
     assert "private-api-key" not in caplog.text and "private-mcp-key" not in caplog.text
 
@@ -275,7 +348,7 @@ def test_model_params_tools_include_connectors(model_id: str) -> None:
     connector_ids = [
         tool["id"] for tool in params["tools"] if tool.get("type") == "connector"
     ]
-    assert connector_ids == ["connector_github", "connector_linear"]
+    assert connector_ids == ["connector_github"]
 
 
 # --- catalog fetch --------------------------------------------------------------
@@ -380,8 +453,43 @@ async def test_no_keys_at_all_raises_system_exit() -> None:
 
 def test_workflow_tool_specs_include_all_registered_tools() -> None:
     names = [spec["name"] for spec in run_worker.workflow_tool_specs()]
-    for expected in ("graph", "use_agent", "use_skill", "mcp_client", "browser", "think"):
+    for expected in (
+        "graph", "use_agent", "use_skill", "mcp_client", "browser", "think",
+        "python_repl", "discover_tools", "unload_tools",
+    ):
         assert expected in names, f"missing {expected}"
+
+
+def test_python_repl_is_a_thin_activity_over_the_installed_tool() -> None:
+    """Local code execution is the installed community REPL bound the Temporal
+    way: a worker-registered ``@activity.defn`` wrapping the public callable,
+    exposed through ``activity_as_tool`` with the config envelope -- not the
+    AWS AgentCore code interpreter and not a vendored loop."""
+    import inspect
+
+    from temporalio import activity
+    from temporalio.contrib.strands._temporal_activity_tool import TemporalActivityTool
+    from strands_tools import python_repl as installed
+
+    import python_repl_activity
+    from config import (
+        PYTHON_REPL_HEARTBEAT_TIMEOUT, PYTHON_REPL_RETRY_POLICY, PYTHON_REPL_START_TO_CLOSE,
+    )
+    from workflow import PERMANENT_COMMUNITY_TOOLS
+
+    assert python_repl_activity.python_repl in run_worker.WORKER_ACTIVITIES
+    assert activity._Definition.from_callable(python_repl_activity.python_repl).name == "python_repl"
+    assert python_repl_activity.native_python_repl is installed.python_repl
+    source = inspect.getsource(python_repl_activity)
+    assert "code_interpreter" not in source and "AgentCore" not in source
+    tool = next(tool for tool in PERMANENT_COMMUNITY_TOOLS if tool.tool_name == "python_repl")
+    assert isinstance(tool, TemporalActivityTool)
+    assert tool._options["start_to_close_timeout"] == PYTHON_REPL_START_TO_CLOSE
+    assert tool._options["heartbeat_timeout"] == PYTHON_REPL_HEARTBEAT_TIMEOUT
+    assert tool._options["retry_policy"] == PYTHON_REPL_RETRY_POLICY
+    schema = tool.tool_spec["inputSchema"]["json"]
+    assert schema["required"] == ["code"]
+    assert set(schema["properties"]) == {"code", "reset_state"}
 
 
 def test_validate_outbound_tools_accepts_current_registry(monkeypatch) -> None:

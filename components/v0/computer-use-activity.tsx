@@ -83,7 +83,7 @@ export function ComputerUseActivity({ parts, isThinking, sessionId }: {
           <span className="min-w-0 flex-1 text-left text-[13px] font-medium tracking-[0.01em] text-foreground">
             {isThinking ? <Shimmer>Computer use</Shimmer> : "Computer use"}
           </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-black/20 px-2 py-0.5 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/70 px-2 py-0.5 text-[11px] text-muted-foreground">
             <span className={`size-1.5 rounded-full ${isThinking ? "animate-pulse-soft bg-blurple-bright" : "bg-muted-foreground/50"}`} />
             {terminal}/{tools.length} actions finished
           </span>

@@ -20,7 +20,7 @@ from temporalio.exceptions import ApplicationError
 
 from config import SUBAGENT_STREAM_BATCH_INTERVAL
 from skills_config import create_use_skill_tool
-from graph_tool import _select_tools
+from graph_tool import _select_tools, _tool_name
 from subagent_support import (
     heartbeat,
     in_process_model,
@@ -51,9 +51,10 @@ async def use_skill_activity(
             exactly these names and loads their instructions into its own
             context (Pattern 2) — traditional skill use, never a nested
             sub-agent. Unknown names fail the call with the available list.
-        tools: Registry names to assign on top of the Pattern 3 tools
-            (file_read, file_write, shell). Omit and the sub-agent gets only
-            those reference tools. Unknown names are skipped.
+        tools: Registry names to assign on top of file_read, file_write,
+            shell, and python_repl. Omit this and the sub-agent also receives
+            every community tool loaded on this session. Name the tools this
+            skill needs to give it that set instead. Unknown names are skipped.
     """
     from workflow import THINKING_TOPIC
 
@@ -68,7 +69,7 @@ async def use_skill_activity(
     try:
         model = in_process_model(await session_model("use_skill"))
         parent = await parent_agent(await session_model("use_skill"))
-        assigned_tools = _select_tools(parent, tools) if tools else None
+        assigned_tools = _select_tools(parent, tools)
         use_skill_tool = create_use_skill_tool(
             model, assigned_skills=skills, tools=assigned_tools
         )
@@ -82,7 +83,12 @@ async def use_skill_activity(
             catalog = skills_prompt(skills)
             if catalog:
                 request = f"{request}\n\n{catalog}"
-                tool_use["input"]["request"] = request
+        from skills_config import skill_resource_note
+
+        resources = skill_resource_note(skill_name)
+        if resources:
+            request = f"{request}\n\n{resources}"
+        tool_use["input"]["request"] = request
         invocation_state: dict[str, Any] = {"agent": parent, "model": model}
 
         stream_client = WorkflowStreamClient.from_within_activity(
@@ -97,7 +103,8 @@ async def use_skill_activity(
                 "tool_use": {"name": "use_skill", "toolUseId": tool_use["toolUseId"]},
                 "data": {"skill_name": skill_name, "type": "skill_start",
                          "attempt": activity.info().attempt, "request": request,
-                         "skills": skills or [], "assigned_tools": tools or []},
+                         "skills": skills or [],
+                         "assigned_tools": [_tool_name(tool) for tool in assigned_tools]},
             })
             async for event in stream:
                 heartbeat()

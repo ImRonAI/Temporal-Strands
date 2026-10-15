@@ -97,7 +97,7 @@ export function GraphArtifacts({ run }: { run: GraphRunState }) {
     <div className="space-y-2">
       {run.resultText && (
         <Artifact className="app-glass app-glass-edge border">
-          <ArtifactHeader className="app-glass-edge bg-black/25">
+          <ArtifactHeader className="app-glass-edge bg-secondary/70">
             <div className="flex items-center gap-2">
               <NetworkIcon className="size-4 text-blurple-bright/80" />
               <ArtifactTitle>Formation result · {run.runId}</ArtifactTitle>
@@ -121,7 +121,7 @@ export function GraphArtifacts({ run }: { run: GraphRunState }) {
           key={node.id}
           className="app-glass app-glass-edge border"
         >
-          <ArtifactHeader className="app-glass-edge bg-black/25">
+          <ArtifactHeader className="app-glass-edge bg-secondary/70">
             <div className="flex items-center gap-2">
               <NetworkIcon className="size-4 text-blurple-bright/80" />
               <ArtifactTitle>{node.id}</ArtifactTitle>

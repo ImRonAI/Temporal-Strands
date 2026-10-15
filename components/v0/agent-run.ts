@@ -183,6 +183,7 @@ export function bindRunsToChains(
 // chain uses.
 const RUN_NATIVE_ITEM_TYPES: ReadonlySet<string> = new Set([
   "search_results",
+  "image_search_results",
   "people_search_results",
   "finance_results",
   "fetch_url_results",

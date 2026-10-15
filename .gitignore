@@ -30,4 +30,5 @@ fair-expanse-*.json
 *-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].json
 compute.json
 orchestrator/.runtime/
-scripts/__pycache__/
+__pycache__/
+*.pyc

@@ -33,9 +33,16 @@ from typing import Any
 import httpx
 from dotenv import load_dotenv
 from google import genai
-from temporalio.client import Client
+from temporalio import activity
+from temporalio.client import (
+    Client, Schedule, ScheduleActionStartWorkflow, ScheduleAlreadyRunningError,
+    ScheduleIntervalSpec, ScheduleOverlapPolicy, SchedulePolicy, ScheduleSpec,
+)
 from temporalio.contrib.strands import StrandsPlugin
-from temporalio.worker import UnsandboxedWorkflowRunner, Worker
+from temporalio.worker import (
+    ActivityInboundInterceptor, ExecuteActivityInput, Interceptor,
+    UnsandboxedWorkflowRunner, Worker,
+)
 
 import think_activity
 # Shared native-tools builders live in agent_api_tools; the public names are
@@ -53,6 +60,8 @@ from compare_workflow import CompareWorkflow
 from config import (
     BUILTIN_SKILLS,
     DEFAULT_MODEL_ID,
+    DREAM_MIN_INTERVAL,
+    GEMINI_MODEL_ID,
     GEMINI_MAX_OUTPUT_TOKENS,
     GEMINI_MODEL_IDS,
     MAX_OUTPUT_TOKENS_CEILING,
@@ -64,20 +73,31 @@ from config import (
     PROVIDER_OUTPUT_CEILINGS,
     PROVIDER_PERPLEXITY_AGENT_API,
     RegisteredModel,
+    REASONING_EFFORTS,
     TASK_QUEUE,
+    THINK_MODEL_ID,
 )
+from delegation_hook import DELEGATION_SOP
+from dream_workflow import DreamWorkflow
 from gemini_model import GeminiModel
 from perplexity_model import PRESET_PREFIX, PerplexityModel
 import computer_use_activity
 import subagent_support
 from graph_activity import graph_activity
 from graph_tool import configure_models
-from load_tool import load_tool_activity, mcp_client_activity, run_loaded_tool
+from load_tool import (
+    discover_tools_activity,
+    load_tool_activity,
+    mcp_client_activity,
+    run_loaded_tool,
+)
+import python_repl_activity
 from skills_config import ensure_skills_configured, skills_dir
 from telemetry import telemetry_plugins
 from use_agent_activity import use_agent_activity
 from use_skill_activity import use_skill_activity
-from workflow import ChatWorkflow, mcp_client_factories
+from agent_tools import mcp_client_factories
+from workflow import ChatWorkflow
 
 _ROOT = Path(__file__).resolve().parent
 load_dotenv(_ROOT.parent / ".env.local", override=False)
@@ -89,6 +109,7 @@ os.environ.setdefault("BYPASS_TOOL_CONSENT", "true")
 logger = logging.getLogger(__name__)
 
 MCP_CONFIG_PATH = _ROOT / "mcp.json"
+REASONING_LEVELS_PATH = _ROOT.parent / "lib" / "reasoning-levels.json"
 
 PERPLEXITY_MODELS_URL = f"{PERPLEXITY_API_BASE}/v1/models"
 
@@ -118,19 +139,24 @@ def max_output_tokens_for(model_id: str) -> int:
 def model_params(model_id: str, tools: list[dict[str, Any]]) -> dict[str, Any]:
     """Request params for one Perplexity model id.
 
-    Catalog provider/model ids get ``max_output_tokens`` at that provider's
-    ceiling: a small budget lets a reasoning model spend everything thinking
-    and emit no answer ("model produced no usable answer (reasoning_only)").
-    Preset ids do NOT get it -- presets own their budgets.
+    Every id gets ``max_output_tokens`` at the platform ceiling: a small
+    budget lets a reasoning model spend everything thinking and emit no
+    answer ("model produced no usable answer (reasoning_only)"). Presets
+    merge request fields over their defaults, so the ceiling lifts the
+    fast/low presets' published 8192/32768 budgets without changing the
+    preset's model, prompt, or tools. Catalog provider/model ids get that
+    provider's ceiling (``PROVIDER_OUTPUT_CEILINGS``); presets resolve to a
+    model only server-side, so they get the platform ceiling.
     """
-    params: dict[str, Any] = {
+    return {
         **MODEL_PARAMS,
         "tools": tools,
         "skills": [dict(skill) for skill in BUILTIN_SKILLS],
+        "max_output_tokens": (
+            MAX_OUTPUT_TOKENS_CEILING if model_id.startswith(PRESET_PREFIX)
+            else max_output_tokens_for(model_id)
+        ),
     }
-    if not model_id.startswith(PRESET_PREFIX):
-        params["max_output_tokens"] = max_output_tokens_for(model_id)
-    return params
 
 
 async def fetch_model_ids(api_key: str) -> list[str]:
@@ -197,6 +223,13 @@ def build_perplexity_factories(
         )
         for model_id in registered_ids
     ]
+    previous = json.loads(REASONING_LEVELS_PATH.read_text())
+    levels = {key: previous[key] for key in GEMINI_MODEL_IDS if key in previous}
+    efforts = sorted(REASONING_EFFORTS, key=("minimal", "low", "medium", "high", "xhigh", "max").index)
+    levels.update({model_id: efforts for model_id in registered_ids})
+    temporary = REASONING_LEVELS_PATH.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(levels, indent=2) + "\n")
+    temporary.replace(REASONING_LEVELS_PATH)
     return factories, catalog
 
 
@@ -213,7 +246,7 @@ def agent_identity() -> tuple[str, str]:
         raise SystemExit("agent.json: 'name' must be a non-empty string")
     if not isinstance(prompt, str) or not prompt.strip():
         raise SystemExit("agent.json: 'prompt' must be a non-empty string")
-    return name, prompt
+    return name, f"{prompt}\n\n{DELEGATION_SOP}"
 
 
 def build_model_factory(
@@ -240,18 +273,6 @@ def build_model_factory(
                     include_server_side_tool_invocations=True,
                 ),
             },
-            # Official generateContent Computer Use (Python tab):
-            # https://ai.google.dev/gemini-api/docs/generate-content/computer-use
-            # Live generateContent 400: computer_use cannot be combined with
-            # google_search in the same request.
-            gemini_tools=[
-                genai.types.Tool(
-                    computer_use=genai.types.ComputerUse(
-                        environment=genai.types.Environment.ENVIRONMENT_BROWSER,
-                        enable_prompt_injection_detection=True,
-                    )
-                ),
-            ],
         )
 
     factories = {
@@ -332,11 +353,12 @@ def workflow_tool_specs() -> list[dict[str, Any]]:
     starts. MCP/computer-use tools are excluded: their specs come from live
     servers / the Gemini-only branch, not from ``activity_as_tool`` here.
     """
-    from workflow import PERMANENT_COMMUNITY_TOOLS, THINK_TOOL
+    from agent_tools import PERMANENT_COMMUNITY_TOOLS, THINK_TOOL
+    from load_tool import catalog_tools
 
     return [
         dict(tool.tool_spec)
-        for tool in (*PERMANENT_COMMUNITY_TOOLS, THINK_TOOL)
+        for tool in (*PERMANENT_COMMUNITY_TOOLS, *catalog_tools({}), THINK_TOOL)
     ]
 
 
@@ -346,21 +368,20 @@ def validate_outbound_tools() -> None:
     Every outer Perplexity request carries ALL registered tool definitions,
     so one invalid schema rejects the whole request before inference. This
     replays the exact outbound conversion (``PerplexityModel._format_request``:
-    function entries with ``_ensure_object_properties``-normalized parameters,
+    function entries with ``function_parameters``-normalized parameters,
     prepended natives) and runs the Agent API contract validator
     (``agent_api_tools._validate_tools``). Legal JSON Schema features
     pass through; only contract violations and non-JSON-serializable payloads
     fail.
     """
-    from perplexity_model import _ensure_object_properties
-    from agent_api_tools import _validate_tools
-
+    from perplexity_model import function_parameters
+    from agent_api_tools import _validate_skills, _validate_tools
     converted = [
         {
             "type": "function",
             "name": spec["name"],
             "description": spec.get("description", ""),
-            "parameters": _ensure_object_properties(spec["inputSchema"]["json"]),
+            "parameters": function_parameters(spec["inputSchema"]["json"]),
         }
         for spec in workflow_tool_specs()
     ]
@@ -375,6 +396,7 @@ def validate_outbound_tools() -> None:
         ) from error
     try:
         _validate_tools(outbound)
+        _validate_skills([dict(skill) for skill in BUILTIN_SKILLS])
     except Exception as error:
         raise SystemExit(f"tool spec validation failed: {error}") from error
     for tool in converted:
@@ -399,8 +421,10 @@ WORKER_ACTIVITIES = [
         use_agent_activity,
         use_skill_activity,
         load_tool_activity,
+        discover_tools_activity,
         mcp_client_activity,
         run_loaded_tool,
+        python_repl_activity.python_repl,
         think_activity.think,
 ]
 
@@ -457,6 +481,52 @@ def connect_included_mcp_servers() -> list[str]:
     return connected
 
 
+async def ensure_dream_schedule(client: Client, model_factories: dict[str, Callable]) -> None:
+    model_id = next(
+        (model for model in (THINK_MODEL_ID, GEMINI_MODEL_ID) if model in model_factories),
+        None,
+    )
+    if model_id is None:
+        raise RuntimeError("Dream requires a registered GPT 6 or Gemini 3.8 Flash factory")
+    try:
+        await client.create_schedule(
+            "gwen-dream",
+            Schedule(
+                action=ScheduleActionStartWorkflow(
+                    DreamWorkflow.run, model_id, id="gwen-dream", task_queue=TASK_QUEUE,
+                ),
+                spec=ScheduleSpec(intervals=[ScheduleIntervalSpec(every=DREAM_MIN_INTERVAL)]),
+                policy=SchedulePolicy(overlap=ScheduleOverlapPolicy.SKIP),
+            ),
+        )
+    except ScheduleAlreadyRunningError:
+        logger.info("Dream schedule already exists")
+
+
+class OptionalMCPDiscoveryInterceptor(Interceptor):
+    def __init__(self, optional_servers: set[str]) -> None:
+        self.activities = {f"{name}-list-tools": name for name in optional_servers}
+
+    def intercept_activity(self, next: ActivityInboundInterceptor) -> ActivityInboundInterceptor:
+        return _OptionalMCPDiscovery(next, self.activities)
+
+
+class _OptionalMCPDiscovery(ActivityInboundInterceptor):
+    def __init__(self, next: ActivityInboundInterceptor, activities: dict[str, str]) -> None:
+        super().__init__(next)
+        self.activities = activities
+
+    async def execute_activity(self, input: ExecuteActivityInput) -> Any:
+        try:
+            return await self.next.execute_activity(input)
+        except Exception:
+            server = self.activities.get(activity.info().activity_type)
+            if server is None:
+                raise
+            logger.warning("Optional MCP server '%s' discovery failed; no tools available", server, exc_info=True)
+            return []
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
@@ -468,6 +538,11 @@ async def main() -> None:
     set_catalog(catalog)
     logger.info("Provider-declaring model catalog: %d entries", len(catalog))
     mcp_clients = mcp_client_factories()
+    configured_servers = json.loads(MCP_CONFIG_PATH.read_text()).get("mcpServers", {})
+    optional_servers = {
+        name for name, cfg in configured_servers.items()
+        if name in mcp_clients and cfg.get("continue_on_error")
+    }
     connected_mcp_servers = connect_included_mcp_servers()
     # Fail fast: one invalid generated tool schema in the outbound array
     # rejects every outer-model request before inference.
@@ -484,9 +559,10 @@ async def main() -> None:
     worker = Worker(
         client,
         task_queue=TASK_QUEUE,
-        workflows=[ChatWorkflow, CompareWorkflow, ModelCatalogWorkflow],
+        workflows=[ChatWorkflow, CompareWorkflow, ModelCatalogWorkflow, DreamWorkflow],
         activities=[*WORKER_ACTIVITIES],
         workflow_runner=UnsandboxedWorkflowRunner(),
+        interceptors=[OptionalMCPDiscoveryInterceptor(optional_servers)],
     )
 
     # One shared registry for every sub-agent activity (graph / use_agent /
@@ -510,6 +586,7 @@ async def main() -> None:
         skills_dir(),
         list(mcp_clients),
     )
+    await ensure_dream_schedule(client, model_factories)
     try:
         await worker.run()
     finally:

@@ -44,10 +44,10 @@ from strands.types.streaming import StreamEvent
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-import agent_api_tools
 from config import (
     DOCUMENT_INLINE_MAX_CHARS, NATIVE_OUTPUT_ITEM_TYPES, PERMANENT_API_ERROR_TYPES,
     PERMANENT_HTTP_STATUSES, PERPLEXITY_API_BASE, REASONING_EFFORTS,
+    VISION_INCAPABLE_MODELS, VISION_PROXY_EFFORT, VISION_PROXY_MAX_OUTPUT_TOKENS, VISION_PROXY_MODEL,
 )
 from desktop_observation import latest_observation, resolve_observation
 from workspace_state import StateConflict
@@ -78,6 +78,7 @@ class _Invocation:
     arguments: dict[str, str] = field(default_factory=dict)
     effort: str | None = None
     progressed: bool = False
+    omitted_connectors: set[str] = field(default_factory=set)
 
 
 def _error(message: str, *, non_retryable: bool) -> ApplicationError:
@@ -120,6 +121,60 @@ def _ensure_object_properties(schema: Any) -> Any:
     return schema
 
 
+# JSON Schema keywords whose values are name -> subschema maps. A key inside
+# one of these is a property name, never a schema keyword, so ``pattern`` as
+# a property name must survive the strip below.
+_SCHEMA_MAPS = frozenset({"properties", "patternProperties", "$defs", "definitions"})
+# Validation keywords the Agent API's request validator rejects for the WHOLE
+# request (400 ``invalid request`` before inference) when their value uses a
+# regex feature outside its dialect -- lookahead/lookbehind, ``(?<name>``,
+# ``\p{..}`` (bisected live against POST /v1/agent, 2026-10-15). The dialect is
+# undocumented, MCP servers commonly emit such patterns (every Telnyx MCP tool
+# ends its patterns in ``(?![\s\S])``), and the keyword only constrains
+# argument *validation*, which the tool server performs itself on call. The
+# ``description`` the model actually reads is untouched.
+_UNSUPPORTED_SCHEMA_KEYWORDS = frozenset({"pattern"})
+
+
+def _strip_unsupported_keywords(schema: Any) -> Any:
+    """Drop ``_UNSUPPORTED_SCHEMA_KEYWORDS`` from every schema node."""
+    if isinstance(schema, dict):
+        stripped: dict[str, Any] = {}
+        for key, value in schema.items():
+            if key in _UNSUPPORTED_SCHEMA_KEYWORDS and isinstance(value, str):
+                continue
+            if key in _SCHEMA_MAPS and isinstance(value, dict):
+                stripped[key] = {name: _strip_unsupported_keywords(sub) for name, sub in value.items()}
+            else:
+                stripped[key] = _strip_unsupported_keywords(value)
+        return stripped
+    if isinstance(schema, list):
+        return [_strip_unsupported_keywords(item) for item in schema]
+    return schema
+
+
+def function_parameters(schema: Any) -> Any:
+    """The exact ``parameters`` object sent for one function tool.
+
+    Shared by ``_outbound_tools`` and ``run_worker.validate_outbound_tools``
+    so startup validation replays the wire conversion byte for byte.
+    """
+    return _strip_unsupported_keywords(_ensure_object_properties(schema))
+
+
+def _outbound_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Give every function tool a parameters schema the Agent API accepts.
+
+    Native tool objects (``web_search``, ``mcp``, ``connector``, and the rest
+    of the API's ``Tool`` union) pass through unchanged.
+    """
+    return [
+        {**entry, "parameters": function_parameters(entry.get("parameters"))}
+        if entry.get("type") == "function" else entry
+        for entry in tools
+    ]
+
+
 def source_bytes(data: Any) -> bytes:
     """Raw bytes for a media block's ``source.bytes`` after a Temporal hop.
 
@@ -152,6 +207,27 @@ def _with_media_bytes(content: Any) -> Any:
     if isinstance(result := content.get("toolResult"), dict) and isinstance(items := result.get("content"), list):
         return {**content, "toolResult": {**result, "content": [_with_media_bytes(c) for c in items]}}
     return content
+
+
+# The vision proxy answers for a session model that cannot see. It returns
+# only what that model needs to act: no prose, no guesses, 0-999 coordinates in
+# the same space the computer-use actions take.
+VISION_PROXY_INSTRUCTIONS = """You are the eyes for a desktop agent that cannot see images.
+Read the screenshot and report only the facts the agent needs to act. No
+greeting, no advice, no prose paragraphs.
+
+Coordinates are image pixels, x then y, measured from the top-left corner.
+Give the centre of each target.
+
+Report, in this order:
+SCREEN: active app or page title, and URL if a browser address bar is visible.
+STATE: modals, dialogs, errors, loading spinners, or focused fields.
+TARGETS: one line per actionable element as `label | type | x,y`
+  (types: button, link, input, checkbox, tab, menu, icon, dropdown).
+  Include every element a next step could need. Quote visible text exactly.
+TEXT: important on-screen text the agent may need verbatim (values, errors,
+  headings), one item per line.
+If something is unreadable or ambiguous, say so instead of guessing."""
 
 
 def _messages_with_media_bytes(messages: Any) -> Any:
@@ -243,14 +319,30 @@ async def _messages_with_document_text(messages: Any) -> Any:
     ]
 
 
+def _native_payload(payload: Any) -> dict[str, Any] | None:
+    """The Perplexity-only server-side tool event in an SSE payload, else None.
+
+    Typed reasoning events (``response.reasoning.*``, ``response.skill.loaded``)
+    are forwarded as they are. A completed output item is forwarded as the
+    bare item: the ``response.output_item.done`` envelope adds only
+    ``sequence_number``/``output_index``, and the UI keys its cards on the
+    item's own ``type``/``call_id``/``id`` (``sandbox-{call_id}``,
+    ``mcp-{id}``, ``file-{call_id}``). ``.added`` is skipped so an item
+    renders once, on completion.
+    """
+    if not isinstance(payload, dict) or not isinstance(kind := payload.get("type"), str):
+        return None
+    if kind.startswith("response.reasoning.") or kind == "response.skill.loaded":
+        return payload
+    item = payload.get("item") if kind == "response.output_item.done" else None
+    if isinstance(item, dict) and item.get("type") in NATIVE_OUTPUT_ITEM_TYPES:
+        return item
+    return None
+
+
 def _is_native(payload: Any) -> bool:
     """Whether an SSE payload is a Perplexity-only server-side tool event."""
-    if not isinstance(payload, dict) or not isinstance(kind := payload.get("type"), str):
-        return False
-    if kind.startswith("response.reasoning.") or kind == "response.skill.loaded":
-        return True
-    item = payload.get("item") if kind == "response.output_item.done" else None
-    return isinstance(item, dict) and item.get("type") in NATIVE_OUTPUT_ITEM_TYPES
+    return _native_payload(payload) is not None
 
 
 def _function_call_item(payload: Any) -> dict[str, Any] | None:
@@ -300,7 +392,7 @@ def _enqueue_native(
     if state is not None and not (
         isinstance(payload, dict) and (
             payload.get("error")
-            or (payload.get("type") in {"response.created", "response.in_progress"}
+            or (payload.get("type") in {"response.created", "response.in_progress", "response.failed"}
                 and isinstance(payload.get("response"), dict)
                 and not payload["response"].get("output"))
         )
@@ -308,8 +400,8 @@ def _enqueue_native(
         # The parent buffers function calls and skips native tool events. Fence
         # retries at the wire boundary, including progress it never yields.
         state.progressed = True
-    if _is_native(payload):
-        queue.put_nowait(payload)
+    if (native := _native_payload(payload)) is not None:
+        queue.put_nowait(native)
     if arguments is not None and (item := _function_call_item(payload)) is not None:
         if isinstance(args := item.get("arguments"), str) and args:
             arguments[item["call_id"]] = args
@@ -390,6 +482,59 @@ class PerplexityModel(OpenAIResponsesModel):
                 transport=self._transport, event_hooks={"response": [self._tap_sse]}),
         }
 
+    @staticmethod
+    def _normalise_targets(readout: str, width: int, height: int) -> str:
+        """Pixel ``label | type | x,y`` lines rewritten into 0-999 click space.
+
+        The proxy reports pixels (models measure those reliably); the
+        computer-use actions take 0-999 across the full screenshot, so the
+        conversion happens here, deterministically, not in the model.
+        """
+        def scale(match: re.Match[str]) -> str:
+            x = min(999, max(0, round(int(match.group(2)) * 999 / max(1, width - 1))))
+            y = min(999, max(0, round(int(match.group(3)) * 999 / max(1, height - 1))))
+            return f"{match.group(1)}{x},{y}"
+        return re.sub(r"^(.*\|\s*)(\d+)\s*,\s*(\d+)\s*$", scale, readout, flags=re.MULTILINE)
+
+    async def _describe_screenshot(self, png: bytes) -> str:
+        """The vision proxy's read-out of one desktop screenshot.
+
+        A nested call on ``VISION_PROXY_MODEL`` at high reasoning effort, made
+        inside the same model activity, so it is retried and timed out with the
+        turn. No tools: it only reads the image.
+        """
+        proxy = PerplexityModel(
+            model_id=VISION_PROXY_MODEL,
+            params={"max_output_tokens": VISION_PROXY_MAX_OUTPUT_TOKENS},
+            api_key=self._api_key,
+            transport=self._transport,
+        )
+        text = ""
+        try:
+            async for event in proxy.stream(
+                [{"role": "user", "content": [
+                    {"text": "Read this desktop screenshot."},
+                    {"image": {"format": "png", "source": {"bytes": png}}},
+                ]}],
+                None,
+                VISION_PROXY_INSTRUCTIONS,
+                invocation_state={"reasoning_effort": VISION_PROXY_EFFORT},
+            ):
+                text += event.get("contentBlockDelta", {}).get("delta", {}).get("text", "") or ""
+        except ApplicationError:
+            raise
+        except Exception as error:
+            raise _error(f"Vision proxy failed: {error}", non_retryable=False) from error
+        if not text.strip():
+            raise _error("Vision proxy returned no description", non_retryable=False)
+        from PIL import Image
+        with Image.open(io.BytesIO(png)) as image:
+            width, height = image.size
+        return (
+            "Target coordinates are already in click space (0-999 across the full screenshot).\n"
+            + self._normalise_targets(text.strip(), width, height)
+        )
+
     async def _tap_sse(self, response: httpx.Response) -> None:
         """Observe Perplexity-only events, forwarding every byte unchanged."""
         if not response.headers.get("content-type", "").startswith("text/event-stream"):
@@ -420,10 +565,11 @@ class PerplexityModel(OpenAIResponsesModel):
         if preset := self._validate_config(str(self.config.get("model_id", "")), params):
             request["preset"] = preset
             request.pop("model", None)
-        request["tools"] = [
-            _ensure_object_properties(t) if t.get("type") == "function" else t
-            for t in request.get("tools", [])]
+        request["tools"] = _outbound_tools(request.get("tools", []))
         state = self._invocation.get()
+        if state and state.omitted_connectors:
+            request["tools"] = [tool for tool in request["tools"] if not (
+                tool.get("type") == "connector" and tool.get("id") in state.omitted_connectors)]
         if state and (effort := state.effort) is not None:
             if effort not in REASONING_EFFORTS:
                 # Fail before the API call: an effort outside the Agent API's
@@ -467,7 +613,15 @@ class PerplexityModel(OpenAIResponsesModel):
             # base64 text (see workflow.turn_content_blocks); the parent's
             # data-URL encoder requires real bytes.
             messages = _messages_with_media_bytes(messages)
-            if observation:
+            if observation and str(self.config.get("model_id", "")) in VISION_INCAPABLE_MODELS:
+                # This model rejects image input outright. Its vision proxy reads
+                # the screenshot and only the text read-out reaches the request.
+                readout = await self._describe_screenshot(png)
+                messages = [*messages, {"role": "user", "content": [
+                    {"text": f"Desktop screenshot from tool call {call_id}, read by the vision agent "
+                             f"({VISION_PROXY_MODEL}) because this model cannot view images:\n\n{readout}"},
+                ]}]
+            elif observation:
                 # Image bytes exist only in this activity's outgoing request, not
                 # in Temporal messages. Perplexity function outputs stay strings.
                 messages = [*messages, {"role": "user", "content": [
@@ -478,31 +632,51 @@ class PerplexityModel(OpenAIResponsesModel):
                 args = (messages, *args[1:])
             else:
                 kwargs = {**kwargs, "messages": messages}
-            try:
-                async for chunk in super().stream(*args, **kwargs):
-                    for native in self._drain():
-                        if self._stream_callback:
-                            self._stream_callback(native)
-                        yield native
-                    chunk, current_tool_use = _fill_tool_arguments(chunk, state.arguments, current_tool_use)
-                    if self._stream_callback:
-                        self._stream_callback(chunk)
-                    yield chunk
-            except APIError as error:
-                # Only an explicit rejection before progress is safe to replay.
-                # SDK retries stay disabled; TemporalAgent owns the backoff.
-                retryable = (
-                    not state.progressed
-                    and not _is_permanent(error)
-                    and error.message == "upstream model is overloaded, please try again later"
-                )
-                raise _error(str(error), non_retryable=not retryable) from error
-            except (ContextWindowOverflowException, ModelThrottledException):
-                # Preserve Strands' native classification; the model activity
-                # policy excludes these from automatic retries.
-                raise
-            except Exception as error:
-                raise _error(str(error), non_retryable=True) from error
+            configured_connectors = {tool.get("id") for tool in (self.config.get("params") or {}).get("tools", [])
+                                     if tool.get("type") == "connector"}
+            model_state = kwargs.get("model_state")
+            original_model_state = copy.deepcopy(model_state)
+            while True:
+                start = None
+                emitted = False
+                try:
+                    async for chunk in super().stream(*args, **kwargs):
+                        # The SDK emits messageStart before reading the response.
+                        # Hold it so a rejected request cannot create a duplicate.
+                        if "messageStart" in chunk:
+                            start = chunk
+                            continue
+                        for frame in ([start] if start else []) + self._drain() + [chunk]:
+                            frame, current_tool_use = _fill_tool_arguments(frame, state.arguments, current_tool_use)
+                            emitted = True
+                            if self._stream_callback:
+                                self._stream_callback(frame)
+                            yield frame
+                        start = None
+                    break
+                except (ContextWindowOverflowException, ModelThrottledException):
+                    raise
+                except Exception as error:
+                    disconnected = re.search(r'Managed connector "([^"\r\n]+)" is not connected\.', str(error))
+                    connector_id = disconnected.group(1) if disconnected else None
+                    if (getattr(error, "status_code", None) in {None, 400, 424}
+                            and not state.progressed and not emitted and connector_id in configured_connectors
+                            and connector_id not in state.omitted_connectors):
+                        # This is request validation, not an inference retry.
+                        # Each attempt removes one named connector, bounding it
+                        # by the configured set; never replay partial tool work.
+                        logger.warning("Optional connector %s is disconnected; continuing without it", connector_id)
+                        state.omitted_connectors.add(connector_id)
+                        state.arguments.clear()
+                        self._drain()
+                        if model_state is not None:
+                            model_state.clear()
+                            model_state.update(original_model_state)
+                        continue
+                    retryable = (isinstance(error, APIError) and not state.progressed
+                                 and not _is_permanent(error)
+                                 and error.message == "upstream model is overloaded, please try again later")
+                    raise _error(str(error), non_retryable=not retryable) from error
             for native in self._drain():
                 if self._stream_callback:
                     self._stream_callback(native)

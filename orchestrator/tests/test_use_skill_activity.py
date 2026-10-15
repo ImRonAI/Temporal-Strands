@@ -21,7 +21,7 @@ from subagent_support import sanitize_stream_payload
 from use_skill_activity import use_skill_activity
 
 os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
-CALCULATOR = str(STRANDS_TOOLS_DIR / "calculator.py")
+CALCULATOR = str(STRANDS_TOOLS_DIR / "sleep.py")
 
 
 @pytest.mark.asyncio
@@ -48,7 +48,9 @@ async def test_skill_stream_is_closed_when_publish_fails() -> None:
             workflow_id="test", activity_id="skill", attempt=1,
         )),
         patch.object(module, "session_model", AsyncMock(return_value=SilentModel())),
-        patch.object(module, "parent_agent", AsyncMock()),
+        patch.object(module, "parent_agent", AsyncMock(return_value=SimpleNamespace(
+            tool_registry=SimpleNamespace(registry={}),
+        ))),
         patch.object(module, "create_use_skill_tool", return_value=SimpleNamespace(stream=stream)),
         patch.object(module.WorkflowStreamClient, "from_within_activity", return_value=client),
     ):
@@ -93,6 +95,10 @@ async def test_reference_pattern_three_runs_isolated_skill_agents(monkeypatch, t
             f"---\nname: {name}\ndescription: Specialist {name}\n---\n"
             f"# {name} instructions\nAct as the {name} specialist.\n"
         )
+    (tmp_path / "alpha" / "references").mkdir()
+    (tmp_path / "alpha" / "references" / "guide.md").write_text("alpha facts")
+    (tmp_path / "alpha" / "scripts").mkdir()
+    (tmp_path / "alpha" / "scripts" / "run.py").write_text("print(1)\n")
     monkeypatch.setenv("SKILLS_DIR", str(tmp_path))
     skills_config.discovered_skills.cache_clear()
     agentskills = skills_config._import_agentskills()
@@ -154,9 +160,16 @@ async def test_reference_pattern_three_runs_isolated_skill_agents(monkeypatch, t
             assert f"# {name} instructions" in prompt
             assert "Parent instructions" not in prompt
             assert len(messages) == 1
-            assert f"Task for {name}" in messages[0]["content"][0]["text"]
+            text = messages[0]["content"][0]["text"]
+            assert f"Task for {name}" in text
+            if name == "alpha":
+                assert "knowledge base" in text
+                assert "guide.md" in text
+                assert "run.py" in text
+            else:
+                assert "knowledge base" not in text
             assert "Private parent conversation" not in str(messages)
-            assert {spec["name"] for spec in specs} == {"file_read", "file_write", "shell"}
+            assert {spec["name"] for spec in specs} == {"shell", "python_repl"}
         assert parent.messages == parent_messages
         assert any(frame["data"].get("text") == "specialist result" for frame in published)
         assert sum(frame["data"].get("type") == "skill_complete" for frame in published) == 2
@@ -177,20 +190,27 @@ def test_sanitize_stream_payload_strips_agent() -> None:
     assert "agent" not in out
 
 
-def test_skill_activity_uses_caller_tool_id_with_replay_guard() -> None:
-    from workflow import _ToolResultHook
+def test_skill_resource_note_lists_references_and_scripts(tmp_path, monkeypatch) -> None:
+    skill = tmp_path / "with-resources"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text("---\nname: with-resources\ndescription: Uses files.\n---\nBody\n")
+    (skill / "references").mkdir()
+    (skill / "references" / "guide.md").write_text("the facts")
+    (skill / "scripts").mkdir()
+    (skill / "scripts" / "run.py").write_text("print(1)\n")
+    monkeypatch.setenv("SKILLS_DIR", str(tmp_path))
+    import skills_config
 
-    event = SimpleNamespace(tool_use={"name": "use_skill", "toolUseId": "caller-skill-42"}, selected_tool=None)
-    hook = _ToolResultHook(lambda _: None)
-    with patch("workflow.workflow.patched", return_value=True) as patched:
-        hook._bind_skill_activity(event)
-    patched.assert_called_once_with("skill-agent-stream-correlation-v1")
-    assert event.selected_tool.tool_name == "use_skill"
-    assert event.selected_tool._options["activity_id"] == "caller-skill-42"
-    event.selected_tool = None
-    with patch("workflow.workflow.patched", return_value=False):
-        hook._bind_skill_activity(event)
-    assert event.selected_tool is None
+    skills_config.discovered_skills.cache_clear()
+    try:
+        note = skills_config.skill_resource_note("with-resources")
+        assert "knowledge base" in note
+        assert str(skill / "references" / "guide.md") in note
+        assert "python_repl" in note
+        assert str(skill / "scripts" / "run.py") in note
+        assert skills_config.skill_resource_note("missing") == ""
+    finally:
+        skills_config.discovered_skills.cache_clear()
 
 
 @pytest.mark.asyncio
@@ -376,16 +396,16 @@ async def test_use_skill_activity_assigns_parent_registry_names() -> None:
         patch("use_skill_activity.create_use_skill_tool", factory),
         patch(
             "subagent_support.session_loaded_tools",
-            new=AsyncMock(return_value=[{"path": CALCULATOR, "name": "calculator"}]),
+            new=AsyncMock(return_value=[{"path": CALCULATOR, "name": "sleep"}]),
         ),
     ):
         result = await use_skill_activity(
-            "demo-skill", "do it", tools=["calculator", "strands_tools.shell"]
+            "demo-skill", "do it", tools=["sleep", "strands_tools.shell"]
         )
 
     assert result == terminal
     assigned = factory.call_args.kwargs["tools"]
-    assert {_tool_name(tool) for tool in assigned} == {"calculator"}
+    assert {_tool_name(tool) for tool in assigned} == {"sleep"}
 
 
 def test_use_skill_spec_exposes_tools_and_skills() -> None:

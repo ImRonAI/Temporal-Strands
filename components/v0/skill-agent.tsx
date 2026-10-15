@@ -46,7 +46,7 @@ export function SkillAgent({ part, run, isThinking, renderNative }: {
   return (
     <Agent className="app-glass app-glass-edge min-w-0 overflow-hidden rounded-lg" data-skill-agent={part?.toolCallId ?? run?.toolUseId}>
       <AgentHeader name={`${name} · ${status}`} model={configuration?.model}
-        className="app-glass-edge border-b bg-black/25 [&>div]:min-w-0 [&>div]:flex-wrap [&_span]:break-words" />
+        className="app-glass-edge border-b bg-secondary/70 [&>div]:min-w-0 [&>div]:flex-wrap [&_span]:break-words" />
       <AgentContent className="min-w-0">
         <Task defaultOpen={false} className="app-glass app-glass-edge rounded-lg border px-3 py-2.5" data-testid="skill-system-prompt">
           <TaskTrigger title="System prompt" className="activity-trigger w-full text-left" />
@@ -95,7 +95,7 @@ export function SkillAgent({ part, run, isThinking, renderNative }: {
               <span className="min-w-0 flex-1 text-left text-[13px] font-medium tracking-[0.01em] text-foreground">
                 {running ? <Shimmer>{`${name} execution`}</Shimmer> : `${name} execution`}
               </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-black/20 px-2 py-0.5 text-[11px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/70 px-2 py-0.5 text-[11px] text-muted-foreground">
                 <span className={`size-1.5 rounded-full ${running ? "animate-pulse-soft bg-blurple-bright" : "bg-muted-foreground/50"}`} />
                 {status}
               </span>

@@ -375,15 +375,19 @@ type OrchestratorEvent =
 
 export async function POST(req: Request) {
   const {
-    messages,
-    model = DEFAULT_MODEL,
-    reasoningEffort,
-    sessionId,
+messages,
+model = DEFAULT_MODEL,
+reasoningEffort,
+sessionId,
+tools = [],
+    skills = [],
   }: {
     messages: UIMessage[]
     model?: string
     reasoningEffort?: string
     sessionId?: string
+    tools?: string[]
+    skills?: string[]
   } = await req.json()
 
   const lastUser = lastUserMessage(messages)
@@ -495,7 +499,9 @@ export async function POST(req: Request) {
             // model_id enables per-turn model switching: the orchestrator
             // validates it against the worker catalog and rebuilds the
             // session's agent when it differs from the current model.
-            body: JSON.stringify({ prompt, images, documents, videos, model_id: model, reasoning_effort: reasoningEffort }),
+            // tools/skills are the per-turn allowlist of native tool names
+            // and skills the agent may use for this turn (empty = default set).
+            body: JSON.stringify({ prompt, images, documents, videos, model_id: model, reasoning_effort: reasoningEffort, tools, skills }),
           }
         )
         if (!turnRes.ok || !turnRes.body) {

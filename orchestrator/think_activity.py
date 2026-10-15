@@ -1,26 +1,12 @@
-"""Temporal activity for the installed ``strands_tools.think`` tool.
+"""Legacy Think activity retained for deployed histories.
 
-Official integration pattern (docs.temporal.io/develop/python/integrations/
-strands-agents): "If you are using built-in ``strands_tools``, wrap them in a
-thin async function decorated with ``@activity.defn`` so they run as Temporal
-Activities." The tool itself (``orchestrator/strands-tools/think.py``) is
-unmodified; this activity only carries the call across the activity boundary,
-where a synchronous, nested-agent tool can legally execute (workflows block
-threads; agent objects cannot cross the boundary).
-
-``model_provider="perplexity"`` resolves through the tool's own
-custom-provider mechanism (``create_model`` → ``.models/perplexity.py``), so
-cycles run on the session's Perplexity Agent API model with its native
-server-side tools. ``model_settings={}`` is required for custom providers:
-``create_model`` consults the built-in-only ``get_provider_config`` whenever
-config is None. With no ``agent`` kwarg the nested cycles get an empty tool
-registry and no parent callback handler. The custom provider forwards its native
-stream events to the existing thinking topic; the installed cycle loop is unchanged.
+New workflows use the installed async Think directly with their live parent.
+Histories without think-durable-native-async-v2 still schedule this activity;
+removing it would strand those runs. Its inputs and result remain unchanged.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -95,19 +81,16 @@ async def think(
     # forwards *args/**kwargs to the tool function; a ToolUse positional
     # would land in ``thought``).
     if model_provider != "perplexity":
-        return await asyncio.to_thread(native_think, **tool_input)
+        return await native_think(**tool_input)
 
     from workflow import THINKING_TOPIC
 
-    loop = asyncio.get_running_loop()
     stream = WorkflowStreamClient.from_within_activity(batch_interval=THINK_STREAM_BATCH_INTERVAL)
     topic = stream.topic(THINKING_TOPIC)
 
     def publish(event: dict[str, Any]) -> None:
-        # The stock synchronous tool runs its model in a separate thread/loop.
-        # Publish on the activity's loop, where the Temporal client lives.
-        loop.call_soon_threadsafe(topic.publish, event)
+        topic.publish(event)
 
     tool_input["model_settings"] = {**tool_input["model_settings"], "stream_callback": publish}
     async with stream:
-        return await asyncio.to_thread(native_think, **tool_input)
+        return await native_think(**tool_input)

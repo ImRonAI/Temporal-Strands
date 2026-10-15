@@ -5,7 +5,6 @@ import {
   CodeIcon,
   EyeIcon,
   FileIcon,
-  FolderIcon,
   FolderTreeIcon,
   Loader2Icon,
   Maximize2Icon,
@@ -14,7 +13,7 @@ import {
   XIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import type { KeyboardEvent, ReactNode } from "react"
+import type { KeyboardEvent } from "react"
 import type { BundledLanguage } from "shiki"
 
 import {
@@ -51,8 +50,6 @@ import {
 import {
   WebPreview,
   WebPreviewBody,
-  WebPreviewNavigation,
-  WebPreviewUrl,
 } from "@/components/ai-elements/web-preview"
 import { cn } from "@/lib/utils"
 
@@ -153,8 +150,8 @@ function ViewButton({
       className={cn(
         "group flex w-full cursor-pointer flex-col items-center gap-1.5 rounded-xl px-2 py-3 text-[10px] font-medium tracking-wide transition-all duration-200",
         active
-          ? "bg-blurple/25 text-blurple-bright shadow-[0_0_20px_-2px_oklch(0.499_0.214_278/0.6),inset_0_1px_0_0_oklch(0.9_0.05_285/0.2)]"
-          : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
+          ? "bg-white/20 text-white shadow-[inset_0_1px_0_0_oklch(1_0_0/0.3)]"
+          : "text-white/75 hover:bg-white/12 hover:text-white"
       )}
       onClick={() => onSelect(view.id)}
       type="button"
@@ -163,8 +160,8 @@ function ViewButton({
         className={cn(
           "flex size-8 items-center justify-center rounded-lg transition-all duration-200",
           active
-            ? "bg-blurple/30 shadow-[inset_0_1px_0_0_oklch(0.9_0.05_285/0.25)]"
-            : "bg-white/[0.04] group-hover:bg-white/[0.08]"
+            ? "bg-white text-blurple-bright shadow-[0_6px_16px_-8px_oklch(0.35_0.12_30/0.6)]"
+            : "bg-white/10 group-hover:bg-white/20"
         )}
       >
         <Icon className="size-4" />
@@ -237,13 +234,6 @@ export type ProjectIdePanelProps = {
   className?: string
 }
 
-function Frame({ children }: { children: ReactNode }) {
-  return (
-    <div className="ide-glass-inset flex h-full min-h-0 flex-col overflow-hidden rounded-xl border backdrop-blur-md">
-      {children}
-    </div>
-  )
-}
 
 /** Rendered preview of the SELECTED file (distinct from the project Preview
  *  view, which shows the dev server / shared document).
@@ -287,7 +277,7 @@ export function StaticJsxSurface({ jsx }: { jsx: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="ide-file-preview-jsx">
       <p
-        className="ide-glass-edge shrink-0 border-b bg-white/[0.02] px-3.5 py-1.5 text-[10px] leading-relaxed text-muted-foreground"
+        className="ide-glass-edge shrink-0 border-b bg-secondary/60 px-3.5 py-1.5 text-[10px] leading-relaxed text-muted-foreground"
         data-testid="ide-file-preview-jsx-notice"
       >
         Static markup preview — styles, props, and interactivity are not
@@ -529,54 +519,83 @@ export function ProjectIdePanel({
       data-testid="project-ide"
       onKeyDown={onPanelKeyDown}
       className={cn(
-        "@container/ide ide-glass flex h-full min-h-0 flex-col overflow-hidden rounded-xl",
+        "@container/ide glass-shell flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border-0 bg-transparent",
         className
       )}
     >
-      <ArtifactHeader className="ide-glass-edge border-b bg-white/[0.03] px-4 py-2.5">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="flex size-7 items-center justify-center rounded-lg bg-blurple/30 shadow-[0_0_16px_-2px_oklch(0.499_0.214_278/0.7),inset_0_1px_0_0_oklch(0.9_0.05_285/0.25)]">
-            <FolderIcon className="size-4 text-blurple-bright" />
+      <ArtifactHeader className="glass-tangerine h-12 gap-3 border-b border-white/25 px-4 py-0 [&_[data-slot=button]]:text-white/85 [&_[data-slot=button]:hover]:bg-white/15 [&_[data-slot=button]:hover]:text-white">
+        {/* One switcher lives on the rail. The header belongs to the active
+            view: its own identity, context, and tools. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-white/22 shadow-[inset_0_1px_0_0_oklch(1_0_0/0.45)]">
+            {view === "preview" ? (
+              <AppWindowIcon className="size-4 text-white" />
+            ) : view === "terminal" ? (
+              <TerminalSquareIcon className="size-4 text-white" />
+            ) : (
+              <CodeIcon className="size-4 text-white" />
+            )}
           </span>
-          <ArtifactTitle className="truncate font-medium tracking-tight">
-            Project
+          <ArtifactTitle className="shrink-0 font-editorial text-[1.1rem] font-medium italic leading-none tracking-[-0.02em] text-white">
+            {view === "preview" ? "Preview" : view === "terminal" ? "Terminal" : "Code"}
           </ArtifactTitle>
-          {fileCount > 0 ? (
-            <span className="rounded-full border border-blurple/25 bg-blurple/15 px-2.5 py-0.5 font-mono text-[10px] font-medium text-blurple-bright">
-              {fileCount} file{fileCount === 1 ? "" : "s"}
-            </span>
-          ) : null}
-        </div>
-        <ArtifactActions>
-          <div className="mr-1 hidden items-center gap-0.5 rounded-full border border-white/10 bg-black/20 p-1 shadow-[inset_0_1px_2px_0_rgba(0,0,0,0.3)] @min-[30rem]/ide:flex">
-            {VIEWS.map((v) => {
-              const Icon = v.icon
-              const active = view === v.id
-              return (
+          {view === "code" ? (
+            <>
+              {selected ? (
+                <span className="min-w-0 truncate font-mono text-[11.5px] text-white/85">
+                  {selected.path}
+                </span>
+              ) : null}
+              {selected ? (
+                <span className="hidden shrink-0 rounded-full bg-white/22 px-2.5 py-0.5 font-mono text-[10px] font-medium text-white @min-[30rem]/ide:inline">
+                  {languageForPath(selected.path)}
+                </span>
+              ) : null}
+              {fileCount > 0 ? (
+                <span className="hidden shrink-0 font-mono text-[10px] text-white/70 @min-[40rem]/ide:inline">
+                  {fileCount} file{fileCount === 1 ? "" : "s"}
+                </span>
+              ) : null}
+              {/* Source/Rendered toggle for previewable files (HTML in a
+                  sandboxed iframe, Markdown via Streamdown, static JSX via
+                  JSXPreview). Only offered when source is held. */}
+              {selected && selectedPreviewKind && source ? (
                 <button
-                  aria-label={v.label}
-                  aria-pressed={active}
+                  aria-label={
+                    renderingFile ? "Show source" : selectedPreviewKind === "html" ? "HTML Preview" : selectedPreviewKind === "markdown" ? "Markdown Preview" : "JSX Preview"
+                  }
+                  aria-pressed={renderingFile}
                   className={cn(
-                    "flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition-all duration-200",
-                    active
-                      ? "bg-blurple/40 text-white shadow-[0_0_16px_-2px_oklch(0.499_0.214_278/0.8),inset_0_1px_0_0_oklch(0.92_0.04_285/0.3)]"
-                      : "text-muted-foreground hover:text-foreground"
+                    "ml-auto flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold transition-all duration-200",
+                    renderingFile
+                      ? "bg-white text-blurple-bright shadow-[0_6px_16px_-8px_oklch(0.35_0.12_30/0.6)]"
+                      : "bg-white/18 text-white hover:bg-white/28"
                   )}
-                  data-testid={`ide-view-${v.id}`}
-                  key={v.id}
+                  data-testid="ide-file-render-toggle"
                   onClick={() =>
-                    setViewOverride({ view: v.id, at: ide.activityId })
+                    setRenderFile({
+                      on: !renderingFile,
+                      at: ide.activityId,
+                    })
                   }
                   type="button"
                 >
-                  <Icon className="size-3.5" />
-                  <span className="hidden @min-[48rem]/ide:inline">
-                    {v.label}
-                  </span>
+                  <EyeIcon className="size-3" />
+                  {renderingFile ? "Source" : selectedPreviewKind === "html" ? "HTML Preview" : selectedPreviewKind === "markdown" ? "Markdown Preview" : "JSX Preview"}
                 </button>
-              )
-            })}
-          </div>
+              ) : null}
+            </>
+          ) : view === "preview" ? (
+            <span className="min-w-0 flex-1 truncate rounded-full bg-white/18 px-3 py-1 font-mono text-[11.5px] text-white/90 shadow-[inset_0_1px_2px_0_oklch(0.35_0.12_30/0.25)]">
+              {previewSrc || (previewDoc ? "Rendered HTML document" : "Nothing served yet")}
+            </span>
+          ) : (
+            <span className="min-w-0 truncate font-mono text-[11.5px] text-white/80">
+              {visibleOps.length} operation{visibleOps.length === 1 ? "" : "s"}
+            </span>
+          )}
+        </div>
+        <ArtifactActions className="shrink-0">
           <ArtifactAction
             aria-label={ide.isStreaming ? "Working" : "Idle"}
             className="pointer-events-none"
@@ -610,7 +629,7 @@ export function ProjectIdePanel({
         <div className="flex h-full min-h-0 w-full">
           {/* Activity rail: the persistent switcher (the header pill row
               collapses away on narrow containers, this rail never does). */}
-          <div className="ide-glass-edge flex w-14 shrink-0 flex-col items-center gap-1.5 border-r bg-black/20 px-1.5 py-3 @min-[48rem]/ide:w-16 @min-[48rem]/ide:px-2">
+          <div className="glass-tangerine flex w-[3.75rem] shrink-0 flex-col items-center gap-1.5 border-r border-white/25 px-1.5 py-3 @min-[48rem]/ide:w-[4.25rem] @min-[48rem]/ide:px-2">
             {VIEWS.map((v) => (
               <ViewButton
                 active={view === v.id}
@@ -631,8 +650,8 @@ export function ProjectIdePanel({
                 className={cn(
                   "group flex w-full cursor-pointer flex-col items-center gap-1.5 rounded-xl px-2 py-3 text-[10px] font-medium tracking-wide transition-all duration-200 @min-[36rem]/ide:hidden",
                   drawerOpen
-                    ? "bg-blurple/25 text-blurple-bright"
-                    : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
+                    ? "bg-white/20 text-white"
+                    : "text-white/75 hover:bg-white/12 hover:text-white"
                 )}
                 data-testid="ide-files-toggle"
                 onClick={() => setDrawerOpen((open) => !open)}
@@ -642,8 +661,8 @@ export function ProjectIdePanel({
                   className={cn(
                     "flex size-8 items-center justify-center rounded-lg transition-all duration-200",
                     drawerOpen
-                      ? "bg-blurple/30"
-                      : "bg-white/[0.04] group-hover:bg-white/[0.08]"
+                      ? "bg-white text-blurple-bright"
+                      : "bg-white/10 group-hover:bg-white/20"
                   )}
                 >
                   <FolderTreeIcon className="size-4" />
@@ -662,8 +681,8 @@ export function ProjectIdePanel({
                 className={cn(
                   "group hidden w-full cursor-pointer flex-col items-center gap-1.5 rounded-xl px-2 py-3 text-[10px] font-medium tracking-wide transition-all duration-200 @min-[36rem]/ide:flex",
                   !treeHidden
-                    ? "bg-blurple/25 text-blurple-bright"
-                    : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
+                    ? "bg-white/20 text-white"
+                    : "text-white/75 hover:bg-white/12 hover:text-white"
                 )}
                 data-testid="ide-tree-toggle"
                 onClick={() => setTreeHidden((hidden) => !hidden)}
@@ -673,8 +692,8 @@ export function ProjectIdePanel({
                   className={cn(
                     "flex size-8 items-center justify-center rounded-lg transition-all duration-200",
                     !treeHidden
-                      ? "bg-blurple/30"
-                      : "bg-white/[0.04] group-hover:bg-white/[0.08]"
+                      ? "bg-white text-blurple-bright"
+                      : "bg-white/10 group-hover:bg-white/20"
                   )}
                 >
                   <FolderTreeIcon className="size-4" />
@@ -691,10 +710,10 @@ export function ProjectIdePanel({
               never squeezed to zero width; the code header still names the
               open file. The desktop rail toggle can also hide it outright. */}
           {view !== "preview" && fileCount > 0 && !treeHidden ? (
-            <div className="ide-glass-edge hidden w-44 shrink-0 flex-col border-r @min-[36rem]/ide:flex @min-[48rem]/ide:w-64">
-              <div className="flex h-9 shrink-0 items-center gap-2 border-white/10 border-b bg-white/[0.02] px-3.5">
-                <FileIcon className="size-3.5 text-blurple-bright/70" />
-                <span className="font-semibold text-[11px] text-foreground/80 tracking-wider">
+            <div className="glass-ink glass-tree hidden w-44 shrink-0 flex-col border-r border-white/8 @min-[36rem]/ide:flex @min-[48rem]/ide:w-60">
+              <div className="flex h-9 shrink-0 items-center gap-2 border-b border-white/12 px-3.5">
+                <FileIcon className="size-3.5 text-[oklch(0.94_0.14_95)]" />
+                <span className="font-semibold text-[10.5px] uppercase tracking-[0.14em] text-white/75">
                   Files
                 </span>
               </div>
@@ -724,17 +743,17 @@ export function ProjectIdePanel({
                 Same native FileTree, same selection/expansion state. */}
             {view !== "preview" && fileCount > 0 && drawerOpen ? (
               <div
-                className="ide-glass absolute inset-y-0 left-0 z-10 flex w-56 max-w-[85%] flex-col border-r @min-[36rem]/ide:hidden"
+                className="glass-ink glass-tree absolute inset-y-0 left-0 z-10 flex w-56 max-w-[85%] flex-col border-r border-white/15 @min-[36rem]/ide:hidden"
                 data-testid="ide-files-drawer"
               >
-                <div className="ide-glass-edge flex h-9 shrink-0 items-center gap-2 border-b bg-white/[0.02] px-3.5">
-                  <FileIcon className="size-3.5 text-blurple-bright/70" />
-                  <span className="font-semibold text-[11px] text-foreground/80 tracking-wider">
+                <div className="flex h-9 shrink-0 items-center gap-2 border-b border-white/12 px-3.5">
+                  <FileIcon className="size-3.5 text-[oklch(0.94_0.14_95)]" />
+                  <span className="font-semibold text-[10.5px] uppercase tracking-[0.14em] text-white/75">
                     Files
                   </span>
                   <button
                     aria-label="Close file explorer"
-                    className="ml-auto flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-white/[0.08] hover:text-foreground"
+                    className="ml-auto flex size-6 cursor-pointer items-center justify-center rounded-md text-white/75 hover:bg-white/15 hover:text-white"
                     data-testid="ide-files-drawer-close"
                     onClick={() => setDrawerOpen(false)}
                     type="button"
@@ -765,13 +784,10 @@ export function ProjectIdePanel({
             {view === "preview" ? (
               previewSrc || previewDoc ? (
                 <WebPreview
-                  className="min-h-0 flex-1 rounded-none border-0 bg-transparent"
+                  className="min-h-0 flex-1 rounded-none border-0 bg-white"
                   defaultUrl={previewSrc}
                   key={previewSrc || "html-doc"}
                 >
-                  <WebPreviewNavigation className="ide-glass-edge border-b bg-white/[0.02]">
-                    <WebPreviewUrl />
-                  </WebPreviewNavigation>
                   <WebPreviewBody
                     src={previewSrc || undefined}
                     srcDoc={previewDoc || undefined}
@@ -786,74 +802,41 @@ export function ProjectIdePanel({
                 />
               )
             ) : view === "terminal" ? (
-              <div className="flex min-h-0 flex-1 flex-col p-3">
+              <div className="glass-ink terminal-electric flex min-h-0 flex-1 flex-col">
                 <Terminal
-                  className="ide-glass-inset min-h-0 flex-1 overflow-hidden rounded-xl border"
+                  className="min-h-0 flex-1 overflow-hidden rounded-none border-0 bg-transparent text-inherit [&_[data-slot=button]]:text-white/75 [&_[data-slot=button]:hover]:bg-white/12 [&_[data-slot=button]:hover]:text-white"
                   isStreaming={ide.isStreaming}
                   onClear={() => setClearedThrough(ide.transcript.length)}
                   output={terminalOutput}
                 >
-                  <TerminalHeader className="ide-glass-edge border-b bg-black/30">
-                    <TerminalTitle />
+                  <TerminalHeader className="h-10 border-b border-white/8 bg-white/[0.03] px-5 py-0">
+                    <TerminalTitle className="font-mono text-[11.5px] text-[oklch(0.93_0.16_140)]">
+                      gwen@computer ~
+                    </TerminalTitle>
                     <TerminalActions>
-                      <TerminalStatus>
-                        <span className="size-1.5 animate-pulse rounded-full bg-emerald-400 motion-reduce:animate-none" />
+                      <TerminalStatus className="font-mono text-[11px] text-[oklch(0.94_0.14_95)]">
+                        <span className="size-1.5 animate-pulse rounded-full bg-[oklch(0.93_0.16_140)] shadow-[0_0_8px_oklch(0.93_0.16_140/0.8)] motion-reduce:animate-none" />
                         running
                       </TerminalStatus>
                       <TerminalCopyButton aria-label="Copy terminal output" />
                       <TerminalClearButton aria-label="Clear terminal output" />
                     </TerminalActions>
                   </TerminalHeader>
-                  <TerminalContent className="max-h-full flex-1" />
+                  <TerminalContent className="max-h-full flex-1 px-5 py-5 text-[13px] leading-[1.75] [&>span:last-child]:bg-[oklch(0.85_0.15_345)] [&>span:last-child]:shadow-[0_0_10px_oklch(0.85_0.15_345/0.8)]" />
                 </Terminal>
               </div>
             ) : (
-              <div className="flex min-h-0 flex-1 flex-col p-3">
-                <Frame>
-                  <div className="ide-glass-edge flex h-9 shrink-0 items-center gap-2 border-b bg-black/30 px-3.5">
-                    <FileIcon className="size-3.5 text-blurple-bright/70" />
-                    <span className="truncate font-mono text-[11px] text-foreground/80">
-                      {selected?.path ?? "No file selected"}
-                    </span>
-                    {selected ? (
-                      <span className="ml-auto rounded-full border border-blurple/25 bg-blurple/15 px-2.5 py-0.5 font-mono text-[10px] font-medium text-blurple-bright">
-                        {languageForPath(selected.path)}
-                      </span>
-                    ) : null}
-                    {/* Source/Rendered toggle for previewable files (HTML in a
-                        sandboxed iframe, Markdown via Streamdown, static JSX
-                        via JSXPreview). Only offered when source is held. */}
-                    {selected && selectedPreviewKind && source ? (
-                      <button
-                        aria-label={
-                          renderingFile ? "Show source" : selectedPreviewKind === "html" ? "HTML Preview" : selectedPreviewKind === "markdown" ? "Markdown Preview" : "JSX Preview"
-                        }
-                        aria-pressed={renderingFile}
-                        className={cn(
-                          "flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-medium transition-all duration-200",
-                          renderingFile
-                            ? "border-blurple/40 bg-blurple/30 text-white"
-                            : "border-white/10 bg-white/[0.04] text-muted-foreground hover:text-foreground"
-                        )}
-                        data-testid="ide-file-render-toggle"
-                        onClick={() =>
-                          setRenderFile({
-                            on: !renderingFile,
-                            at: ide.activityId,
-                          })
-                        }
-                        type="button"
-                      >
-                        <EyeIcon className="size-3" />
-                        {renderingFile ? "Source" : selectedPreviewKind === "html" ? "HTML Preview" : selectedPreviewKind === "markdown" ? "Markdown Preview" : "JSX Preview"}
-                      </button>
-                    ) : null}
-                  </div>
+              <div
+                className={cn(
+                  "flex min-h-0 flex-1 flex-col",
+                  source && renderingFile && selected ? "bg-white" : "glass-ink syntax-electric"
+                )}
+              >
                   {source && renderingFile && selected ? (
                     <FilePreviewBody path={selected.path} source={source} />
                   ) : source ? (
                     <CodeBlock
-                      className="ide-code-surface min-h-0 flex-1 overflow-auto rounded-none border-0"
+                      className="min-h-0 flex-1 overflow-auto rounded-none border-0 bg-transparent text-inherit [&_pre]:px-5 [&_pre]:py-4 [&_pre]:text-[13px] [&_pre]:leading-[1.7]"
                       code={source}
                       language={languageForPath(selected?.path ?? "")}
                       showLineNumbers
@@ -885,7 +868,6 @@ export function ProjectIdePanel({
                       loading={ide.isStreaming}
                     />
                   )}
-                </Frame>
               </div>
             )}
           </div>

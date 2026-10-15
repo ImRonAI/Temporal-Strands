@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import inspect
-import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -64,12 +63,12 @@ async def test_stock_think_streams_cycles_before_returning(monkeypatch, thinking
 
     module = load_provider_module(monkeypatch)
     requests = []
-    release = threading.Event()
+    release = asyncio.Event()
 
-    def handler(request):
+    async def handler(request):
         requests.append(request)
         if len(requests) == 2:
-            assert release.wait(5), "first cycle was not published before the second completed"
+            await asyncio.wait_for(release.wait(), 5)
         return httpx.Response(200, content=sse(CREATED, text_delta(f"Analysis {len(requests)}."), COMPLETED),
                              headers={"content-type": "text/event-stream"})
 
@@ -101,7 +100,7 @@ async def test_stock_think_streams_cycles_before_returning(monkeypatch, thinking
 def recorded_native(calls: list[dict[str, Any]], result: dict[str, Any] | None = None):
     """A stand-in for the installed strands_tools.think callable."""
 
-    def stub(**kwargs: Any) -> dict[str, Any]:
+    async def stub(**kwargs: Any) -> dict[str, Any]:
         kwargs["model_settings"] = {key: value for key, value in kwargs["model_settings"].items()
                                    if key != "stream_callback"}
         calls.append(kwargs)

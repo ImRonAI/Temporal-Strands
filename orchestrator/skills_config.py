@@ -168,10 +168,59 @@ def discovered_skills() -> tuple[Any, ...]:
 
 
 def skill_subagent_tools() -> list[Any]:
-    """Tools isolated skill sub-agents may call (Pattern 3 example parity)."""
-    from strands_tools import file_read, file_write, shell
+    """Tools isolated skill sub-agents may call (Pattern 3 example parity).
 
-    return [file_read, file_write, shell]
+    ``shell`` reads ``references/`` and runs non-Python ``scripts/``;
+    ``python_repl`` runs Python scripts. ``file_read``/``file_write`` were
+    removed from the install as redundant with these.
+    """
+    from strands_tools import python_repl, shell
+
+    return [shell, python_repl]
+
+
+def skill_resource_note(skill_name: str, skill_dir: str | Path | None = None) -> str:
+    """Absolute ``references/`` and ``scripts/`` paths for one skill.
+
+    Official ``scan_skill_resources`` lists those files. The skill agent
+    reads references with ``shell`` and runs a relevant script with
+    ``python_repl`` or ``shell``. Skills with neither directory get no note.
+    ``skill_dir`` is the skill the caller already resolved. Without it the
+    name is looked up in the discovered catalog.
+    """
+    if skill_dir is not None:
+        root = Path(skill_dir)
+    else:
+        matches = [skill for skill in discovered_skills() if skill.name == skill_name]
+        if not matches:
+            return ""
+        root = Path(matches[0].skill_dir)
+    from agentskills.tool_utils import scan_skill_resources
+    references: list[Path] = []
+    scripts: list[Path] = []
+    for item in scan_skill_resources(root):
+        path = Path(item)
+        try:
+            parts = path.relative_to(root).parts
+        except ValueError:
+            continue
+        if "references" in parts:
+            references.append(path)
+        elif "scripts" in parts:
+            scripts.append(path)
+    lines: list[str] = []
+    if references:
+        lines.append(
+            "References. Read these with shell (cat) and use them as the knowledge base for this task:"
+        )
+        lines.extend(f"- {path}" for path in references)
+    if scripts:
+        lines.append(
+            "Scripts. When one of these is relevant to the task, run it with "
+            "python_repl if it is Python, otherwise with shell. Do not rewrite it:"
+        )
+        lines.extend(f"- {path}" for path in scripts)
+    return "\n".join(lines)
 
 
 def ensure_skills_configured(model_factory: Any | None = None) -> int:
@@ -322,8 +371,8 @@ def create_use_skill_tool(
 
     ``tools`` are parent-registry entries (tool objects or the recorded
     file of a ``load_tool``-ed name) the caller assigns to each skill
-    sub-agent on top of the reference tools (``file_read``, ``file_write``,
-    ``shell``) — the same ``additional_tools`` slot.
+    sub-agent on top of the reference tools (``shell``, ``python_repl``) —
+    the same ``additional_tools`` slot.
     """
     agentskills = _import_agentskills()
     if agentskills is None:

@@ -28,6 +28,8 @@ import {
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input"
 import { ModelPicker } from "@/components/v0/model-picker"
+import { ToolSelector, type ToolSelection } from "@/components/v0/tool-selector"
+import type { Catalog, UseCatalogResult } from "@/components/v0/use-catalog"
 import { PastedPromptAttachment } from "@/components/v0/pasted-prompt-attachment"
 import {
   PASTED_PROMPT_INSTRUCTION,
@@ -151,7 +153,7 @@ function ComposerTextarea({
       value={text}
       onChange={(event) => onTextChange(event.target.value)}
       onPaste={handlePaste}
-      placeholder={placeholder ?? "Describe what you want to ship…"}
+      placeholder={placeholder ?? "Ask Gwen anything…"}
       className="min-h-[64px] px-4 pt-3.5 text-base leading-relaxed text-foreground placeholder:text-muted-foreground md:text-base"
     />
   )
@@ -172,6 +174,13 @@ type ComposerProps = {
   onPreview?: () => void
   previewActive?: boolean
   globalDrop?: boolean
+  // Per-turn tool/skill allowlist. The selector renders only when a handler is
+  // given; compare panes and other callers that omit it keep the plain composer.
+  selectedTools?: string[]
+  selectedSkills?: string[]
+  onSelectionChange?: (next: ToolSelection) => void
+  catalog?: Catalog | null
+  catalogStatus?: UseCatalogResult["status"]
 }
 
 function ComposerSubmit({ text, status, onStop }: Pick<ComposerProps, "text" | "status" | "onStop">) {
@@ -181,7 +190,7 @@ function ComposerSubmit({ text, status, onStop }: Pick<ComposerProps, "text" | "
       disabled={status === "submitted" || (!text.trim() && attachments.files.length === 0 && status !== "streaming")}
       status={status}
       onStop={onStop}
-      className="rounded-full shadow-[inset_0_1px_0_0_oklch(0.95_0.05_285/0.2)] transition-all duration-300 enabled:hover:shadow-[0_0_20px_-2px_oklch(0.499_0.214_278/0.8)] active:scale-90"
+      className="size-9 rounded-full bg-sunrise text-white shadow-glow ring-1 ring-white/40 transition-all duration-300 enabled:hover:scale-105 enabled:hover:shadow-[0_12px_30px_-8px_oklch(0.645_0.2_33/0.65)] disabled:bg-none disabled:bg-coral/12 disabled:text-blurple-bright/70 disabled:opacity-100 disabled:shadow-none disabled:ring-0 active:scale-90"
     />
   )
 }
@@ -227,6 +236,11 @@ export function Composer({
   reasoningEffort = "default",
   onReasoningEffortChange,
   globalDrop = true,
+  selectedTools,
+  selectedSkills,
+  onSelectionChange,
+  catalog,
+  catalogStatus,
 }: ComposerProps) {
   const [pasted, setPasted] = useState<PastedPrompt[]>([])
 
@@ -246,7 +260,7 @@ export function Composer({
       accept={ACCEPTED_FILE_TYPES}
       globalDrop={globalDrop}
       multiple
-      className="group/composer app-glass-edge overflow-hidden rounded-3xl border bg-card/85 shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.07),0_16px_48px_-16px_oklch(0.05_0.01_285/0.9)] backdrop-blur-xl transition-[border-color,box-shadow] duration-500 focus-within:border-blurple-bright/40 focus-within:shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.07),0_16px_56px_-14px_oklch(0.499_0.214_278/0.45)]"
+      className="group/composer overflow-hidden rounded-[1.75rem] [&_[data-slot=input-group]]:rounded-[inherit]! [&_[data-slot=input-group]]:border-0! [&_[data-slot=input-group]]:bg-transparent! [&_[data-slot=input-group]]:opacity-100! [&_[data-slot=input-group]]:shadow-none! [&_[data-slot=input-group]]:ring-0! border border-white/90 bg-white/85 shadow-[inset_0_1px_0_0_oklch(1_0_0),0_1px_2px_0_oklch(0.45_0.06_40/0.06),0_24px_60px_-24px_oklch(0.55_0.12_38/0.32),0_0_0_1px_oklch(0.915_0.012_55/0.7)] backdrop-blur-2xl backdrop-saturate-150 transition-[border-color,box-shadow] duration-500 focus-within:border-coral/30 focus-within:shadow-[inset_0_1px_0_0_oklch(1_0_0),0_1px_2px_0_oklch(0.45_0.06_40/0.06),0_28px_70px_-22px_oklch(0.645_0.2_33/0.35),0_0_0_4px_oklch(0.645_0.2_33/0.1)]"
     >
       {/* Focus hairline: a single thread of indigo light along the top edge.
           Lives inside InputGroup (which is `relative`); the named group on the
@@ -285,6 +299,15 @@ export function Composer({
               onReasoningEffortChange={onReasoningEffortChange}
             />
           ) : null)}
+          {onSelectionChange ? (
+            <ToolSelector
+              catalog={catalog ?? null}
+              status={catalogStatus ?? "idle"}
+              selectedTools={selectedTools ?? []}
+              selectedSkills={selectedSkills ?? []}
+              onSelectionChange={onSelectionChange}
+            />
+          ) : null}
           {onPreview ? (
             <Button
               aria-pressed={previewActive}

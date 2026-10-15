@@ -122,7 +122,7 @@ export function ModelPicker({
     >
       <PopoverTrigger
         className={cn(
-          "flex items-center gap-1.5 rounded-lg border border-input bg-white/[0.02] px-2.5 py-1.5 text-sm text-muted-foreground shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.05)] transition-colors outline-none select-none hover:border-border hover:bg-accent hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-expanded:border-blurple-bright/40 aria-expanded:bg-accent aria-expanded:text-foreground",
+          "flex items-center gap-1.5 rounded-full border border-input bg-white/80 px-3 py-1.5 text-[13px] font-medium text-foreground/75 shadow-[0_1px_2px_0_oklch(0.45_0.06_40/0.06)] transition-colors outline-none select-none hover:border-border hover:bg-accent hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-expanded:border-coral/35 aria-expanded:bg-accent aria-expanded:text-foreground",
           triggerClassName
         )}
       >
@@ -136,7 +136,7 @@ export function ModelPicker({
           composite, and the inner Command must not repaint it opaque. */}
       <PopoverContent
         align="start"
-        className="app-elevated border bg-popover/85 p-0 ring-0 backdrop-blur-xl"
+        className="app-elevated rounded-2xl border bg-popover/90 p-0 ring-0 backdrop-blur-xl"
       >
         {choosingEffort && onReasoningEffortChange ? (
           <PromptInputCommand className="bg-transparent" key={`effort-${value}`}>

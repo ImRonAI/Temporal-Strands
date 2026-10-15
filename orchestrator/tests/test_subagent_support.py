@@ -15,10 +15,48 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from strands.models.model import Model
+from strands.models.openai_responses import OpenAIResponsesModel
 
 from graph_tool import _select_tools, _tool_name
 from load_tool import STRANDS_TOOLS_DIR
-from subagent_support import agent_workspace, parent_agent, workspace_task_prefix
+from subagent_support import agent_workspace, in_process_model, parent_agent, workspace_task_prefix
+
+
+def test_in_process_model_keeps_native_tools_and_skills_on_requests() -> None:
+    from strands_tools.environment import TOOL_SPEC
+
+    native_tools = [{"type": "web_search"}]
+    skills = [{"type": "builtin", "name": "office"}]
+    model = OpenAIResponsesModel(
+        model_id="preset:high",
+        stateful=True,
+        params={"background": True, "store": True, "tools": native_tools, "skills": skills},
+    )
+
+    assert in_process_model(model) is model
+    assert model.get_config()["params"] == {"tools": native_tools, "skills": skills}
+    assert model.stateful is False
+    request = model._format_request(
+        [{"role": "user", "content": [{"text": "Check the environment"}]}],
+        tool_specs=[TOOL_SPEC],
+    )
+    assert request["tools"][0] == {"type": "web_search"}
+    assert request["tools"][1]["name"] == "environment"
+    assert request["skills"] == skills
+    assert request["store"] is False
+    assert "background" not in request
+    assert model.get_config()["params"]["tools"] == native_tools
+
+
+@pytest.mark.asyncio
+async def test_parent_registers_installed_starter_tools_without_loaded_records() -> None:
+    from strands_tools import environment, http_request, journal
+
+    parent = await parent_agent(OpenAIResponsesModel(model_id="preset:high"))
+    assert set(parent.tool_registry.registry) == {"journal", "environment", "http_request"}
+    for module in (journal, environment, http_request):
+        registered = parent.tool_registry.registry[module.TOOL_SPEC["name"]]
+        assert registered.tool_spec == module.TOOL_SPEC
 
 
 def test_stream_projection_preserves_evidence_without_mutating_sdk_state():
@@ -94,7 +132,7 @@ async def test_native_tool_stream_storage_grows_linearly():
 os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
 os.environ.setdefault("BYPASS_TOOL_CONSENT", "true")
 
-CALCULATOR = str(STRANDS_TOOLS_DIR / "calculator.py")
+CURRENT_TIME = str(STRANDS_TOOLS_DIR / "current_time.py")
 
 
 class SilentModel(Model):
@@ -138,36 +176,38 @@ def _activity_mock(loaded: Any) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_parent_agent_restores_official_load_tool_records() -> None:
-    loaded = [{"path": CALCULATOR, "name": "calculator"}]
+    loaded = [{"path": CURRENT_TIME, "name": "current_time"}]
     with patch("subagent_support.activity", _activity_mock(loaded)):
         parent = await parent_agent(SilentModel())
 
     names = set(parent.tool_registry.registry)
-    assert names == {"calculator"}
+    assert names == {"current_time", "journal", "environment", "http_request"}
 
 
 @pytest.mark.asyncio
 async def test_select_tools_named_subset_unknown_is_official_warning() -> None:
-    loaded = [{"path": CALCULATOR, "name": "calculator"}]
+    loaded = [{"path": CURRENT_TIME, "name": "current_time"}]
     with patch("subagent_support.activity", _activity_mock(loaded)):
         parent = await parent_agent(SilentModel())
 
     with patch("graph_tool.logger") as logger:
         selected = _select_tools(
-            parent, ["file_read", "calculator", "strands_tools.current_time"]
+            parent, ["file_read", "current_time", "strands_tools.current_time"]
         )
 
-    assert {_tool_name(tool) for tool in selected} == {"calculator"}
+    assert {_tool_name(tool) for tool in selected} == {"current_time"}
     warned = {call.args[1] for call in logger.warning.call_args_list}
     assert warned == {"file_read", "strands_tools.current_time"}
 
 
 @pytest.mark.asyncio
-async def test_select_tools_omit_assigns_nothing() -> None:
-    loaded = [{"path": CALCULATOR, "name": "calculator"}]
+async def test_select_tools_omit_assigns_every_parent_tool() -> None:
+    loaded = [{"path": CURRENT_TIME, "name": "current_time"}]
     with patch("subagent_support.activity", _activity_mock(loaded)):
         parent = await parent_agent(SilentModel())
-    assert _select_tools(parent, None) == []
+    assert {_tool_name(tool) for tool in _select_tools(parent, None)} == {
+        "current_time", "journal", "environment", "http_request"
+    }
     assert _select_tools(parent, []) == []
 
 
@@ -180,7 +220,7 @@ async def test_loaded_tools_query_failure_degrades_to_empty() -> None:
     )
     with patch("subagent_support.activity", mock):
         parent = await parent_agent(SilentModel())
-    assert parent.tool_registry.registry == {}
+    assert set(parent.tool_registry.registry) == {"journal", "environment", "http_request"}
     mock.logger.warning.assert_called()
 
 

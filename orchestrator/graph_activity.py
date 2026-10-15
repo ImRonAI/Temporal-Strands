@@ -16,9 +16,12 @@ Frame contract (published on ``THINKING_TOPIC``, one frame per event):
 ``data`` events, in order:
 
 1. One initial ``{"type": "graph_topology", "graph_id", "nodes", "edges"}``
-   event. Each node is an agent: ``node_id``, ``label``, ``parent_id``
-   (null at the top level), ``node_type`` ``agent``, optional ``role`` and
-   ``model`` (``model_settings.model_id``). Edges are the declared
+   event. Each node carries ``node_id`` (path-qualified for nested members),
+   ``label``, ``parent_id`` (null at the top level), the real ``node_type``
+   (``agent``/``skill_agent``/``swarm``/``graph``), and optional ``role``,
+   ``model`` (``model_settings.model_id``), and ``skill``. Swarm members and
+   nested-graph nodes are emitted recursively under their parent path; nested
+   graph edges are path-qualified the same way. Edges are the declared
    ``{"from", "to"}`` pairs.
 2. Flattened native events from ``Graph.stream_async``. Nested executors
    wrap inner ``multiagent_*`` events in ``multiagent_node_stream.event``;
@@ -55,7 +58,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import aclosing, suppress
-from typing import Any, Optional, cast
+from typing import Any, Literal, Optional, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 from strands import Agent
@@ -104,28 +107,46 @@ class GraphModelSettings(BaseModel):
 
     model_id: Optional[str] = Field(
         default=None,
-        description="Registered factory name. Leave blank to inherit the parent model.",
+        description="Ignored. Every node uses the parent model. Leave this off.",
     )
 
 
 class GraphNode(BaseModel):
-    """Official graph-tool node: one agent. No type field."""
+    """One formation node. ``type`` selects the executor (default agent).
+
+    ``swarm`` nodes carry ``agents`` (member nodes; plain agents or
+    skill_agents only -- the SDK Swarm nests nothing) plus optional SDK limit
+    knobs. ``graph`` nodes carry a nested ``topology``. ``skill_agent`` nodes
+    carry ``skill`` (a registered skill name).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(description="Unique node id.")
+    type: Optional[Literal["agent", "skill_agent", "swarm", "graph"]] = Field(
+        default=None,
+        description=(
+            "Node executor type. Omit for 'agent'. 'skill_agent' requires "
+            "skill; 'swarm' requires agents; 'graph' requires topology. "
+            "workflow/parallel are not supported."
+        ),
+    )
     role: Optional[str] = Field(default=None, description="Node role label.")
-    system_prompt: str = Field(description="The agent's instructions.")
+    system_prompt: Optional[str] = Field(
+        default=None,
+        description="The agent's instructions. Required for agent nodes; unused by swarm/graph container nodes.",
+    )
     model_settings: Optional[GraphModelSettings] = Field(
         default=None,
-        description="Optional model_settings.model_id. Omit to inherit the parent model.",
+        description="Ignored. Every node uses the parent model. Leave this off.",
     )
     tools: Optional[list[str]] = Field(
         default=None,
         description=(
-            "Registry names the parent assigns. Omit this and the node gets no "
-            "tools. Hot-load a community tool with load_tool first, then name "
-            "it here. Unknown names are skipped."
+            "Registry names this node needs. Name only the tools its work "
+            "requires. Omit this and the node receives every tool the parent "
+            "has. Load a community tool with load_tool before naming it. "
+            "Unknown names are skipped. An empty list gives the node no tools."
         ),
     )
     skills: Optional[list[str]] = Field(
@@ -135,6 +156,37 @@ class GraphNode(BaseModel):
             "skills tool scoped to exactly these names. Omit and the node has "
             "no skills. Unknown names fail the call."
         ),
+    )
+    skill: Optional[str] = Field(
+        default=None,
+        description="skill_agent nodes: the registered skill name this node embodies.",
+    )
+    agents: Optional[list["GraphNode"]] = Field(
+        default=None,
+        description=(
+            "swarm nodes: member nodes (agent or skill_agent only, unique ids, "
+            "no nesting). The SDK caps runs at 20 handoffs / 20 iterations by default."
+        ),
+    )
+    topology: Optional["GraphTopology"] = Field(
+        default=None,
+        description="graph nodes: a nested {nodes, edges, entry_points} topology (recursive).",
+    )
+    entry_point: Optional[str] = Field(
+        default=None,
+        description="swarm nodes: member id that receives the task first; omit to use the first member.",
+    )
+    max_handoffs: Optional[int] = Field(
+        default=None, description="swarm nodes: maximum handoffs (SDK default 20)."
+    )
+    max_iterations: Optional[int] = Field(
+        default=None, description="swarm nodes: maximum node executions (SDK default 20)."
+    )
+    execution_timeout: Optional[float] = Field(
+        default=None, description="swarm nodes: total execution timeout in seconds (SDK default 900)."
+    )
+    node_timeout: Optional[float] = Field(
+        default=None, description="swarm nodes: per-member timeout in seconds (SDK default 300)."
     )
 
 
@@ -151,6 +203,9 @@ class GraphTopology(BaseModel):
     )
 
 
+GraphNode.model_rebuild()
+
+
 def _as_topology_dict(topology: GraphTopology | dict[str, Any] | None) -> dict[str, Any] | None:
     """The sibling tool's plain-dict topology (aliases such as ``from`` kept)."""
     if topology is None:
@@ -165,30 +220,50 @@ def _qualify(path: str, node_id: str) -> str:
 
 
 def planned_topology(topology: dict[str, Any], graph_id: str) -> dict[str, Any]:
-    """The initial ``graph_topology`` event: official agent nodes and edges.
+    """The initial ``graph_topology`` event: declared nodes and edges.
 
-    Runtime transitions arrive later as ``multiagent_handoff`` events.
+    Nodes carry their real ``node_type``; swarm members and nested-graph
+    nodes are emitted recursively with path-qualified ``node_id`` and
+    ``parent_id`` so ``flatten_native_event`` can enrich runtime frames with
+    the declared type/skill/model. Nested graph edges are path-qualified the
+    same way. Runtime transitions arrive later as ``multiagent_handoff``
+    events.
     """
     nodes: list[dict[str, Any]] = []
-    for node_def in topology.get("nodes") or []:
-        label = node_def.get("id") or ""
+    edges: list[dict[str, Any]] = []
+
+    def visit(node_def: dict[str, Any], parent_path: str) -> None:
+        label = node_def.get("id") or node_def.get("name") or ""
+        path = _qualify(parent_path, label)
         entry: dict[str, Any] = {
-            "node_id": label,
+            "node_id": path,
             "label": label,
-            "parent_id": None,
-            "node_type": "agent",
+            "parent_id": parent_path or None,
+            "node_type": node_def.get("type") or "agent",
         }
         if node_def.get("role"):
             entry["role"] = node_def["role"]
-        settings = node_def.get("model_settings") or {}
-        model_id = settings.get("model_id") if isinstance(settings, dict) else None
-        if model_id:
-            entry["model"] = model_id
+        if node_def.get("skill"):
+            entry["skill"] = node_def["skill"]
         nodes.append(entry)
-    edges = [
-        {"from": edge["from"], "to": edge["to"]}
-        for edge in topology.get("edges") or []
-    ]
+        kind = node_def.get("type") or "agent"
+        if kind == "swarm":
+            for member in node_def.get("agents") or []:
+                visit(member, path)
+        elif kind == "graph":
+            nested = node_def.get("topology") or {}
+            for child in nested.get("nodes") or []:
+                visit(child, path)
+            for edge in nested.get("edges") or []:
+                edges.append({
+                    "from": _qualify(path, str(edge["from"])),
+                    "to": _qualify(path, str(edge["to"])),
+                })
+
+    for node_def in topology.get("nodes") or []:
+        visit(node_def, "")
+    for edge in topology.get("edges") or []:
+        edges.append({"from": edge["from"], "to": edge["to"]})
     return {"type": "graph_topology", "graph_id": graph_id, "nodes": nodes, "edges": edges}
 
 
@@ -347,15 +422,18 @@ async def graph_activity(
     ``topology`` AND ``task`` together -- the formation is built, executed,
     and cleaned up in one call, and every node's progress streams live.
 
-    A node is an agent, the official graph-tool shape: id, role,
-    system_prompt, optional model_settings.model_id, optional tools,
-    optional skills. There is no node type. Edges are {"from", "to"}.
-    Omit model_settings to inherit the session model. tools names
-    parent-registry tools to assign; omit tools and the node gets none.
-    skills names catalog skills; the node gets the official skills tool
-    scoped to those names. Omit skills and the node has none.
+    A node's ``type`` (default ``agent``) selects the executor: ``agent``
+    (id, role, system_prompt, optional tools, optional skills), ``skill_agent``
+    (id + ``skill``, a registered skill name), ``swarm`` (id + ``agents``
+    member nodes, optional entry_point/max_handoffs/max_iterations/
+    execution_timeout/node_timeout), or ``graph`` (id + nested ``topology``,
+    recursive). Edges are {"from", "to"}. Nodes with no edge between them run
+    in the same batch. Every node uses the parent model; leave model_settings
+    off. Name the tools and skills each node needs. Omit a node's tools and
+    it receives every tool the parent has. Omit skills and the node has none.
     Each batch transition streams a multiagent_handoff event
-    (from_node_ids, to_node_ids).
+    (from_node_ids, to_node_ids); nested formations' events arrive wrapped in
+    multiagent_node_stream and are flattened with path-qualified node ids.
 
     Args:
         action: "execute" (default), "create", "status", "list", or "delete". "create",
@@ -363,13 +441,15 @@ async def graph_activity(
             to one worker; prefer the single-call execute form.
         graph_id: Optional stable label for the run (auto-derived if omitted).
         task: Task prompt executed through the formation (required for execute).
-        topology: Official topology: nodes (id, role, system_prompt, optional
-            model_settings, optional tools, optional skills), edges
-            ({"from", "to"}), optional entry_points. Required for create and
-            for single-call execute.
-        tools: Default registry names for nodes that omit their own tools
-            list. Omit this too and those nodes get no tools. Unknown names
-            are skipped.
+        topology: Official topology extended with node types: nodes (id,
+            optional type agent|skill_agent|swarm|graph, role, system_prompt,
+            optional model_settings, optional tools, optional skills; swarm
+            nodes add agents + optional limit knobs, graph nodes add a nested
+            topology, skill_agent nodes add skill), edges ({"from", "to"}),
+            optional entry_points. Required for create and for single-call
+            execute.
+        tools: Name tools on each node. This argument is not a formation-wide
+            tool list. A node that omits tools receives every tool the parent has.
     """
     from workflow import THINKING_TOPIC
 

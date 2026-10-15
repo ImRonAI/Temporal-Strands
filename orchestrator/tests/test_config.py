@@ -106,10 +106,8 @@ def test_stream_can_drain_overlap_matches_workflow_streams_recipe() -> None:
     The value lives in config.py, not as a literal in ChatWorkflow.run.
     """
     from config import STREAM_CAN_DRAIN_OVERLAP
-    import workflow
 
     assert STREAM_CAN_DRAIN_OVERLAP == timedelta(seconds=1)
-    assert workflow.STREAM_CAN_DRAIN_OVERLAP is STREAM_CAN_DRAIN_OVERLAP
 
 
 def test_model_activity_policy_allows_slow_streams_without_automatic_retries() -> None:

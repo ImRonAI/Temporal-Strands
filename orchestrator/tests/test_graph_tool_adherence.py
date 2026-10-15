@@ -201,7 +201,21 @@ def test_activity_as_tool_produces_structural_graph_spec() -> None:
     defs = schema["$defs"]
     assert {"GraphTopology", "GraphNode", "GraphEdge", "GraphModelSettings"} <= set(defs)
     node_props = defs["GraphNode"]["properties"]
-    assert set(node_props) == {"id", "role", "system_prompt", "model_settings", "tools", "skills"}
+    assert set(node_props) == {
+        "id", "type", "role", "system_prompt", "model_settings", "tools",
+        "skills", "skill", "agents", "topology", "entry_point",
+        "max_handoffs", "max_iterations", "execution_timeout", "node_timeout",
+    }
+    # Nested formations recurse: swarm members are GraphNodes, a nested graph
+    # is a GraphTopology (Optional wraps each in anyOf with a null branch).
+    agents_variants = node_props["agents"]["anyOf"]
+    agents_array = next(v for v in agents_variants if v.get("type") == "array")
+    assert agents_array["items"]["$ref"] == "#/$defs/GraphNode"
+    topology_variants = node_props["topology"]["anyOf"]
+    assert any(v.get("$ref") == "#/$defs/GraphTopology" for v in topology_variants)
+    type_variants = node_props["type"]["anyOf"]
+    type_enum = next(v for v in type_variants if v.get("type") == "string")
+    assert set(type_enum["enum"]) == {"agent", "skill_agent", "swarm", "graph"}
     assert "nodes" in defs["GraphTopology"]["properties"]
 
     # task is a plain string parameter.
@@ -269,7 +283,7 @@ def test_resolve_model_unknown_id_raises_value_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_with_unknown_model_id_yields_error_at_create() -> None:
+async def test_create_ignores_a_node_model_id() -> None:
     graph_tool.configure_models({"known/model": lambda: ScriptedModel()})
     tool_use = {
         "toolUseId": "t-bad-model",
@@ -289,7 +303,6 @@ async def test_create_with_unknown_model_id_yields_error_at_create() -> None:
     results = [e for e in events if isinstance(e, ToolResultEvent)]
     assert results, "graph tool produced no ToolResultEvent"
     result = results[-1].tool_result
-    assert result["status"] == "error"
-    text = "".join(block.get("text", "") for block in result["content"])
-    assert "Unknown model_id" in text
+    assert result["status"] == "success"
+    graph_tool._manager.delete("bad-model")
     assert "bad-model" not in graph_tool._manager.graphs

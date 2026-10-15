@@ -17,29 +17,30 @@ export function SiteHeader() {
       initial={{ opacity: 0, y: -12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-      className="app-glass-edge sticky top-0 z-30 flex items-center justify-between gap-2 border-b bg-background/70 px-4 py-3.5 backdrop-blur-xl sm:gap-4 sm:px-8"
+      className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b border-white/70 bg-white/55 px-4 py-3 shadow-[0_1px_0_0_oklch(0.915_0.012_55/0.6)] backdrop-blur-2xl backdrop-saturate-150 sm:gap-4 sm:px-8"
     >
-      <div className="flex items-center gap-2.5">
+      <div className="group flex items-center gap-2.5">
         <span
           aria-hidden="true"
-          className="app-glass-edge grid size-7 place-items-center rounded-md border bg-white/[0.03] shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.08)] backdrop-blur-sm transition-shadow duration-500 hover:shadow-[0_0_16px_-2px_oklch(0.709_0.158_284/0.55)]"
+          className="relative grid size-8 place-items-center overflow-hidden rounded-[0.7rem] bg-sunrise shadow-glow ring-1 ring-white/60 transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:-rotate-6 group-hover:scale-105"
         >
+          <span className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,oklch(1_0_0/0.5),transparent_60%)]" />
           <svg
-            className="size-4 text-foreground"
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="0.75"
+            className="relative size-5 text-white drop-shadow-[0_1px_1px_oklch(0.5_0.15_30/0.35)]"
+            viewBox="0 0 24 24"
+            fill="currentColor"
             aria-hidden="true"
           >
-            <path
-              d="M14.2 14.2H17V6.9375C17 4.76288 15.2371 3 13.0625 3H5.8V5.8M14.2 14.2V7.79063L7.79062 14.2H14.2ZM14.2 14.2V17H6.9375C4.76288 17 3 15.2371 3 13.0625V5.8H5.8M5.8 5.8V12.2313L12.2313 5.8H5.8Z"
-              strokeLinejoin="round"
-            />
+            <path d="M11.5 3.5c.55 3.9 2.25 5.85 6.25 6.6-4 .72-5.7 2.68-6.25 6.58-.55-3.9-2.25-5.86-6.25-6.58 4-.75 5.7-2.7 6.25-6.6Z" />
+            <circle cx="18" cy="17.5" r="1.9" opacity="0.92" />
+            
           </svg>
         </span>
-        <span className="hidden text-[13px] font-medium tracking-[0.02em] text-muted-foreground sm:inline">
-          v0 / studio
+        <span className="font-editorial text-[1.35rem] leading-none tracking-[-0.03em] text-foreground">
+          Gwen
+        </span>
+        <span className="hidden rounded-full border border-coral/25 bg-coral/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-blurple-bright sm:inline">
+          Beta
         </span>
       </div>
 
@@ -51,7 +52,7 @@ export function SiteHeader() {
             key={item}
             variant="ghost"
             size="sm"
-            className="text-muted-foreground hover:text-foreground"
+            className="rounded-full font-medium text-muted-foreground hover:bg-coral/8 hover:text-foreground"
           >
             {item}
           </Button>
@@ -64,27 +65,27 @@ export function SiteHeader() {
           nativeButton={false}
           variant="ghost"
           size="sm"
-          className="shrink text-muted-foreground hover:text-foreground md:hidden"
+          className="shrink rounded-full font-medium text-muted-foreground hover:bg-coral/8 hover:text-foreground md:hidden"
         />
         <Button
           render={<Link href="/compare">Compare models</Link>}
           nativeButton={false}
           variant="ghost"
           size="sm"
-          className="hidden text-muted-foreground hover:text-foreground md:inline-flex"
+          className="hidden rounded-full font-medium text-muted-foreground hover:bg-coral/8 hover:text-foreground md:inline-flex"
         />
         <Button
           variant="ghost"
           size="sm"
-          className="hidden text-muted-foreground hover:text-foreground md:inline-flex"
+          className="hidden rounded-full font-medium text-muted-foreground hover:bg-coral/8 hover:text-foreground md:inline-flex"
         >
           Sign in
         </Button>
         <Button
           size="sm"
-          className="shrink-0 rounded-full bg-primary px-3 text-primary-foreground shadow-[inset_0_1px_0_0_oklch(0.95_0.05_285/0.22),0_8px_24px_-10px_oklch(0.499_0.214_278/0.8)] transition-transform duration-300 hover:scale-[1.03] hover:bg-primary/90 active:scale-95 sm:px-4"
+          className="shrink-0 rounded-full bg-sunrise px-3.5 font-semibold text-primary-foreground shadow-glow ring-1 ring-white/40 transition-[transform,box-shadow] duration-300 hover:scale-[1.03] hover:shadow-[0_14px_34px_-10px_oklch(0.645_0.2_33/0.6)] active:scale-95 sm:px-4.5"
         >
-          Start building
+          Get started
         </Button>
       </div>
     </motion.header>

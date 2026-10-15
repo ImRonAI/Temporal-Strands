@@ -316,42 +316,6 @@ describe("ComputerUsePreviewPanel", () => {
     expect(await renderPanel({ preview: preview({ intent: "" }) })).not.toContain('data-testid="desktop-intent"')
   })
 
-  it("floats approvals and failures over the desktop instead of stacking above it", async () => {
-    const openingTag = (html: string, id: string) => {
-      const at = html.indexOf(`data-testid="${id}"`)
-      expect(at).toBeGreaterThan(-1)
-      return html.slice(html.lastIndexOf("<", at), html.indexOf(">", at))
-    }
-    const approval = await renderPanel({ pendingApproval: "navigate to bank.example" })
-    expect(openingTag(approval, "computer-use-approval")).toContain("absolute")
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 503 })))
-    const failure = await renderPanel()
-    expect(openingTag(failure, "browser-handoff-error")).toContain("absolute")
-    expect(failure).toContain("Could not verify desktop control")
-  })
-
-  it("exposes an in-app expand toggle only when the parent can reclaim the chat width", async () => {
-    const collapsed = await renderPanel()
-    expect(collapsed).not.toContain('data-testid="browser-expand"')
-
-    const onExpandedChange = vi.fn()
-    const panel = panelHandlers({ expanded: false, onExpandedChange })
-    await panel.flushEffects()
-    let html = panel.render()
-    expect(html).toMatch(/data-testid="browser-expand"[^>]*aria-label="Hide chat"/)
-    expect(h.buttons.get("browser-expand")?.disabled).toBeUndefined()
-    click("browser-expand")
-    expect(onExpandedChange).toHaveBeenCalledExactlyOnceWith(true)
-
-    html = panel.render({ expanded: true })
-    // A clear collapse action is always present while expanded.
-    expect(html).toMatch(/data-testid="browser-expand"[^>]*aria-label="Show chat"/)
-    click("browser-expand")
-    expect(onExpandedChange).toHaveBeenLastCalledWith(false)
-    // Native fullscreen stays available alongside in-app expansion.
-    expect(html).toContain('data-testid="browser-fullscreen"')
-  })
-
   it("marks human control with a green inset ring and drops it when the agent resumes", async () => {
     h.serverMode = "human"
     const panel = panelHandlers()

@@ -85,6 +85,8 @@ from config import (
     TASK_QUEUE,
 )
 from browser_activity import artifact_root
+from load_tool import _SESSION_TOOLS, discover_tools_activity
+from skills_config import discovered_skills
 from run_worker import agent_identity, assemble_model_factories
 from workspace_api import WorkspaceRequestBoundary, router as workspace_router, workspace_lifespan
 from workflow import (
@@ -96,15 +98,9 @@ from workflow import (
     TOOL_RESULTS_TOPIC,
     ChatInput,
     ChatWorkflow,
-    TurnDocument,
-    TurnImage,
-    TurnInput,
-    TurnVideo,
 )
 
-REASONING_LEVELS = json.loads(
-    (Path(__file__).resolve().parent.parent / "lib" / "reasoning-levels.json").read_text()
-)
+REASONING_LEVELS_PATH = Path(__file__).resolve().parent.parent / "lib" / "reasoning-levels.json"
 
 _ROOT = Path(__file__).resolve().parent
 load_dotenv(_ROOT.parent / ".env.local", override=False)
@@ -345,6 +341,9 @@ class TurnRequest(BaseModel):
     # Omitted -> keep the session's current model.
     model_id: str | None = None
     reasoning_effort: str | None = None
+    # Per-turn allowlist enforced by ChatWorkflow's SelectionHook; empty = unrestricted.
+    tools: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
 
 
 class ApproveRequest(BaseModel):
@@ -394,6 +393,58 @@ async def health() -> dict[str, Any]:
     }
 
 
+# The Agent API's server-side tool types must never surface in the local catalog.
+_AGENT_API_TYPE_NAMES = frozenset({
+    "web_search",
+    "fetch_url",
+    "image_search",
+    "people_search",
+    "finance_search",
+    "sandbox",
+})
+
+
+@app.get("/catalog")
+async def catalog(session_id: str | None = None) -> dict[str, Any]:
+    """Read-only catalog of session/community tools and discovered skills.
+
+    ``session`` is the always-on set (minus Agent API types); ``discoverable`` is
+    everything ``discover_tools_activity()`` lists minus ``session``. With a
+    ``session_id``, merge that workflow's ``loaded_tools`` into ``session`` --
+    graceful degradation: any failure means skip, never 500.
+    """
+    discovery = await discover_tools_activity()
+    names: list[str] = []
+    if discovery.get("status") == "success":
+        names = [line for line in discovery["content"][0]["text"].splitlines() if line]
+    session_names = {name for name in _SESSION_TOOLS if name not in _AGENT_API_TYPE_NAMES}
+    if session_id:
+        client = _state.get("client")
+        if client is not None:
+            try:
+                handle = client.get_workflow_handle(session_id)
+                loaded = await handle.query(ChatWorkflow.loaded_tools)
+                for entry in loaded:
+                    name = entry.get("name") if isinstance(entry, dict) else entry
+                    if isinstance(name, str) and name not in _AGENT_API_TYPE_NAMES:
+                        session_names.add(name)
+            except Exception as error:  # noqa: BLE001 - catalog must not 500
+                logger.warning("Could not query loaded_tools for %s: %s", session_id, error)
+    discoverable = sorted(
+        name for name in set(names) - session_names if name not in _AGENT_API_TYPE_NAMES
+    )
+    return {
+        "tools": {
+            "session": sorted(session_names),
+            "discoverable": discoverable,
+        },
+        "skills": [
+            {"name": s.name, "description": s.description or ""}
+            for s in discovered_skills()
+        ],
+    }
+
+
 @app.post("/sessions")
 async def start_session(body: StartSession) -> dict[str, str]:
     await validated_model(body.model_id)
@@ -407,7 +458,6 @@ async def start_session(body: StartSession) -> dict[str, str]:
         ChatInput(
             model_id=body.model_id,
             system_prompt=_state["system_prompt"],
-            session_id=session_id,
         ),
         id=session_id,
         task_queue=TASK_QUEUE,
@@ -417,13 +467,8 @@ async def start_session(body: StartSession) -> dict[str, str]:
 
 @app.post("/sessions/{session_id}/turns/stream")
 async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
-    if (
-        not body.prompt.strip()
-        and not body.images
-        and not body.documents
-        and not body.videos
-    ):
-        raise HTTPException(422, "A prompt or at least one attachment is required")
+    if not body.prompt.strip():
+        raise HTTPException(422, "A prompt is required")
     client = temporal()
     handle = client.get_workflow_handle(session_id)
 
@@ -431,25 +476,14 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
     # not preceded by every earlier turn's replay.
     stream_client = WorkflowStreamClient.create(client, session_id)
     try:
-        if body.model_id is not None or body.reasoning_effort is not None:
-            current_model = await handle.query(ChatWorkflow.model_id)
-            # The existing workflow already holds a validated model selection.
-            # Only switches need catalog discovery; a slow unrelated readiness
-            # workflow must not prevent an unchanged-model conversation.
-            if body.model_id is not None and body.model_id != current_model:
-                await validated_model(body.model_id)
-            model_id = body.model_id or current_model
-            if body.reasoning_effort is not None and body.reasoning_effort not in REASONING_LEVELS.get(model_id, []):
+        if body.model_id is not None:
+            await validated_model(body.model_id)
+        if body.reasoning_effort is not None:
+            model_id = body.model_id or await handle.query(ChatWorkflow.model_id)
+            reasoning_levels = json.loads(await asyncio.to_thread(REASONING_LEVELS_PATH.read_text))
+            if body.reasoning_effort not in reasoning_levels.get(model_id, []):
                 raise HTTPException(422, f"Unsupported reasoning effort for {model_id}: {body.reasoning_effort}")
-        # Prefer the in-flight turn's own start offset over the live tail.
-        # get_offset() returns base_offset + log length, so a client that
-        # reconnects while a turn is still streaming would subscribe past every
-        # frame already emitted for it and see nothing until the next turn.
-        # ChatWorkflow.turn_start_offset is None between turns, in which case
-        # the tail is correct.
-        start_offset = await handle.query(ChatWorkflow.turn_start_offset)
-        if start_offset is None:
-            start_offset = await stream_client.get_offset()
+        start_offset = await stream_client.get_offset()
     except RPCError as error:
         if error.status == RPCStatusCode.NOT_FOUND:
             raise HTTPException(404, f"Unknown session: {session_id}") from error
@@ -476,29 +510,14 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
         try:
             try:
                 update_handle = await handle.start_update(
-                ChatWorkflow.turn,
-                TurnInput(
-                    prompt=body.prompt,
-                    images=[
-                        TurnImage(format=image.format, data=image.data)
-                        for image in body.images
-                    ],
-                    documents=[
-                        TurnDocument(format=document.format, data=document.data)
-                        for document in body.documents
-                    ],
-                    videos=[
-                        TurnVideo(format=video.format, data=video.data)
-                        for video in body.videos
-                    ],
-                    model_id=body.model_id,
-                    reasoning_effort=body.reasoning_effort,
-                ),
-                wait_for_stage=WorkflowUpdateStage.ACCEPTED,
+                    ChatWorkflow.turn,
+                    args=[body.prompt, body.tools, body.skills],
+                    wait_for_stage=WorkflowUpdateStage.ACCEPTED,
                 )
             except Exception as error:  # noqa: BLE001 - surfaced to the client
                 yield sse({"error": str(error)})
                 return
+
 
             result_task = asyncio.create_task(update_handle.result())
             try:
@@ -645,6 +664,12 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
                 with suppress(asyncio.CancelledError, Exception):
                     await anext_task
             await _aclose(subscription)
+            if last_offset > start_offset:
+                try:
+                    await handle.execute_update(ChatWorkflow.truncate_stream, last_offset)
+                except (RPCError, WorkflowUpdateFailedError, WorkflowUpdateRPCTimeoutOrCancelledError) as error:
+                    logger.warning("Could not truncate forwarded stream for %s at %s: %s",
+                                   session_id, last_offset, error)
 
     return StreamingResponse(
         body_iter(),
@@ -655,13 +680,8 @@ async def turn_stream(session_id: str, body: TurnRequest) -> StreamingResponse:
 
 @app.post("/sessions/{session_id}/approve", status_code=204)
 async def approve(session_id: str, body: ApproveRequest) -> None:
-    handle = temporal().get_workflow_handle(session_id)
-    try:
-        await handle.signal(ChatWorkflow.approve, body.response)
-    except RPCError as error:
-        if error.status == RPCStatusCode.NOT_FOUND:
-            raise HTTPException(404, f"Unknown session: {session_id}") from error
-        raise HTTPException(502, str(error)) from error
+    del session_id, body
+    raise HTTPException(410, "Approval is an interrupt on the agent result, not a session signal")
 
 
 async def _vnc_input(command: str, expected_answer: str | tuple[str, ...], *, verify_cleanup: bool = False) -> None:
@@ -711,14 +731,7 @@ def _desktop_mode(session_id: str) -> dict:
 async def desktop_control_status(session_id: str, response: Response) -> dict:
     response.headers["Cache-Control"] = "no-store"
     state = await asyncio.to_thread(_desktop_mode, session_id)
-    try:
-        async with asyncio.timeout(READINESS_POLLER_RPC_TIMEOUT.total_seconds()):
-            workflow_state = await temporal().get_workflow_handle(session_id).query(
-                ChatWorkflow.control_status, rpc_timeout=READINESS_POLLER_RPC_TIMEOUT,
-            )
-    except (TimeoutError, RPCError):
-        # Reconnecting must not forget native ownership when the worker is down.
-        workflow_state = {"run_id": None, "ready": False}
+    workflow_state = {"run_id": None, "ready": False}
     runtime_available = await task_queue_has_pollers(desktop=True)
     try:
         command = shlex.split(DESKTOP_VNC_GRANT_COMMAND)
@@ -742,50 +755,20 @@ async def desktop_control_status(session_id: str, response: Response) -> dict:
 
 @app.post("/sessions/{session_id}/handoff", status_code=204)
 async def handoff(session_id: str, body: HandoffRequest) -> None:
-    handle = temporal().get_workflow_handle(session_id)
+    if body.action == "give" and not body.message.strip():
+        raise HTTPException(422, "Resume instructions are required")
     try:
-        async with asyncio.timeout(DESKTOP_HANDOFF_TIMEOUT.total_seconds()):
-            await asyncio.to_thread(_desktop_mode, session_id)
-            steps = {
-                "take": [(ChatWorkflow.claim_control, ()), (ChatWorkflow.desktop_control, ("take",))],
-                "release": [(ChatWorkflow.desktop_control, ("release",))],
-                "give": [(ChatWorkflow.desktop_control, ("prepare_resume",)),
-                         (ChatWorkflow.relinquish_control, (body.message,))],
-            }[body.action]
-            old_run = None
-            for method, arguments in steps:
-                while True:
-                    try:
-                        old_run = await handle.execute_update(method, *arguments, rpc_timeout=DESKTOP_HANDOFF_TIMEOUT)
-                        break
-                    except WorkflowUpdateFailedError as error:
-                        if getattr(error.cause, "type", None) != "SessionRollingOver":
-                            raise
-                        await asyncio.sleep(HANDOFF_ROLLOVER_RETRY_BACKOFF.total_seconds())
-            if body.action != "give":
-                return
-            while True:
-                state = await handle.query(ChatWorkflow.control_status)
-                if state["run_id"] != old_run and state["ready"]:
-                    try:
-                        await handle.execute_update(ChatWorkflow.desktop_control, "resume", rpc_timeout=DESKTOP_HANDOFF_TIMEOUT)
-                        return
-                    except WorkflowUpdateFailedError as error:
-                        if getattr(error.cause, "type", None) != "SessionRollingOver":
-                            raise
-                await asyncio.sleep(HANDOFF_ROLLOVER_RETRY_BACKOFF.total_seconds())
-    except (TimeoutError, WorkflowUpdateRPCTimeoutOrCancelledError) as error:
-        task = asyncio.current_task()
-        if isinstance(error, WorkflowUpdateRPCTimeoutOrCancelledError) and task is not None and task.cancelling():
-            raise asyncio.CancelledError() from error
-        phase = {"take": "takeover", "release": "release", "give": "resume"}[body.action]
-        raise HTTPException(504, f"Desktop {phase} timed out; transfer unconfirmed, check control status before retrying") from error
+        await temporal().get_workflow_handle(session_id).execute_update(
+            ChatWorkflow.desktop_control, body.action,
+        )
     except WorkflowUpdateFailedError as error:
-        raise HTTPException(409, str(error.__cause__ or error)) from error
+        cause = error.cause
+        while getattr(cause, "cause", None) is not None:
+            cause = cause.cause
+        raise HTTPException(409, str(cause)) from error
     except RPCError as error:
-        if error.status == RPCStatusCode.NOT_FOUND:
-            raise HTTPException(404, f"Unknown session: {session_id}") from error
-        raise HTTPException(502, str(error)) from error
+        status = 404 if error.status == RPCStatusCode.NOT_FOUND else 502
+        raise HTTPException(status, str(error)) from error
 
 
 @app.get("/sessions/{session_id}/desktop-images/{artifact_id}")

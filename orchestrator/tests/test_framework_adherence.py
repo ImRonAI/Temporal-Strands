@@ -174,16 +174,37 @@ def test_think_is_native_on_temporal_agent_with_hook_activity() -> None:
     from temporalio import activity
     from temporalio.contrib.strands.workflow import TemporalActivityTool
 
-    # THINK_TOOL is the activity-as-tool binding of the thin @activity.defn
-    # wrapper; the installed strands_tools.think callable lives inside the
-    # activity (workflows block the threads a sync tool needs).
-    assert isinstance(workflow.THINK_TOOL, TemporalActivityTool)
-    assert workflow.THINK_TOOL.tool_name == "think"
+    # The session tool is the installed think callable. The factory builds a
+    # nested TemporalAgent on the session model. The activity stays registered
+    # for histories that already scheduled activity name "think".
+    from agent_tools import THINK_TOOL
+    assert isinstance(THINK_TOOL, TemporalActivityTool)
+    assert THINK_TOOL.tool_name == "think"
     assert activity._Definition.must_from_callable(think_activity.think).name == "think"
     assert think_activity.think in run_worker.WORKER_ACTIVITIES
     tree = _parse(_module_stem_to_path("think_activity"))
     assert any(module == "strands_tools.think" for module, _ in _imported_names(tree))
+    # Think is on-demand catalog, not a permanent session tool: the workflow
+    # never imports it, only supplies the factory the installed tool calls.
+    workflow_tree = _parse(_module_stem_to_path("workflow"))
+    assert not any(module == "strands_tools.think" for module, _ in _imported_names(workflow_tree))
     assert not hasattr(workflow.ChatWorkflow, "_think_context")
+    source = _module_stem_to_path("workflow").read_text()
+    assert "think_agent_factory" in source
+    assert "model=self._model_id" in source
+    assert "THINK_TOOL" not in source
+    assert "continue_as_new" in source
+
+
+def test_workflow_keeps_native_execution_without_tool_facade_classes():
+    tree = _parse(_module_stem_to_path("load_tool"))
+    assert not any(isinstance(node, ast.ClassDef) and any(
+        ast.unparse(base) in {"AgentTool", "TemporalActivityTool", "TemporalAgent"} for base in node.bases
+    ) for node in ast.walk(tree))
+    import agent_tools
+    from unittest.mock import patch
+    with patch.object(agent_tools, "mcp_client_factories", side_effect=AssertionError("workflow must not read config")):
+        assert all(handle.server for handle in agent_tools.temporal_mcp_clients())
 
 
 # ---------------------------------------------------------------------------

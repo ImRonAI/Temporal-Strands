@@ -185,9 +185,46 @@ def test_planned_topology_paths_and_edges() -> None:
     assert ids["research"]["node_type"] == "agent"
     assert ids["research"]["parent_id"] is None
     assert ids["research"]["role"] == "research"
-    assert ids["writer"]["model"] == "preset:high"
+    assert "model" not in ids["writer"]
     edges = {(edge["from"], edge["to"]) for edge in planned["edges"]}
     assert edges == {("research", "writer")}
+
+
+def test_planned_topology_recurses_into_swarm_and_nested_graph() -> None:
+    """Nested members are declared with path-qualified ids, real node types,
+    and skill metadata; nested graph edges are path-qualified."""
+    topo = {
+        "nodes": [
+            {
+                "id": "team",
+                "type": "swarm",
+                "agents": [
+                    {"id": "alpha", "system_prompt": "a"},
+                    {"id": "beta", "type": "skill_agent", "skill": "wf-skill"},
+                ],
+            },
+            {
+                "id": "pipe",
+                "type": "graph",
+                "topology": {
+                    "nodes": [{"id": "inner", "system_prompt": "i"}],
+                    "edges": [{"from": "inner", "to": "inner"}],
+                },
+            },
+        ],
+    }
+    planned = planned_topology(topo, "demo")
+    by_id = {node["node_id"]: node for node in planned["nodes"]}
+    assert by_id["team"]["node_type"] == "swarm"
+    assert by_id["team"]["parent_id"] is None
+    assert by_id["team/alpha"]["node_type"] == "agent"
+    assert by_id["team/alpha"]["parent_id"] == "team"
+    assert by_id["team/alpha"]["label"] == "alpha"
+    assert by_id["team/beta"]["node_type"] == "skill_agent"
+    assert by_id["team/beta"]["skill"] == "wf-skill"
+    assert by_id["pipe"]["node_type"] == "graph"
+    assert by_id["pipe/inner"]["parent_id"] == "pipe"
+    assert {"from": "pipe/inner", "to": "pipe/inner"} in planned["edges"]
 
 
 # --- native event flattening -----------------------------------------------
@@ -259,7 +296,7 @@ def test_flatten_enriches_from_planned_metadata() -> None:
         meta=meta,
     )
     assert frame["node_type"] == "agent"
-    assert frame["model"] == "preset:high"
+    assert "model" not in frame
 
 
 # --- validation ------------------------------------------------------------
@@ -288,8 +325,7 @@ async def test_create_without_topology_errors() -> None:
 
 @pytest.mark.asyncio
 async def test_unknown_tools_are_official_warning_not_an_import() -> None:
-    """Formation-wide tools= filters the parent registry by name. A package
-    or invented name is the official warning; the graph still runs."""
+    """A node that names an unknown tool gets the official warning. The graph still runs."""
     model = ScriptedModel()
     stream = FakeStreamClient()
     a, b, c = run_graph(model, stream)
@@ -300,11 +336,10 @@ async def test_unknown_tools_are_official_warning_not_an_import() -> None:
                 "nodes": [{
                     "id": "solo",
                     "system_prompt": "s",
-                    "model_settings": {"model_id": ""},
+                    "tools": ["definitely_not_a_tool"],
                 }],
             },
             task="go",
-            tools=["definitely_not_a_tool"],
         )
     assert result["status"] == "success"
     logger.warning.assert_any_call(
@@ -460,7 +495,7 @@ async def test_model_inheritance_all_nodes_use_session_model() -> None:
 
 
 @pytest.mark.asyncio
-async def test_node_model_id_selects_a_registered_model() -> None:
+async def test_node_model_id_is_ignored_and_every_node_uses_the_session_model() -> None:
     from graph_tool import configure_models
 
     session = ScriptedModel()
@@ -481,23 +516,24 @@ async def test_node_model_id_selects_a_registered_model() -> None:
     finally:
         configure_models({})
     assert result["status"] == "success"
-    assert session.calls == 1 and alt.calls == 1
+    assert session.calls == 2 and alt.calls == 0
     planned = frames(stream)[0]["data"]
-    assert next(n for n in planned["nodes"] if n["node_id"] == "b")["model"] == "fake/alt"
+    assert "model" not in next(n for n in planned["nodes"] if n["node_id"] == "b")
 
 
 @pytest.mark.asyncio
-async def test_unknown_node_model_id_fails_at_create() -> None:
+async def test_unknown_node_model_id_is_ignored() -> None:
     model = ScriptedModel()
     stream = FakeStreamClient()
     a_, b_, c_ = run_graph(model, stream)
     with a_, b_, c_:
-        with pytest.raises(ApplicationError, match="Unknown model_id"):
-            await graph_activity(
-                action="execute",
-                topology={"nodes": [{"id": "x", "system_prompt": "s", "model_settings": {"model_id": "nope"}}]},
-                task="go",
-            )
+        result = await graph_activity(
+            action="execute",
+            topology={"nodes": [{"id": "x", "system_prompt": "s", "model_settings": {"model_id": "nope"}}]},
+            task="go",
+        )
+    assert result["status"] == "success"
+    assert model.calls == 1
     from graph_tool import _manager
 
     assert _manager.graphs == {}
@@ -600,16 +636,142 @@ async def test_no_cross_run_collision_same_graph_id() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
-async def test_non_agent_node_type_is_rejected() -> None:
-    """Official graph nodes are agents. A type string is not a formation."""
+async def test_unknown_node_type_is_rejected() -> None:
+    """workflow/parallel and invented type strings are not supported."""
     model = ScriptedModel()
     stream = FakeStreamClient()
-    topo = {"nodes": [{"id": "writer", "type": "swarm", "system_prompt": "w"}]}
+    topo = {"nodes": [{"id": "writer", "type": "workflow", "system_prompt": "w"}]}
     a, b, c = run_graph(model, stream)
     with a, b, c:
         with pytest.raises(ApplicationError, match="Unknown node type"):
             await graph_activity(action="execute", topology=topo, task="write")
+
+
+@pytest.mark.asyncio
+async def test_swarm_node_executes_with_path_qualified_members() -> None:
+    """A swarm node builds a native SDK Swarm; member events flatten to
+    ``team/<member>`` paths enriched with the declared node types."""
+    from graph_tool import _manager
+
+    model = ScriptedModel()
+    stream = FakeStreamClient()
+    topo = {
+        "nodes": [
+            {
+                "id": "team",
+                "type": "swarm",
+                "role": "collaborate",
+                "agents": [
+                    {"id": "alpha", "system_prompt": "a"},
+                    {"id": "beta", "system_prompt": "b"},
+                ],
+            },
+        ],
+    }
+    a, b, c = run_graph(model, stream)
+    with a, b, c:
+        result = await graph_activity(action="execute", topology=topo, task="go")
+
+    assert result["status"] == "success"
+    assert _manager.graphs == {}
+    datas = [frame["data"] for frame in frames(stream)]
+
+    planned = datas[0]
+    assert planned["type"] == "graph_topology"
+    by_id = {node["node_id"]: node for node in planned["nodes"]}
+    assert by_id["team"]["node_type"] == "swarm"
+    assert by_id["team/alpha"]["parent_id"] == "team"
+    assert by_id["team/beta"]["node_type"] == "agent"
+
+    starts = {
+        d["node_id"]: d for d in datas if d.get("type") == "multiagent_node_start"
+    }
+    # The SDK emits node_type "multiagent" for the swarm node; flattening
+    # enriches it with the declared type from the planned topology.
+    assert starts["team"]["node_type"] == "swarm"
+    assert starts["team/alpha"]["node_type"] == "agent"
+    assert starts["team/alpha"]["parent_id"] == "team"
+
+    # The member's text deltas ride in path-qualified leaf stream frames.
+    stream_frames = [
+        d for d in datas
+        if d.get("type") == "multiagent_node_stream" and isinstance(d.get("event"), dict)
+    ]
+    texts = [
+        d["event"].get("data")
+        for d in stream_frames
+        if isinstance(d["event"].get("data"), str)
+    ]
+    assert any("reply-" in t for t in texts)
+    assert any(d["node_id"].startswith("team/") for d in stream_frames)
+
+    import json
+
+    json.dumps(datas)
+
+
+@pytest.mark.asyncio
+async def test_nested_graph_node_executes_recursively() -> None:
+    """A nested graph node builds a real SDK Graph; inner events flatten to
+    ``pipe/<inner>`` paths and structural edges appear path-qualified."""
+    from graph_tool import _manager
+
+    model = ScriptedModel()
+    stream = FakeStreamClient()
+    topo = {
+        "nodes": [
+            {
+                "id": "pipe",
+                "type": "graph",
+                "topology": {
+                    "nodes": [
+                        {"id": "inner_a", "system_prompt": "a"},
+                        {"id": "inner_b", "system_prompt": "b"},
+                    ],
+                    "edges": [{"from": "inner_a", "to": "inner_b"}],
+                    "entry_points": ["inner_a"],
+                },
+            },
+            {"id": "outer", "system_prompt": "o"},
+        ],
+        "edges": [{"from": "pipe", "to": "outer"}],
+        "entry_points": ["pipe"],
+    }
+    a, b, c = run_graph(model, stream)
+    with a, b, c:
+        result = await graph_activity(action="execute", topology=topo, task="go")
+
+    assert result["status"] == "success"
+    assert _manager.graphs == {}
+    # inner_a + inner_b + outer each ran one model call.
+    assert model.calls == 3
+    datas = [frame["data"] for frame in frames(stream)]
+
+    planned = datas[0]
+    by_id = {node["node_id"]: node for node in planned["nodes"]}
+    assert by_id["pipe"]["node_type"] == "graph"
+    assert by_id["pipe/inner_a"]["parent_id"] == "pipe"
+    assert {"from": "pipe/inner_a", "to": "pipe/inner_b"} in planned["edges"]
+    assert {"from": "pipe", "to": "outer"} in planned["edges"]
+
+    starts = {
+        d["node_id"]: d for d in datas if d.get("type") == "multiagent_node_start"
+    }
+    assert starts["pipe"]["node_type"] == "graph"
+    assert starts["pipe/inner_a"]["node_type"] == "agent"
+    assert starts["pipe/inner_a"]["label"] == "inner_a"
+    assert "outer" in starts
+
+    handoffs = [d for d in datas if d.get("type") == "multiagent_handoff"]
+    assert any(
+        d.get("from_node_ids") == ["pipe/inner_a"]
+        and d.get("to_node_ids") == ["pipe/inner_b"]
+        for d in handoffs
+    )
+
+    import json
+
+    json.dumps(datas)
 
 
 def test_skill_agent_node_assigned_skills_become_inline_tools(monkeypatch) -> None:
@@ -664,7 +826,7 @@ def test_skill_agent_node_tools_come_from_parent_registry(monkeypatch) -> None:
     from pathlib import Path
 
     from strands import Agent
-    from strands_tools import calculator
+    from strands_tools import current_time
 
     import graph_tool
     import skills_config
@@ -683,15 +845,14 @@ def test_skill_agent_node_tools_come_from_parent_registry(monkeypatch) -> None:
     skills_config.discovered_skills.cache_clear()
     try:
         ensure_skills_configured(None)
-        parent = Agent(model=ScriptedModel(), tools=[calculator], callback_handler=None)
+        parent = Agent(model=ScriptedModel(), tools=[current_time], callback_handler=None)
         agent = graph_tool.build_skill_agent(
-            {"id": "writer", "skill": "wf-skill", "tools": ["calculator"]},
+            {"id": "writer", "skill": "wf-skill", "tools": ["current_time"]},
             parent_agent=parent,
             model=ScriptedModel(),
         )
         names = set(agent.tool_registry.registry)
-        assert "calculator" in names
-        assert {"file_read", "file_write"} <= names
+        assert "current_time" in names
     finally:
         skills_config.discovered_skills.cache_clear()
         ensure_skills_configured(None)
@@ -744,15 +905,17 @@ def test_agent_node_assigned_skills_become_the_skills_tool(monkeypatch, tmp_path
 
 @pytest.mark.asyncio
 async def test_node_tools_are_only_the_names_it_lists() -> None:
-    """A node may name a tool the orchestrator load_tool-ed onto itself.
-    A node that omits ``tools`` gets none of them."""
+    """A node that names tools gets those. A node that omits tools gets every parent tool."""
     from load_tool import STRANDS_TOOLS_DIR
 
     import graph_tool
 
     model = ScriptedModel()
     stream = FakeStreamClient()
-    loaded = [{"path": str(STRANDS_TOOLS_DIR / "calculator.py"), "name": "calculator"}]
+    loaded = [
+        {"path": str(STRANDS_TOOLS_DIR / "sleep.py"), "name": "sleep"},
+        {"path": str(STRANDS_TOOLS_DIR / "current_time.py"), "name": "current_time"},
+    ]
 
     async def query(name: str, *_: Any, **__: Any) -> Any:
         return {"model_id": "fake/text", "loaded_tools": loaded}[name]
@@ -774,15 +937,15 @@ async def test_node_tools_are_only_the_names_it_lists() -> None:
             action="execute",
             topology={
                 "nodes": [
-                    {"id": "calc", "system_prompt": "s", "tools": ["calculator"]},
+                    {"id": "calc", "system_prompt": "s", "tools": ["sleep"]},
                     {"id": "all", "system_prompt": "s"},
                 ]
             },
             task="go",
         )
     assert result["status"] == "success"
-    assert seen[0] == {"calculator"}
-    assert seen[1] == set()
+    assert seen[0] == {"sleep"}
+    assert seen[1] == {"sleep", "current_time", "environment", "http_request", "journal"}
 
 
 # --- management actions (process-local) --------------------------------------
@@ -827,7 +990,9 @@ def test_activity_as_tool_spec_is_flat_and_documented() -> None:
     assert topology["required"] == ["nodes"]
     node = schema["$defs"]["GraphNode"]
     assert set(node["properties"]) == {
-        "id", "role", "system_prompt", "model_settings", "tools", "skills",
+        "id", "type", "role", "system_prompt", "model_settings", "tools",
+        "skills", "skill", "agents", "topology", "entry_point",
+        "max_handoffs", "max_iterations", "execution_timeout", "node_timeout",
     }
     settings = schema["$defs"]["GraphModelSettings"]["properties"]
     assert set(settings) == {"model_id"}
@@ -876,3 +1041,65 @@ def test_topology_model_round_trips_to_sibling_dict() -> None:
     assert as_dict["nodes"][1]["model_settings"] == {"model_id": "preset:high"}
     # Plain dicts (unit tests, direct callers) pass through unchanged.
     assert _as_topology_dict({"nodes": []}) == {"nodes": []}
+
+
+def test_topology_model_round_trips_nested_formations() -> None:
+    """swarm/graph node fields survive validation and dump (exclude_none)."""
+    from graph_activity import GraphTopology, _as_topology_dict
+
+    topo = GraphTopology.model_validate({
+        "nodes": [
+            {
+                "id": "team",
+                "type": "swarm",
+                "agents": [
+                    {"id": "alpha", "system_prompt": "a"},
+                    {"id": "beta", "type": "skill_agent", "skill": "wf-skill"},
+                ],
+                "entry_point": "alpha",
+                "max_handoffs": 5,
+                "node_timeout": 60.0,
+            },
+            {
+                "id": "pipe",
+                "type": "graph",
+                "topology": {
+                    "nodes": [{"id": "inner", "system_prompt": "i"}],
+                    "edges": [],
+                    "entry_points": ["inner"],
+                },
+            },
+        ],
+        "edges": [{"from": "team", "to": "pipe"}],
+    })
+    as_dict = _as_topology_dict(topo)
+    team, pipe = as_dict["nodes"]
+    assert team == {
+        "id": "team",
+        "type": "swarm",
+        "agents": [
+            {"id": "alpha", "system_prompt": "a"},
+            {"id": "beta", "type": "skill_agent", "skill": "wf-skill"},
+        ],
+        "entry_point": "alpha",
+        "max_handoffs": 5,
+        "node_timeout": 60.0,
+    }
+    assert pipe["type"] == "graph"
+    assert pipe["topology"] == {
+        "nodes": [{"id": "inner", "system_prompt": "i"}],
+        "edges": [],
+        "entry_points": ["inner"],
+    }
+
+
+def test_topology_model_rejects_unknown_node_fields() -> None:
+    """extra='forbid' still holds on the extended GraphNode."""
+    from pydantic import ValidationError
+
+    from graph_activity import GraphTopology
+
+    with pytest.raises(ValidationError):
+        GraphTopology.model_validate({
+            "nodes": [{"id": "x", "system_prompt": "s", "bogus": 1}],
+        })

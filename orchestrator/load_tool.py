@@ -13,21 +13,18 @@ tool then executes on the worker through Temporal's dynamic activity
 (``@activity.defn(dynamic=True)``), which runs the loaded ``AgentTool`` with the
 SDK's own ``stream()``.
 
-Workflow side: after a successful ``load_tool`` the hook in ``workflow.py``
-calls ``register_community_tool`` -- the same official ``load_tool`` against the
-live ``TemporalAgent`` -- then swaps the loaded tool for ``LoadedActivityTool``,
-which dispatches to that dynamic activity exactly as the plugin's own
-``TemporalMCPTool`` dispatches to ``{server}-call-tool``.
+Workflow side: the hook registers the activity-returned tool schema through
+native ``@tool(context=True)`` and dispatches its ToolUse to the dynamic
+activity. New loads and Continue-As-New never import tool files on replay.
+Path-only records retain the old loading behavior for persisted histories.
 
 https://github.com/temporalio/sdk-python/blob/main/temporalio/contrib/strands/README.md
 """
 
 from __future__ import annotations
 
-import ast
-import functools
-import html
 import importlib.util
+import asyncio
 import inspect
 import json
 import os
@@ -41,10 +38,11 @@ from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
 
 import strands_tools
-from strands import Agent
+from strands import Agent, tool
+from strands.hooks import AfterToolCallEvent, HookProvider
 from strands.tools.mcp import MCPClient
 from strands.types._events import ToolResultEvent
-from strands.types.tools import AgentTool, ToolGenerator, ToolResult, ToolSpec, ToolUse
+from strands.types.tools import ToolContext, ToolResult, ToolSpec, ToolUse
 from strands_tools.load_tool import load_tool as official_load_tool
 from strands_tools.mcp_client import mcp_client as official_mcp_client
 from temporalio import activity, workflow
@@ -57,6 +55,10 @@ from temporalio.contrib.strands._temporal_mcp_client import (
 )
 
 from config import (
+    GRAPH_START_TO_CLOSE,
+    GRAPH_HEARTBEAT_TIMEOUT,
+    GRAPH_RETRY_POLICY,
+    GRAPH_QUIET_HEARTBEAT_INTERVAL,
     MCP_START_TO_CLOSE,
     MODEL_HEARTBEAT,
     MODEL_RETRY_POLICY,
@@ -64,8 +66,6 @@ from config import (
 
 STRANDS_TOOLS_DIR = Path(strands_tools.__file__).resolve().parent
 _MCP_CONFIG_PATH = Path(__file__).resolve().parent / "mcp.json"
-_PACKAGES_PATH = Path(__file__).resolve().parent / "subagent_packages.json"
-_SKIP_DIRS = {"node_modules", "__pycache__", "tests", "test", "skills"}
 
 # Tool activity. Start-to-close matches the installed Strands guide's
 # activity_as_tool(..., start_to_close_timeout=timedelta(seconds=30)).
@@ -76,17 +76,32 @@ _ACTIVITY_OPTIONS = dict(
 )
 
 
+def _bound_tool(name: str) -> Any | None:
+    """Existing bindings whose native invocation contracts must be preserved."""
+    from agent_tools import COMPUTER_USE_TOOLS, PERMANENT_COMMUNITY_TOOLS
+    from strands_tools.think import think
+
+    if name == "think":
+        return think
+    for bound in (*COMPUTER_USE_TOOLS, *PERMANENT_COMMUNITY_TOOLS):
+        if bound.tool_name == name and (
+            bound in COMPUTER_USE_TOOLS or name in {"graph", "browser", "use_agent"}
+        ):
+            return bound
+    return None
+
+
 def tool_file_path(path: str) -> str:
     """The file the official ``load_tool`` opens.
 
     The path as given when it exists; otherwise the installed ``strands_tools``
-    module of that name (``path="calculator"`` -> ``strands_tools/calculator.py``,
+    module of that name (``path="current_time"`` -> ``strands_tools/current_time.py``,
     resolved by ``importlib``). A bare package id resolves to the nested file
     that defines its tools (``dicom`` -> ``dicom/strands_tools.py``). Anything
     else is returned unchanged for the official tool to report in its own words.
     """
     expanded = os.path.expanduser(path)
-    if os.path.exists(expanded):
+    if os.path.isfile(expanded):
         return expanded
     stem = Path(path).stem
     spec = importlib.util.find_spec(f"strands_tools.{stem}")
@@ -114,99 +129,10 @@ def _ok(text: str) -> dict[str, Any]:
     return {"status": "success", "content": [{"text": text}]}
 
 
-def _err(text: str) -> dict[str, Any]:
-    return {"status": "error", "content": [{"text": text}]}
-
-
-def _xml(tag: str, body: str) -> str:
-    return f"<{tag}>\n{body}\n</{tag}>"
-
-
-def _esc(value: str) -> str:
-    return html.escape(value, quote=True)
-
-
-def _py_tools() -> list[tuple[str, str]]:
-    found: list[tuple[str, str]] = []
-    for py in STRANDS_TOOLS_DIR.rglob("*.py"):
-        if _SKIP_DIRS.intersection(py.parts) or py.name.startswith("test_"):
-            continue
-        try:
-            tree = ast.parse(py.read_text(errors="replace"))
-        except SyntaxError:
-            continue
-        for node in tree.body:
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            for dec in node.decorator_list:
-                tool_name = _decorated_tool_name(dec, node.name)
-                if tool_name:
-                    found.append((tool_name, str(py)))
-    found.sort()
-    return found
-
-
-def _decorated_tool_name(dec: ast.expr, fallback: str) -> str | None:
-    fid = getattr(dec, "id", None) or getattr(getattr(dec, "func", None), "id", None)
-    attr = getattr(getattr(dec, "func", None), "attr", None)
-    if fid not in {"tool", "strands_tool"} and attr not in {"tool", "strands_tool"}:
-        return None
-    if isinstance(dec, ast.Call):
-        for kw in dec.keywords:
-            if kw.arg == "name" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
-                return kw.value.value
-    return fallback
-
-
 def _mcp_config() -> dict[str, Any]:
     if not _MCP_CONFIG_PATH.is_file():
         return {}
     return json.loads(_MCP_CONFIG_PATH.read_text())
-
-
-def _disk_mcp_servers() -> list[str]:
-    names: list[str] = []
-    for child in STRANDS_TOOLS_DIR.iterdir():
-        if child.is_dir() and "mcp" in child.name.lower() and child.name not in _SKIP_DIRS:
-            names.append(child.name)
-    return sorted(names)
-
-
-def _resolve_arg(arg: str) -> str:
-    if arg.startswith("-"):
-        return arg
-    candidate = (STRANDS_TOOLS_DIR / arg).resolve()
-    if str(candidate).startswith(str(STRANDS_TOOLS_DIR)) and candidate.exists():
-        return str(candidate)
-    return arg
-
-
-def _server_line(name: str, cfg: dict[str, Any], status: str) -> str:
-    if not cfg:
-        return f'<server name="{_esc(name)}" status="{status}"/>'
-    if cfg.get("url"):
-        return (
-            f'<server name="{_esc(name)}" status="{status}" '
-            f'transport="streamable_http" server_url="{_esc(str(cfg["url"]))}" '
-            f'credentials="{"worker-configured" if cfg.get("headers") else "none"}"/>'
-        )
-    args = [_resolve_arg(str(item)) for item in (cfg.get("args") or [])]
-    env = cfg.get("env") or {}
-    missing = [
-        value[2:-1]
-        for value in env.values()
-        if isinstance(value, str) and value.startswith("${") and value.endswith("}")
-        and not os.environ.get(value[2:-1])
-    ]
-    attrs = (
-        f' transport="stdio" command="{_esc(str(cfg.get("command") or ""))}" '
-        f'args="{_esc(json.dumps(args))}"'
-    )
-    if env:
-        attrs += f' env="{_esc(json.dumps(env))}"'
-    if missing:
-        attrs += f' env_missing="{_esc(",".join(missing))}"'
-    return f'<server name="{_esc(name)}" status="{status}"{attrs}/>'
 
 
 def _expand_env(env: dict[str, Any]) -> tuple[dict[str, str] | None, list[str]]:
@@ -222,105 +148,6 @@ def _expand_env(env: dict[str, Any]) -> tuple[dict[str, str] | None, list[str]]:
             text,
         )
     return (None if missing else expanded), missing
-
-
-def _server_status(name: str, configured: dict[str, Any]) -> str:
-    if name in _EXTRA_MCP_PARAMS or (name in configured and not configured[name].get("continue_on_error")):
-        return "connected"
-    if name in configured:
-        return "started"
-    return "off"
-
-
-def _schemas() -> list[tuple[str, str]]:
-    used = {
-        str((params.get("env") or {}).get("OPENAPI_SPEC_PATH") or "")
-        for params in _EXTRA_MCP_PARAMS.values()
-    }
-    rows: list[tuple[str, str]] = []
-    for entry in _mcp_config().get("openapiSchemas") or []:
-        if not isinstance(entry, dict):
-            continue
-        rel = str(entry.get("path") or "")
-        full = str((STRANDS_TOOLS_DIR / rel).resolve()) if rel else ""
-        if rel and full not in used and not any(item.endswith(rel) for item in used if item):
-            rows.append((str(entry.get("name") or rel), rel))
-    return rows
-
-
-def _read_packages() -> dict[str, Any]:
-    if not _PACKAGES_PATH.is_file():
-        return {}
-    data = json.loads(_PACKAGES_PATH.read_text())
-    return data if isinstance(data, dict) else {}
-
-
-def _write_packages(data: dict[str, Any]) -> None:
-    _PACKAGES_PATH.write_text(json.dumps(data, indent=2) + "\n")
-
-
-def _inventory(query: str = "") -> str:
-    needle = query.strip().lower()
-
-    def keep(text: str) -> bool:
-        return not needle or needle in text.lower()
-
-    loaded = {
-        getattr(tool, "tool_name", "")
-        for tool in _worker_agent().tool_registry.registry.values()
-    }
-    tools = []
-    seen: set[str] = set()
-    for tool_name, path in _py_tools():
-        seen.add(tool_name)
-        line = (
-            f'<tool name="{_esc(tool_name)}" path="{_esc(path)}" '
-            f'loaded="{str(tool_name in loaded).lower()}"/>'
-        )
-        if keep(line):
-            tools.append(line)
-    for tool_name in sorted(loaded - seen):
-        if not tool_name:
-            continue
-        line = f'<tool name="{_esc(tool_name)}" path="meta" loaded="true"/>'
-        if keep(line):
-            tools.append(line)
-    skills = []
-    try:
-        from skills_config import discovered_skills
-
-        for skill in discovered_skills():
-            desc = (getattr(skill, "description", "") or "").replace("\n", " ").strip()[:160]
-            line = f'<skill name="{_esc(skill.name)}" description="{_esc(desc)}"/>'
-            if keep(line):
-                skills.append(line)
-    except Exception as error:  # noqa: BLE001 - catalog is optional
-        skills.append(f"<!-- skills unavailable: {_esc(str(error))} -->")
-    configured = _mcp_config().get("mcpServers") or {}
-    servers = []
-    names = sorted(set(configured) | set(_disk_mcp_servers()) | set(_EXTRA_MCP_PARAMS))
-    for server in names:
-        status = _server_status(server, configured)
-        line = _server_line(server, configured.get(server) or {}, status)
-        if keep(line):
-            servers.append(line)
-    schemas = [
-        f'<schema name="{_esc(label)}" path="{_esc(rel)}"/>'
-        for label, rel in _schemas()
-        if keep(label + rel)
-    ]
-    packages = []
-    for pkg_name, pkg in _read_packages().items():
-        line = f'<package name="{_esc(pkg_name)}">{_esc(json.dumps(pkg))}</package>'
-        if keep(line):
-            packages.append(line)
-    return "\n".join([
-        _xml("tools", "\n".join(tools)),
-        _xml("skills", "\n".join(skills)),
-        _xml("mcp_servers", "\n".join(servers)),
-        _xml("openapi_schemas", "\n".join(schemas)),
-        _xml("packages", "\n".join(packages)),
-    ])
 
 
 # ---------------------------------------------------------------------------
@@ -340,130 +167,105 @@ def _worker_agent() -> Agent:
 
 
 @activity.defn(name="load_tool")
-async def load_tool_activity(
-    path: str = "",
-    name: str = "",
-    action: str = "load",
-    tools: list[str] | None = None,
-    skills: list[str] | None = None,
-    mcp_servers: list[str] | None = None,
-    query: str = "",
-) -> dict:
-    """Load, unload, or list tools, skills, MCP servers, schemas, and packages.
+async def load_tool_activity(path: str, name: str) -> dict:
+    """Load one community tool and register it on this session.
 
-    Default action is load: ``path`` is a bare module name or a ``.py`` file,
-    ``name`` is the registry name. ``list_tools`` returns tools (including
-    meta-tools), skills, MCP servers, unconverted OpenAPI schemas, and
-    subagent packages. ``unload`` removes a name this tool loaded.
+    Call this once per tool. Several calls in one step all register, and each
+    loaded name is callable on the next step. Call it again with the same name
+    to reload.
 
     Args:
-        path: Bare community module name (``calculator``, ``dicom``, ``fhir``,
-            ``forge``) or a ``.py`` file you created.
-        name: Registry name to load or unload, or the subagent package name.
-        action: load (default), unload, list_tools, list_mcp_servers,
-            list_schemas, list_skills, list_packages, save_package, or
-            delete_package.
-        tools: Tool names stored on a subagent package.
-        skills: Catalog skill names stored on a subagent package.
-        mcp_servers: MCP server names stored on a subagent package.
-        query: Optional substring filter for list_tools.
+        path: Bare module name (current_time, dicom, fhir, forge) or a Python file path.
+        name: Registry name for the loaded tool.
     """
-    if action == "load":
-        return official_load_tool(path=tool_file_path(path), name=name, agent=_worker_agent())
-    if action == "unload":
-        return await _unload(name)
-    if action in {"list_tools", "list_mcp_servers", "list_schemas", "list_skills", "list_packages"}:
-        text = _inventory(query)
-        if action != "list_tools":
-            tag = {
-                "list_mcp_servers": "mcp_servers",
-                "list_schemas": "openapi_schemas",
-                "list_skills": "skills",
-                "list_packages": "packages",
-            }[action]
-            start = text.index(f"<{tag}>")
-            end = text.index(f"</{tag}>") + len(f"</{tag}>")
-            text = text[start:end]
-        return _ok(text)
-    if action == "save_package":
-        if not name:
-            return _err("package name is required")
-        packages = _read_packages()
-        packages[name] = {
-            "tools": list(tools or []),
-            "skills": list(skills or []),
-            "mcp_servers": list(mcp_servers or []),
+    bound = _bound_tool(name)
+    if bound is not None:
+        return {**_ok(f"Loaded {name}"), "path": name, "tool_spec": bound.tool_spec}
+    resolved = tool_file_path(path)
+    if name in _SESSION_TOOLS and (
+        name not in {"environment", "http_request", "journal"}
+        or Path(resolved).resolve() != STRANDS_TOOLS_DIR / f"{name}.py"
+    ):
+        return {"status": "error", "content": [{"text": f"Cannot replace starter tool {name}"}]}
+    result = official_load_tool(path=resolved, name=name, agent=_worker_agent())
+    if result.get("status") == "success":
+        return {
+            **result,
+            "path": resolved,
+            "tool_spec": _worker_agent().tool_registry.registry[name].tool_spec,
         }
-        _write_packages(packages)
-        return _ok(f"saved package {name}")
-    if action == "delete_package":
-        packages = _read_packages()
-        if name not in packages:
-            return _err(f"no package {name}")
-        del packages[name]
-        _write_packages(packages)
-        return _ok(f"deleted package {name}")
-    return _err(f"unknown load_tool action {action!r}")
+    return result
 
 
-async def _unload(name: str) -> dict:
-    if not name:
-        return _err("name is required")
-    loaded_path = await _loaded_tool_path(name)
-    if loaded_path is None and name not in _worker_agent().tool_registry.registry:
-        return _err(f"{name} is not a loaded tool")
-    if loaded_path is None:
-        return _err(f"{name} is not a loaded tool")
-    _worker_agent().tool_registry.registry.pop(name, None)
-    return _ok(f"unloaded {name}")
+async def mcp_client_activity(
+    action: str,
+    server_config: dict[str, Any] | None = None,
+    connection_id: str | None = None,
+    tool_name: str | None = None,
+    tool_args: dict[str, Any] | None = None,
+    transport: str | None = None,
+    command: str | None = None,
+    args: list[str] | None = None,
+    env: dict[str, str] | None = None,
+    server_url: str | None = None,
+    arguments: dict[str, Any] | None = None,
+    headers: dict[str, Any] | None = None,
+    timeout: float | None = None,
+    sse_read_timeout: float | None = None,
+    terminate_on_close: bool | None = None,
+    auth: Any | None = None,
+) -> dict[str, Any]:
+    """Forward one ``mcp_client`` call to the installed tool.
 
-
-@activity.defn(name="mcp_client")
-@functools.wraps(official_mcp_client, updated=())
-async def mcp_client_activity(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    bound = inspect.signature(official_mcp_client).bind_partial(*args, **kwargs)
-    if bound.arguments.get("action") == "connect":
-        kwargs = dict(bound.arguments)
-        params = dict(kwargs.get("server_config") or {})
-        configured = (_mcp_config().get("mcpServers") or {}).get(kwargs.get("connection_id"), {})
-        if configured.get("url"):
-            resolved, missing = _expand_env({"server_url": configured["url"]})
-            if resolved is None:
-                return _err(f"cannot connect: missing environment {', '.join(missing)}")
-            configured_url = resolved["server_url"]
-            supplied_url = kwargs.get("server_url") or params.get("server_url")
-            if supplied_url and supplied_url not in (configured["url"], configured_url):
-                return _err("configured connection_id must use its configured server URL")
-            kwargs["server_url"] = configured_url
-            kwargs["transport"] = configured.get("transport", "streamable_http").replace("-", "_")
-            if configured.get("headers"):
-                kwargs["headers"] = configured["headers"]
-        for field in ("env", "headers"):
-            values = kwargs.get(field, params.get(field))
-            if isinstance(values, dict):
-                expanded, missing = _expand_env(values)
-                if missing:
-                    return _err(f"cannot connect: missing environment {', '.join(missing)}")
-                kwargs[field] = expanded
-        args = ()
-    result = official_mcp_client(*args, **kwargs)
-    call = inspect.signature(official_mcp_client).bind_partial(*args, **kwargs).arguments
+    ``agent`` stays on the worker. It is not an activity argument.
+    """
+    call = {
+        "action": action,
+        "server_config": server_config,
+        "connection_id": connection_id,
+        "tool_name": tool_name,
+        "tool_args": tool_args,
+        "transport": transport,
+        "command": command,
+        "args": args,
+        "env": env,
+        "server_url": server_url,
+        "arguments": arguments,
+        "headers": headers,
+        "timeout": timeout,
+        "sse_read_timeout": sse_read_timeout,
+        "terminate_on_close": terminate_on_close,
+        "auth": auth,
+        "agent": _worker_agent(),
+    }
+    result = official_mcp_client(**call)
     _track_extra_connection(call, result)
     return result
 
 
+mcp_client_activity.__doc__ = inspect.unwrap(official_mcp_client).__doc__
+mcp_client_activity = activity.defn(name="mcp_client")(mcp_client_activity)
+
+
 async def _loaded_tool_path(name: str) -> str | None:
-    """Path of a loaded tool from the parent workflow's ``loaded_tools`` query
-    (durable workflow state, so a restarted worker can reload it)."""
+    """Path of a loaded tool from the parent workflow's ``loaded_tools`` query.
+
+    A restarted worker uses that path to reload. If the query is unavailable,
+    the bare module name resolves to the installed catalog file.
+    """
     info = activity.info()
     if not info.workflow_id:
-        return None
+        return tool_file_path(name)
     handle = activity.client().get_workflow_handle(info.workflow_id)
-    records = await handle.query("loaded_tools")
+    try:
+        records = await handle.query("loaded_tools")
+    except Exception as error:  # noqa: BLE001 - query is optional after a worker restart
+        activity.logger.warning("loaded_tools query unavailable: %s", error)
+        return tool_file_path(name)
     for rec in records or []:
         if isinstance(rec, dict) and rec.get("name") == name and rec.get("path"):
             return str(rec["path"])
-    return None
+    return tool_file_path(name)
 
 
 async def _run_loaded_tool(tool_use: ToolUse) -> ToolResult | None:
@@ -476,10 +278,23 @@ async def _run_loaded_tool(tool_use: ToolUse) -> ToolResult | None:
             raise KeyError(name)
         official_load_tool(path=path, name=name, agent=agent)
         loaded = agent.tool_registry.registry[name]
+    heartbeat_task = None
+    if name == "swarm":
+        from subagent_support import (
+            in_process_model, parent_agent, quiet_heartbeat_ticker, session_model,
+        )
+
+        agent = await parent_agent(in_process_model(await session_model(name)))
+        heartbeat_task = asyncio.create_task(quiet_heartbeat_ticker(GRAPH_QUIET_HEARTBEAT_INTERVAL.total_seconds()))
     result: ToolResult | None = None
-    async for event in loaded.stream(tool_use, {}):
-        if isinstance(event, ToolResultEvent):
-            result = event.tool_result
+    try:
+        async for event in loaded.stream(tool_use, {"agent": agent}):
+            if isinstance(event, ToolResultEvent):
+                result = event.tool_result
+    finally:
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
     return result
 
 
@@ -488,47 +303,204 @@ async def _run_loaded_tool(tool_use: ToolUse) -> ToolResult | None:
 # ---------------------------------------------------------------------------
 
 
-class LoadedActivityTool(AgentTool):
-    """Workflow-side stub for a ``load_tool``-loaded tool; dispatches to the
-    worker's dynamic activity of the same name (the plugin's ``TemporalMCPTool``
-    shape, with the SDK ``ToolUse`` as the activity input)."""
+def register_community_tool(agent: Any, path: str, name: str, spec: ToolSpec | None = None) -> dict[str, Any]:
+    """Register the activity-returned schema without importing tool files on replay.
 
-    def __init__(self, spec: ToolSpec, options: dict[str, Any]) -> None:
-        super().__init__()
-        self._spec = spec
-        self._options = options
+    The path-only branch supports persisted sessions created before schemas were
+    carried. New sessions use only serialized metadata from the load activity.
+    """
+    bound = _bound_tool(name)
+    if bound is not None:
+        if name in agent.tool_registry.registry:
+            agent.tool_registry.replace(bound)
+        else:
+            agent.tool_registry.register_tool(bound)
+        return _ok(f"Loaded {name}")
+    if spec is None:
+        result = official_load_tool(path=tool_file_path(path), name=name, agent=agent)
+        if result.get("status") != "success":
+            return result
+        spec = agent.tool_registry.registry[name].tool_spec
 
-    @property
-    def tool_name(self) -> str:
-        return self._spec["name"]
+    @tool(name=name, description=spec["description"], inputSchema=spec["inputSchema"], context=True)
+    async def dispatch(tool_context: ToolContext) -> ToolResult:
+        # Named legacy activities may still serve older histories. A distinct
+        # activity type ensures loaded community tools reach the dynamic handler.
+        options = _ACTIVITY_OPTIONS
+        if name == "swarm":
+            options = dict(
+                start_to_close_timeout=GRAPH_START_TO_CLOSE,
+                heartbeat_timeout=GRAPH_HEARTBEAT_TIMEOUT,
+                retry_policy=GRAPH_RETRY_POLICY,
+            )
+        return await workflow.execute_activity(f"community.{name}", tool_context.tool_use, **options)
 
-    @property
-    def tool_spec(self) -> ToolSpec:
-        return self._spec
+    if name in agent.tool_registry.registry:
+        agent.tool_registry.replace(dispatch)
+    else:
+        agent.tool_registry.register_tool(dispatch)
+    return _ok(f"Loaded {name}")
 
-    @property
-    def tool_type(self) -> str:
-        return "temporal_activity"
 
-    async def stream(
-        self, tool_use: ToolUse, invocation_state: dict[str, Any], **kwargs: Any
-    ) -> ToolGenerator:
-        result: ToolResult = await workflow.execute_activity(
-            self.tool_name, tool_use, **self._options
+@activity.defn(name="discover_tools")
+async def discover_tools_activity() -> dict[str, Any]:
+    """List community tool names that can be loaded. Does not register them."""
+    names: list[str] = []
+    for item in sorted(STRANDS_TOOLS_DIR.glob("*.py")):
+        if item.is_file() and not item.name.startswith("_"):
+            names.append(item.stem)
+    for child in sorted(STRANDS_TOOLS_DIR.iterdir()):
+        if not child.is_dir() or child.name.startswith("_"):
+            continue
+        if (child / "strands_tools.py").is_file() or (child / f"{child.name}_tools.py").is_file():
+            names.append(child.name)
+    from agent_tools import COMPUTER_USE_TOOLS
+
+    names.extend(bound.tool_name for bound in COMPUTER_USE_TOOLS)
+    names.extend(("graph", "browser", "use_agent"))
+    names = sorted(set(names))
+    return {"status": "success", "content": [{"text": "\n".join(names)}]}
+
+
+def unregistered_names(catalog: str, registered: set[str]) -> list[str]:
+    """Catalog names that are not already on the session registry."""
+    return [line for line in catalog.splitlines() if line and line not in registered]
+
+
+def _result_payload(result: dict[str, Any]) -> dict[str, Any] | None:
+    content = result.get("content") or []
+    if not content or not isinstance(content[0], dict):
+        return None
+    text = content[0].get("text") or ""
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def apply_tool_result(agent: Any, tool_use: dict[str, Any], result: dict[str, Any], paths: dict[str, str]) -> None:
+    """Register a successful ``load_tool`` or drop names from ``unload_tools``.
+
+    One call handles one tool result. The model may emit many in one step;
+    each result updates the registry on its own.
+    """
+    if tool_use.get("name") == "load_tool":
+        payload = _result_payload(result)
+        if not payload or payload.get("status") != "success" or not payload.get("tool_spec"):
+            return
+        name = (tool_use.get("input") or {}).get("name")
+        if not isinstance(name, str) or not name or name in _SESSION_TOOLS:
+            return
+        path = payload.get("path") or name
+        register_community_tool(agent, str(path), name, payload["tool_spec"])
+        paths[name] = str(path)
+        return
+    if tool_use.get("name") != "unload_tools":
+        return
+    requested = (tool_use.get("input") or {}).get("names") or []
+    if isinstance(requested, list):
+        drop_loaded(agent, [str(name) for name in requested], paths)
+
+
+def drop_loaded(agent: Any, names: list[str], paths: dict[str, str]) -> list[str]:
+    """Pop every requested name that this session loaded. Leave the rest."""
+    gone: list[str] = []
+    registry = agent.tool_registry.registry
+    dynamic = getattr(agent.tool_registry, "dynamic_tools", None)
+    for name in names:
+        if name in _SESSION_TOOLS or name not in paths:
+            continue
+        registry.pop(name, None)
+        if isinstance(dynamic, dict):
+            dynamic.pop(name, None)
+        paths.pop(name, None)
+        gone.append(name)
+    return gone
+
+
+def replay_catalog(agent: Any, messages: Sequence[Any], paths: dict[str, str]) -> None:
+    """Re-apply load and unload results already stored in the conversation.
+
+    Continue-as-new rebuilds the agent from its static tool list. The messages
+    are the record of what was loaded afterward.
+    """
+    uses: dict[str, dict[str, Any]] = {}
+    for message in messages or []:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            use = block.get("toolUse")
+            if isinstance(use, dict) and use.get("toolUseId"):
+                uses[str(use["toolUseId"])] = use
+            result = block.get("toolResult")
+            if not isinstance(result, dict):
+                continue
+            matched = uses.get(str(result.get("toolUseId")))
+            if matched:
+                apply_tool_result(agent, matched, result, paths)
+
+
+class LoadedTools(HookProvider):
+    """Register each successful ``load_tool`` before the next model call."""
+
+    def __init__(self) -> None:
+        self.paths: dict[str, str] = {}
+
+    def register_hooks(self, registry: Any, **kwargs: Any) -> None:
+        registry.add_callback(AfterToolCallEvent, self._after)
+
+    def _after(self, event: AfterToolCallEvent) -> None:
+        if event.result is None:
+            return
+        apply_tool_result(event.agent, dict(event.tool_use), dict(event.result), self.paths)
+
+
+def catalog_tools(paths: dict[str, str]) -> tuple[Any, Any]:
+    """``discover_tools`` and ``unload_tools`` bound to this session's loads."""
+
+    @tool(context=True)
+    async def discover_tools(tool_context: ToolContext) -> dict[str, Any]:
+        """List community tools that exist and are not on this session.
+
+        Returns names only. Load any of them with load_tool, as many as you
+        want in this step or the next. Call this again after loading or unloading.
+        """
+        catalog = await workflow.execute_activity(
+            discover_tools_activity,
+            start_to_close_timeout=MCP_START_TO_CLOSE,
+            heartbeat_timeout=MODEL_HEARTBEAT,
+            retry_policy=MODEL_RETRY_POLICY,
         )
-        yield ToolResultEvent(result)
+        text = (catalog.get("content") or [{}])[0].get("text") or ""
+        names = unregistered_names(text, set(tool_context.agent.tool_registry.registry))
+        return {"status": "success", "content": [{"text": "\n".join(names)}]}
+
+    @tool(context=True)
+    def unload_tools(names: list[str], tool_context: ToolContext) -> dict[str, Any]:
+        """Remove loaded community tools from this session.
+
+        ``names`` may list as many loaded tools as you want. Tools that were
+        not loaded stay. Call load_tool again to bring one back.
+        """
+        gone = drop_loaded(tool_context.agent, names, paths)
+        return {"status": "success", "content": [{"text": "\n".join(gone)}]}
+
+    return discover_tools, unload_tools
 
 
-def register_community_tool(agent: Any, path: str, name: str) -> dict[str, Any]:
-    """Official ``load_tool`` against the live agent, then ``replace`` the loaded
-    tool with its activity-dispatching stub. Returns the official result."""
-    result = official_load_tool(path=tool_file_path(path), name=name, agent=agent)
-    if result.get("status") != "success":
-        return result
-    loaded = agent.tool_registry.registry[name]
-    if not isinstance(loaded, LoadedActivityTool):
-        agent.tool_registry.replace(LoadedActivityTool(loaded.tool_spec, _ACTIVITY_OPTIONS))
-    return result
+_SESSION_TOOLS = frozenset({
+    "load_tool",
+    "discover_tools",
+    "unload_tools",
+    "use_skill",
+    "environment",
+    "http_request",
+    "journal",
+})
 
 
 # ---------------------------------------------------------------------------

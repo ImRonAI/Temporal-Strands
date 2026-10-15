@@ -8,6 +8,12 @@ from temporalio.common import RetryPolicy
 
 TASK_QUEUE = "perplexity-orchestrator"
 
+OFFLOAD_BUCKET = "gwen-offload"
+MEMORY_BUCKET = "gwen-memory"
+OFFLOAD_PAYLOAD_BYTES = 524_288
+DREAM_MIN_INTERVAL = timedelta(hours=24)
+DREAM_MIN_SESSIONS = 5
+
 # --- Provider declaration ---
 # Providers are declared by the worker, never inferred client-side from id
 # shapes: a "gemini*" id could mean Google AI Studio (direct) or google/* via
@@ -82,17 +88,29 @@ SERVER_HTTP_TIMEOUT = timedelta(seconds=60)
 # (strands/models/openai_responses.py:334-449). PerplexityModel taps the raw
 # SSE body and re-emits each one verbatim under a ``{"perplexity": ...}``
 # StreamEvent so the UI can render its tool card. "message" is deliberately
-# absent: its text already streams as output_text deltas.
+# absent: its text already streams as output_text deltas. "function_call" is
+# absent too: the parent loop owns it (PerplexityModel records its arguments
+# separately). The sandbox file-operation items (read/write/edit/glob/grep/
+# apply_patch) appear in live streams and the SDK's OutputItem union but not
+# in the OpenAPI discriminator; they are forwarded so the UI can show file
+# work. ``tool_search_output`` is the deferred-MCP catalog search.
 NATIVE_OUTPUT_ITEM_TYPES = (
     "search_results",
+    "image_search_results",
     "people_search_results",
     "finance_results",
     "fetch_url_results",
     "sandbox_results",
+    "sandbox_read_file",
     "sandbox_write_file",
+    "sandbox_edit_file",
+    "sandbox_glob",
+    "sandbox_grep",
+    "sandbox_apply_patch",
     "share_file",
     "mcp_call",
     "mcp_list_tools",
+    "tool_search_output",
     "skill_loaded",
     "advisor_result",
 )
@@ -128,15 +146,36 @@ PERMANENT_API_ERROR_TYPES = frozenset({
 # The Agent API's documented reasoning-effort enum (OpenAPI), enforced
 # pre-request by PerplexityModel.
 REASONING_EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh", "max"})
+
+# --- Per-turn tool/skill selection (workflow.py turn update) ---
+# load_tool is checked against its requested name in the hook input instead of
+# its own name; discover_tools/unload_tools cannot gain a new capability
+# without a passing load_tool; use_skill is gated on selection.skills.
+SELECTION_META_TOOLS = frozenset({"load_tool", "discover_tools", "unload_tools", "use_skill"})
+# Registered by ChatWorkflow.run() itself, never by load_tool, so a turn
+# restriction may still hold a starter subset.
+SELECTION_STARTER_TOOLS = frozenset({"environment", "http_request", "journal"})
+SELECTION_CANCEL_REASON = "Tool {name} is not in this turn's selected tools."
+SKILL_SELECTION_CANCEL_REASON = "Skill {name} is not in this turn's selected skills."
+# Desktop vision proxy. Perplexity rejects any image input for these model ids
+# with a bare 400 "invalid request" (live probe 2026-10-09: PNG, JPEG, 720px
+# JPEG and https URL all rejected for perplexity/glm-5.3; glm-5.3-flash and
+# preset:high accepted the same 1440x900 screenshot). For a listed model the
+# screenshot goes to VISION_PROXY_MODEL instead, and only its text read-out
+# (layout, targets, 0-999 click coordinates) reaches the session model.
+VISION_INCAPABLE_MODELS = frozenset({"perplexity/glm-5.3"})
+VISION_PROXY_MODEL = "perplexity/glm-5.3-flash"
+VISION_PROXY_EFFORT = "high"
+VISION_PROXY_MAX_OUTPUT_TOKENS = 4096
 # Configured Agent API connectors, attached to every request as
 # native {"type": "connector"} tools (agent_api_tools.connector_tools).
 # Authorization lives in the Perplexity Project; requests only reference the
 # connector id. A connector the gateway reports as not connected fails the
 # WHOLE request with HTTP 424 before inference (live 2026-09-15:
 # connector_googledrive, request id ac36f1f9-faa5-4dfb-afbc-e2c829d6f8af),
-# so only connectors verified live against the Project belong here.
-# connector_googledrive is removed until the Project's Drive grant is
-# reconnected in the console and a bare request succeeds.
+# so disconnected connectors must not be defaults. Google Drive and Linear
+# are omitted until reconnected and verified against this API group. The
+# provider can omit another explicitly disconnected connector before progress.
 CONNECTORS: tuple[dict[str, str], ...] = (
     {
         "id": "connector_github",
@@ -147,19 +186,21 @@ CONNECTORS: tuple[dict[str, str], ...] = (
             "git/gh."
         ),
     },
-    {
-        "id": "connector_linear",
-        "server_label": "linear",
-        "server_description": "The user's Linear: issues, projects, teams, and project updates.",
-    },
 )
 # The Agent API's own documented ceilings, not numbers chosen by this client.
+# max_steps: OpenAPI ``max_steps`` is 1-100. max_output_tokens: the schema has
+# no maximum (model-dependent); 128000 is the budget the medium/high/xhigh
+# presets publish (docs.perplexity.ai/docs/agent-api/presets, "Current preset
+# values") and the largest value the live gateway accepts for non-Google ids.
 MAX_STEPS_CEILING = 100
 MAX_OUTPUT_TOKENS_CEILING = 128_000
 # Per-provider output ceilings for catalog provider/model ids. The catalog
 # exposes no limit field; google/* rejects 128000 but accepts 65536 (verified
 # against the live API on 2026-08-02). Anything not listed gets the platform
-# ceiling. Presets own their budgets and never get max_output_tokens.
+# ceiling. Preset ids are also sent the ceiling: presets merge request fields
+# over their defaults, and the fast/low presets would otherwise cap output at
+# 8192/32768 (their published budgets) while this orchestrator asks for the
+# whole tool-using run in one response.
 PROVIDER_OUTPUT_CEILINGS = {"google/": 65_536}
 GEMINI_MODEL_ID = "gemini-3.8-flash"
 # Every id the worker registers a GeminiModel factory for (and advertises in
@@ -283,6 +324,19 @@ GRAPH_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
 USE_AGENT_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
 USE_AGENT_START_TO_CLOSE = timedelta(minutes=15)
 USE_AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
+# --- Local Python execution (python_repl_activity -> strands_tools.python_repl) ---
+# The installed community REPL runs on the host worker as a thin activity.
+# Code can have side effects (files, network), so exactly one automatic
+# attempt; the orchestrator re-runs deliberately. Ten minutes bounds a long
+# computation; the activity heartbeats before executing so a hung interpreter
+# is detected by the heartbeat timeout rather than the full start-to-close.
+PYTHON_REPL_START_TO_CLOSE = timedelta(minutes=10)
+PYTHON_REPL_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
+PYTHON_REPL_RETRY_POLICY = RetryPolicy(maximum_attempts=1)
+# Where the REPL persists its dill namespace between calls
+# (PYTHON_REPL_PERSISTENCE_DIR). Runtime data, not source: the tool defaults
+# to ``$CWD/repl_state`` and would otherwise litter orchestrator/.
+PYTHON_REPL_PERSISTENCE_DIR = Path(__file__).resolve().parent / ".runtime" / "python-repl"
 # Computer Use / browser actions are Temporal activities on desktop-browser.
 # Start-to-close is assigned after DESKTOP_TASK_TIMEOUT. Schedule-to-start and
 # schedule-to-close stay unset so Temporal's unlimited default applies.

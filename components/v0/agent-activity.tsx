@@ -154,10 +154,27 @@ type SearchResult = {
   date?: string | null
 }
 type UrlContent = { url: string; title: string; snippet: string }
+// Agent API ImageResult (docs.perplexity.ai/docs/agent-api/tools/image-search).
+type ImageResult = {
+  image_url: string
+  origin_url: string
+  width: number
+  height: number
+  title?: string | null
+}
 
 type NativeTool =
   | { type: "response.reasoning.search_queries"; queries: string[] }
   | { type: "response.reasoning.search_results"; results: SearchResult[] }
+  | { type: "response.reasoning.image_search_queries"; call_id?: string; queries: string[] }
+  | { type: "response.reasoning.image_search_results"; call_id?: string; results: ImageResult[] }
+  | {
+      type: "image_search_results"
+      call_id?: string
+      queries?: string[]
+      results: ImageResult[]
+      error?: string | null
+    }
   | { type: "response.reasoning.fetch_url_queries"; urls: string[] }
   | { type: "response.reasoning.fetch_url_results"; contents: UrlContent[] }
   | {
@@ -310,6 +327,15 @@ function chainStatus(chain: AgentChain, run: AgentRunSnapshot | undefined): stri
 // Chain of Thought example: results are ChainOfThoughtSearchResults >
 // ChainOfThoughtSearchResult. `render` is the Badge's base-ui composition
 // prop, so a result with a URL is the anchor itself.
+// Hostname for an untrusted URL string; the string itself when unparsable.
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url
+  }
+}
+
 function SearchResults({ items }: { items: Array<{ title: string; url?: string }> }) {
   if (items.length === 0) return null
   return (
@@ -317,7 +343,7 @@ function SearchResults({ items }: { items: Array<{ title: string; url?: string }
       {items.map((item, i) => (
         <ChainOfThoughtSearchResult
           key={item.url ? `${item.url}-${i}` : `${item.title}-${i}`}
-          className="max-w-full truncate border-border bg-white/[0.035] text-muted-foreground shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.05)] [a]:hover:border-blurple-bright/40 [a]:hover:bg-blurple/15 [a]:hover:text-foreground"
+          className="max-w-full truncate border-border bg-secondary/60 text-muted-foreground shadow-[inset_0_1px_0_0_oklch(1_0_0)] [a]:hover:border-blurple-bright/40 [a]:hover:bg-blurple/15 [a]:hover:text-foreground"
           render={
             item.url ? (
               <a href={item.url} rel="noreferrer" target="_blank" />
@@ -351,7 +377,7 @@ function NativeToolError({
         state="output-error"
         className="bg-destructive/[0.06]"
       />
-      <ToolContent className="border-t border-destructive/20 bg-black/20">
+      <ToolContent className="border-t border-destructive/20 bg-secondary/70">
         {input !== undefined && <ToolInput input={input} />}
         <ToolOutput output={undefined} errorText={error} />
       </ToolContent>
@@ -378,7 +404,7 @@ function FileTask({
           <TaskItem key={`${file.path}-${i}`}>
             <span className="inline-flex flex-wrap items-center gap-1.5">
               {file.label}
-              <TaskItemFile className="max-w-full border-border bg-black/25 font-mono text-[12px] tracking-[0.01em] text-foreground/90 shadow-[inset_0_1px_0_0_oklch(0.9_0.04_285/0.05)]">
+              <TaskItemFile className="max-w-full border-border bg-secondary/70 font-mono text-[12px] tracking-[0.01em] text-foreground/90 shadow-[inset_0_1px_0_0_oklch(1_0_0)]">
                 <FileIcon className="size-3.5 text-blurple-bright/80" />
                 <span className="truncate">{file.path}</span>
               </TaskItemFile>
@@ -499,7 +525,7 @@ function ShareFileArtifact({ name, url }: { name: string; url: string | null }) 
 
   return (
     <Artifact className="app-glass app-glass-edge">
-      <ArtifactHeader className="app-glass-edge bg-black/25">
+      <ArtifactHeader className="app-glass-edge bg-secondary/70">
         <div>
           <ArtifactTitle className="font-mono text-[13px] tracking-[0.01em]">{name}</ArtifactTitle>
           <ArtifactDescription className="text-xs">
@@ -583,7 +609,7 @@ function ListFilesArtifacts({ part }: { part: DynamicToolUIPart }) {
     <div className="grid gap-2 sm:grid-cols-2">
       {files.map((file, i) => (
         <Artifact key={`${file.filename}-${i}`} className="app-glass app-glass-edge">
-          <ArtifactHeader className="app-glass-edge border-b-0 bg-black/25">
+          <ArtifactHeader className="app-glass-edge border-b-0 bg-secondary/70">
             <div className="min-w-0">
               <ArtifactTitle className="truncate font-mono text-[13px] tracking-[0.01em]">{file.filename ?? "file"}</ArtifactTitle>
               <ArtifactDescription className="text-xs tabular-nums">
@@ -648,8 +674,8 @@ function RunChain({ run, running }: { run: AgentRunSnapshot; running: boolean })
 function LifecycleTool({ part }: { part: DynamicToolUIPart }) {
   return (
     <Tool className="app-glass app-glass-edge overflow-hidden rounded-lg" defaultOpen={false}>
-      <ToolHeader type="dynamic-tool" toolName={part.toolName} state={part.state} className="hover:bg-white/[0.02]" />
-      <ToolContent className="app-glass-edge border-t bg-black/20">
+      <ToolHeader type="dynamic-tool" toolName={part.toolName} state={part.state} className="hover:bg-secondary/80" />
+      <ToolContent className="app-glass-edge border-t bg-secondary/70">
         <ToolInput input={part.input} />
         {(part.state === "output-available" || part.state === "output-error") && (
           <ToolOutput
@@ -726,7 +752,7 @@ function AgentChainCard({
 
   return (
     <Agent className="app-glass app-glass-edge overflow-hidden rounded-lg">
-      <AgentHeader model={modelLabel} name={`${runLabel} · ${status}`} className="app-glass-edge border-b bg-black/25" />
+      <AgentHeader model={modelLabel} name={`${runLabel} · ${status}`} className="app-glass-edge border-b bg-secondary/70" />
       <AgentContent>
         <AgentInstructions>
           {input?.instructions ?? input?.input ?? input?.task ?? "…"}
@@ -775,7 +801,7 @@ function UnboundRunCard({ run }: { run: AgentRunSnapshot }) {
       <AgentHeader
         model={run.model ?? run.preset}
         name={`Sub-agent · ${run.preset} · ${run.status}`}
-        className="app-glass-edge border-b bg-black/25"
+        className="app-glass-edge border-b bg-secondary/70"
       />
       <AgentContent>
         <RunChain run={run} running={running} />
@@ -1075,6 +1101,56 @@ function NativeToolStep({ native }: { native: NativeTool }) {
         </ChainOfThoughtStep>
       )
 
+    // Image search in flight: same shape as the web search step.
+    case "response.reasoning.image_search_queries":
+      return (
+        <ChainOfThoughtStep
+          icon={ImageIcon}
+          label={`Searching images · ${native.queries.length} quer${native.queries.length === 1 ? "y" : "ies"}`}
+          status="active"
+        >
+          <SearchResults items={native.queries.map((q) => ({ title: q }))} />
+        </ChainOfThoughtStep>
+      )
+
+    // Image results: each image is a ChainOfThoughtImage linking to its
+    // origin page; the badges list the origin sites. A failed call arrives
+    // with an empty results array and `error: "image_search_failed"`.
+    case "response.reasoning.image_search_results":
+    case "image_search_results": {
+      const error = "error" in native ? native.error : null
+      const queries = "queries" in native ? native.queries ?? [] : []
+      const label =
+        queries.length === 1
+          ? `Images · ${queries[0]}`
+          : `Images · ${native.results.length} result${native.results.length === 1 ? "" : "s"}`
+      return (
+        <ChainOfThoughtStep icon={ImageIcon} label={label} status="complete">
+          {error ? (
+            <NativeToolError toolName="image_search" input={{ queries }} error={error} />
+          ) : (
+            <>
+              <SearchResults
+                items={native.results.map((r) => ({
+                  title: r.title || hostnameOf(r.origin_url),
+                  url: r.origin_url,
+                }))}
+              />
+              {native.results.map((r, i) => (
+                <ImageStep
+                  key={`${r.image_url}-${i}`}
+                  src={r.image_url}
+                  alt={r.title || "Image result"}
+                  caption={r.title ? `${r.title} · ${r.width}×${r.height}` : `${r.width}×${r.height}`}
+                  href={r.origin_url}
+                />
+              ))}
+            </>
+          )}
+        </ChainOfThoughtStep>
+      )
+    }
+
     case "response.reasoning.fetch_url_queries":
       return (
         <ChainOfThoughtStep
@@ -1189,8 +1265,8 @@ function NativeToolStep({ native }: { native: NativeTool }) {
         <ChainOfThoughtStep icon={ServerIcon} label={label} status="complete">
           {observation && <DataObservationPanel observation={observation} />}
           <Tool className="app-glass app-glass-edge overflow-hidden rounded-lg" defaultOpen={!observation}>
-            <ToolHeader type="dynamic-tool" toolName={native.name} state="output-available" className="hover:bg-white/[0.02]" />
-            <ToolContent className="app-glass-edge border-t bg-black/20">
+            <ToolHeader type="dynamic-tool" toolName={native.name} state="output-available" className="hover:bg-secondary/80" />
+            <ToolContent className="app-glass-edge border-t bg-secondary/70">
               <ToolInput input={input} />
               <ToolOutput
                 output={parseJson(native.output) ?? native.output ?? undefined}
@@ -1269,7 +1345,7 @@ function NativeToolStep({ native }: { native: NativeTool }) {
             <SandboxHeader
               state={sandboxStateFromStatus(native.status, failed)}
               title={`sandbox.${native.language === "python" ? "py" : native.language}`}
-              className="app-glass-edge border-b bg-black/25"
+              className="app-glass-edge border-b bg-secondary/70"
             />
             <SandboxContent>
               <SandboxTabs defaultValue={failed ? "output" : "code"}>
@@ -1532,8 +1608,8 @@ function ShellOutput({
 function FoundFilesArtifact({ paths }: { paths: string[] }) {
   const [selectedFile, setSelectedFile] = useState<string>()
   return (
-    <Artifact className="app-glass-edge bg-black/20 shadow-none">
-      <ArtifactHeader className="app-glass-edge bg-black/25">
+    <Artifact className="app-glass-edge bg-secondary/70 shadow-none">
+      <ArtifactHeader className="app-glass-edge bg-secondary/70">
         <div>
           <ArtifactTitle>Files found</ArtifactTitle>
           <ArtifactDescription className="text-xs tabular-nums">{paths.length} file{paths.length === 1 ? "" : "s"}</ArtifactDescription>
@@ -1556,8 +1632,8 @@ function FoundFilesArtifact({ paths }: { paths: string[] }) {
 
 function FileContentArtifact({ files }: { files: Array<{ path: string; content: string }> }) {
   return (
-    <Artifact className="app-glass-edge bg-black/20 shadow-none">
-      <ArtifactHeader className="app-glass-edge bg-black/25">
+    <Artifact className="app-glass-edge bg-secondary/70 shadow-none">
+      <ArtifactHeader className="app-glass-edge bg-secondary/70">
         <div className="min-w-0">
           <ArtifactTitle>File content</ArtifactTitle>
           <ArtifactDescription className="truncate font-mono text-xs tracking-[0.01em]">{files.map((file) => file.path).join(", ")}</ArtifactDescription>
@@ -1648,9 +1724,9 @@ function DynamicTool({ part }: { part: DynamicToolUIPart }) {
         type="dynamic-tool"
         toolName={part.toolName}
         state={state}
-        className={error ? "bg-destructive/[0.06]" : "hover:bg-white/[0.02]"}
+        className={error ? "bg-destructive/[0.06]" : "hover:bg-secondary/80"}
       />
-      <ToolContent className={error ? "border-t border-destructive/20 bg-black/20" : "app-glass-edge border-t bg-black/20"}>
+      <ToolContent className={error ? "border-t border-destructive/20 bg-secondary/70" : "app-glass-edge border-t bg-secondary/70"}>
         <ToolInput input={input ?? part.input} />
         <ToolOutput output={body} errorText={error} />
         {part.toolName === "list_agent_response_files" && !error && <ListFilesArtifacts part={part} />}
@@ -1730,7 +1806,7 @@ export function AgentActivity({
             <span className="min-w-0 flex-1 text-left text-[13px] font-medium tracking-[0.01em] text-foreground">
               <Shimmer>Thinking…</Shimmer>
             </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-black/20 px-2 py-0.5 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/70 px-2 py-0.5 text-[11px] text-muted-foreground">
               <span className="size-1.5 animate-pulse-soft rounded-full bg-blurple-bright" />
               Live
             </span>
@@ -1781,7 +1857,7 @@ export function AgentActivity({
           <span className="min-w-0 flex-1 text-left text-[13px] font-medium tracking-[0.01em] text-foreground">
             {isThinking ? <Shimmer>Thinking…</Shimmer> : activityTitle}
           </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-black/20 px-2 py-0.5 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/70 px-2 py-0.5 text-[11px] text-muted-foreground">
             <span className={`size-1.5 rounded-full ${isThinking ? "animate-pulse-soft bg-blurple-bright" : "bg-muted-foreground/50"}`} />
             {isThinking ? `${activityMeta} · Live` : activityMeta}
           </span>
@@ -1916,9 +1992,6 @@ export function AgentActivity({
       // Think's returned output is shown only where the live reasoning stream
       // did not already carry it (nothing streamed, or a cut-short cycle).
       const missing = result.terminal && !result.error ? unstreamedThinkOutput(result.text, parts) : ""
-      if (result.terminal && !result.error && !missing) return null
-      // Live: the reasoning step already shows progress; avoid a second marker.
-      if (!result.terminal && isThinking && reasoningText) return null
       const status = result.terminal ? "complete" : isThinking ? "active" : "pending"
       return (
         <ChainOfThoughtStep
@@ -1930,6 +2003,7 @@ export function AgentActivity({
           role={result.error ? "alert" : undefined}
           className={result.error ? "activity-step text-destructive" : "activity-step"}
           data-activity-status={status}
+          data-think-call-id={part.toolCallId}
         >
           {(result.error || missing) && <MessageResponse>{result.error || missing}</MessageResponse>}
           {!result.terminal && !isThinking && <p className="text-xs text-amber-600">Stream ended before Think returned a result.</p>}

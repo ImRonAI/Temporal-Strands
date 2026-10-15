@@ -12,6 +12,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 from strands.tools.mcp import MCPClient
@@ -20,21 +22,26 @@ from strands_tools.mcp_client import mcp_client
 
 from load_tool import (
     STRANDS_TOOLS_DIR,
-    LoadedActivityTool,
     register_community_tool,
     tool_file_path,
 )
 from strands_tools.load_tool import load_tool as _official_load_tool  # noqa: F401
 from run_worker import MCP_CONFIG_PATH, _ROOT
-from workflow import PERMANENT_COMMUNITY_TOOLS, mcp_client_factories, temporal_mcp_clients
+from agent_tools import (
+    COMPUTER_USE_TOOLS,
+    PERMANENT_COMMUNITY_TOOLS,
+    THINK_TOOL,
+    mcp_client_factories,
+    temporal_mcp_clients,
+)
 
 
 def test_permanent_registry_includes_skills_and_graph() -> None:
     registry = ToolRegistry()
     names = registry.process_tools(list(PERMANENT_COMMUNITY_TOOLS))
-    assert names == ["load_tool", "browser", "mcp_client", "graph", "use_agent", "use_skill"]
+    assert names == ["load_tool", "browser", "mcp_client", "graph", "use_agent", "use_skill", "python_repl"]
     assert sorted(registry.registry) == [
-        "browser", "graph", "load_tool", "mcp_client", "use_agent", "use_skill",
+        "browser", "graph", "load_tool", "mcp_client", "python_repl", "use_agent", "use_skill",
     ]
     assert registry.registry["load_tool"].tool_type == "temporal_activity"
     assert registry.registry["use_skill"].tool_type == "temporal_activity"
@@ -59,8 +66,6 @@ def test_registry_contract_is_activity_names_not_package_paths() -> None:
     """Pattern 2: the model sees Temporal activity names, not import paths."""
     from pathlib import Path
 
-    from workflow import COMPUTER_USE_TOOLS, THINK_TOOL
-
     identity = json.loads(Path(__file__).resolve().parents[1].joinpath("agent.json").read_text())
     prompt = identity["prompt"]
     for marker in ("strands_tools.", "skills_loader.py", "list_skills"):
@@ -84,11 +89,11 @@ def test_registry_contract_is_activity_names_not_package_paths() -> None:
             assert marker not in text, f"{name} schema still contains {marker!r}"
 
     load_props = tools["load_tool"].tool_spec["inputSchema"]["json"]["properties"]
-    assert "calculator" in load_props["path"]["description"]
-    assert "strands_tools.calculator" not in load_props["path"]["description"]
+    assert "current_time" in load_props["path"]["description"]
+    assert "strands_tools.current_time" not in load_props["path"]["description"]
 
     use_agent_tools = tools["use_agent"].tool_spec["inputSchema"]["json"]["properties"]["tools"]
-    assert "registry" in use_agent_tools["description"]
+    assert "Registry names" in use_agent_tools["description"]
 
 
 def test_graph_tool_exposes_formation_schema() -> None:
@@ -103,12 +108,31 @@ def test_graph_tool_exposes_formation_schema() -> None:
 
 
 def test_mcp_json_servers_use_temporal_mcp_client(monkeypatch) -> None:
+    monkeypatch.setenv("DATACOMMONS_MCP_URL", "https://api.datacommons.org/mcp")
+    monkeypatch.setenv("DC_API_KEY", "test-key")
+    monkeypatch.setenv("POPHIVE_MCP_URL", "https://mcp.pophive.org/mcp")
     monkeypatch.setenv("TELNYX_API_KEY", "test-key")
+    expected = set(json.loads(MCP_CONFIG_PATH.read_text())["mcpServers"])
     factories = mcp_client_factories()
-    assert set(factories) == {"shell"}
-    handles = temporal_mcp_clients()
-    assert {handle.server for handle in handles} == {"shell"}
-    assert all(handle._cache_tools for handle in handles)
+    assert set(factories) == expected
+    assert {"shell", "openapi", "telnyx-readonly", "telnyx-docs", "unsloth"} <= expected
+    # Handles capture the worker environment at import, before workflow replay.
+    result = subprocess.run(
+        [sys.executable, "-c", """
+import json
+from agent_tools import temporal_mcp_clients
+handles = temporal_mcp_clients()
+print(json.dumps({"names": [handle.server for handle in handles],
+                  "cached": all(handle._cache_tools for handle in handles)}))
+"""],
+        cwd=_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    handles = json.loads(result.stdout)
+    assert set(handles["names"]) == expected
+    assert handles["cached"] is True
 
 
 def test_strands_tools_dir_is_the_installed_package() -> None:
@@ -117,12 +141,11 @@ def test_strands_tools_dir_is_the_installed_package() -> None:
 
     assert STRANDS_TOOLS_DIR == Path(strands_tools.__file__).resolve().parent
     assert not (_ROOT / "tools").exists()
-    assert (STRANDS_TOOLS_DIR / "file_read.py").is_file()
     assert (STRANDS_TOOLS_DIR / "shell.py").is_file()
-    existing = str(STRANDS_TOOLS_DIR / "file_read.py")
+    existing = str(STRANDS_TOOLS_DIR / "shell.py")
     assert tool_file_path(existing) == existing
-    assert tool_file_path("file_read") == existing
-    assert tool_file_path("file_read.py") == existing
+    assert tool_file_path("shell") == existing
+    assert tool_file_path("shell.py") == existing
     assert tool_file_path("does/not/exist.py") == "does/not/exist.py"
 
 
@@ -160,20 +183,22 @@ def test_startup_connect_skips_streamable_http_catalog(monkeypatch) -> None:
     from run_worker import connect_included_mcp_servers
 
     names = connect_included_mcp_servers()
-    assert names == ["shell"]
-    assert [call.get("transport") for call in calls] == ["stdio"]
-    assert calls[0]["connection_id"] == "shell"
+    assert names == ["agent-sops", "shell"]
+    assert [call.get("transport") for call in calls] == ["stdio", "stdio"]
+    assert [call["connection_id"] for call in calls] == ["agent-sops", "shell"]
 
 
-def test_mcp_client_factories_skips_temporal_list_tools_for_remote_catalog(
-    monkeypatch,
+def test_mcp_client_factories_omit_only_telnyx_without_its_required_key(
+    monkeypatch, caplog,
 ) -> None:
-    """Remote mcp.json servers stay catalogued but never register {name}-list-tools."""
     monkeypatch.setenv("DATACOMMONS_MCP_URL", "https://api.datacommons.org/mcp")
     monkeypatch.setenv("DC_API_KEY", "test-key")
-    monkeypatch.setenv("POPHIVE_MCP_URL", "https://example.com/mcp")
+    monkeypatch.setenv("POPHIVE_MCP_URL", "https://mcp.pophive.org/mcp")
     monkeypatch.delenv("TELNYX_API_KEY", raising=False)
-    assert set(mcp_client_factories()) == {"shell"}
+    expected = set(json.loads(MCP_CONFIG_PATH.read_text())["mcpServers"])
+    assert set(mcp_client_factories()) == expected - {"telnyx"}
+    assert any("telnyx" in record.getMessage() and "TELNYX_API_KEY" in record.getMessage()
+               for record in caplog.records)
 
 
 def test_load_servers_skips_optional_servers_without_env(
@@ -243,22 +268,33 @@ def test_load_tool_registers_io_community_tool_as_activity() -> None:
     SDK ``replace`` with the activity-dispatching stub carrying the tool's own spec."""
     os.environ.setdefault("STRANDS_NON_INTERACTIVE", "true")
     agent = _Agent()
-    path = str(STRANDS_TOOLS_DIR / "file_read.py")
+    path = str(STRANDS_TOOLS_DIR / "current_time.py")
     raw_agent = _Agent()
-    assert _official_load_tool(path=path, name="file_read", agent=raw_agent)["status"] == "success"
-    raw_spec = raw_agent.tool_registry.registry["file_read"].tool_spec
+    assert _official_load_tool(path=path, name="current_time", agent=raw_agent)["status"] == "success"
+    raw_spec = raw_agent.tool_registry.registry["current_time"].tool_spec
 
-    result = register_community_tool(agent, "file_read", "file_read")
+    result = register_community_tool(agent, "current_time", "current_time")
     assert result["status"] == "success"
-    registered = agent.tool_registry.registry["file_read"]
-    assert isinstance(registered, LoadedActivityTool)
-    assert registered.tool_type == "temporal_activity"
-    assert registered.tool_name == "file_read"
+    registered = agent.tool_registry.registry["current_time"]
+    from strands.tools.decorator import DecoratedFunctionTool
+    assert isinstance(registered, DecoratedFunctionTool)
+    assert registered.tool_name == "current_time"
     assert registered.tool_spec == raw_spec
 
     # Re-registering (continue-as-new rebuild) is idempotent.
-    assert register_community_tool(agent, path, "file_read")["status"] == "success"
-    assert isinstance(agent.tool_registry.registry["file_read"], LoadedActivityTool)
+    assert register_community_tool(agent, path, "current_time")["status"] == "success"
+    assert isinstance(agent.tool_registry.registry["current_time"], DecoratedFunctionTool)
 
     missing = register_community_tool(_Agent(), "does/not/exist.py", "x")
     assert missing["status"] == "error"
+
+
+def test_register_serialized_tool_never_opens_the_tool_file(monkeypatch):
+    agent = _Agent()
+    spec = {"name": "remote_tool", "description": "Worker tool", "inputSchema": {
+        "json": {"type": "object", "properties": {"value": {"type": "string"}}},
+    }}
+    monkeypatch.setattr("load_tool.official_load_tool", lambda **kwargs:
+        pytest.fail("workflow registration must not import files"))
+    assert register_community_tool(agent, "/not/on/workflow/host.py", "remote_tool", spec)["status"] == "success"
+    assert agent.tool_registry.registry["remote_tool"].tool_spec == spec

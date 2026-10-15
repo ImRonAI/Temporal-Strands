@@ -73,20 +73,6 @@ const MODES_LOCKING_CLOSE: ReadonlySet<BrowserControlMode> = new Set([
  *  human holding control); amber is every transitional or unverified state. */
 type Tone = "live" | "idle" | "busy" | "error"
 
-const TONE_DOT: Record<Tone, string> = {
-  live: "bg-emerald-400 shadow-[0_0_8px_oklch(0.79_0.17_160/0.75)]",
-  idle: "bg-muted-foreground/50",
-  busy: "bg-amber-400 shadow-[0_0_8px_oklch(0.83_0.17_85/0.6)] animate-pulse-soft",
-  error: "bg-destructive shadow-[0_0_8px_oklch(0.64_0.22_25/0.6)]",
-}
-
-const TONE_TEXT: Record<Tone, string> = {
-  live: "text-emerald-300",
-  idle: "text-muted-foreground",
-  busy: "text-amber-300",
-  error: "text-destructive",
-}
-
 const BADGE: Record<BrowserControlMode, { label: string; tone: Tone }> = {
   agent: { label: "Agent working", tone: "live" },
   stopping: { label: "Stopping", tone: "busy" },
@@ -100,11 +86,11 @@ const BADGE: Record<BrowserControlMode, { label: string; tone: Tone }> = {
 const TOOLBAR_ACTION = "h-7 shrink-0 gap-1.5 px-2 text-[11px] font-medium"
 /** WebPreviewNavigationButton spreads className over its own, so restate the
  *  icon-button reset it would otherwise provide. */
-const TOOLBAR_ICON = "size-7 p-0 text-muted-foreground hover:text-foreground"
+const TOOLBAR_ICON = "size-7 p-0 text-white/85 hover:bg-white/15 hover:text-white"
 
 /** The desktop is a black canvas; noVNC paints its own letterbox, so this is
  *  only what shows before the viewer connects. */
-const DESKTOP_CANVAS = "bg-[oklch(0.11_0.006_285)]"
+const DESKTOP_CANVAS = "bg-[oklch(0.955_0.009_55)]"
 
 export type ComputerUsePreviewPanelProps = {
   preview: ComputerUsePreviewState
@@ -342,7 +328,7 @@ export function ComputerUsePreviewPanel({
     <div className="flex h-full min-h-0 flex-1 flex-col" ref={rootRef}>
       <Artifact
         className={cn(
-          "@container/browser flex h-full min-h-0 flex-col overflow-hidden rounded-xl border-border/70 shadow-[0_24px_60px_-28px_oklch(0.05_0.01_285/0.9)]",
+          "@container/browser flex h-full min-h-0 flex-col overflow-hidden rounded-xl border-border/70 shadow-lift",
           DESKTOP_CANVAS,
           className
         )}
@@ -355,28 +341,26 @@ export function ComputerUsePreviewPanel({
                 every control on the right. Nothing else sits between the
                 operator and the live desktop. */}
             <WebPreviewNavigation
-              className="h-10 gap-1.5 border-b border-white/[0.06] bg-background/85 px-2 py-0 backdrop-blur-sm"
+              className="glass-tangerine h-12 gap-1.5 border-b border-white/25 px-3 py-0"
               data-testid="desktop-toolbar"
             >
               <div className="flex min-w-0 shrink-0 items-center gap-2 pl-1" title={hint}>
-                <span
-                  aria-hidden
-                  className={cn("size-1.5 shrink-0 rounded-full transition-colors duration-500", TONE_DOT[badge.tone])}
-                />
-                <ArtifactTitle className="hidden text-xs font-medium tracking-tight @min-[28rem]/browser:block">
-                  Linux desktop
+                <span aria-hidden className="text-[1.05rem] leading-none drop-shadow-[0_1px_1px_oklch(0.4_0.12_30/0.35)]">
+                  💻
+                </span>
+                <ArtifactTitle className="truncate font-editorial text-[1.05rem] font-medium italic leading-none tracking-[-0.02em] text-white">
+                  Gwen&apos;s Computer
                 </ArtifactTitle>
-                <span
-                  className={cn("truncate font-mono text-[10px] font-medium uppercase tracking-[0.08em]", TONE_TEXT[badge.tone])}
-                  data-testid="browser-control-badge"
-                >
+                {/* Control state stays announced for assistive tech and the
+                    hover hint; it is no longer drawn as a visible badge. */}
+                <span className="sr-only" data-testid="browser-control-badge">
                   {badge.label}
                 </span>
               </div>
 
               <WebPreviewUrl
                 aria-label="Visited page"
-                className="pointer-events-none hidden h-7 min-w-0 flex-1 truncate rounded-md border-transparent bg-white/[0.03] px-2 font-mono text-[11px] text-muted-foreground shadow-none @min-[36rem]/browser:block md:text-[11px]"
+                className="pointer-events-none hidden h-7 min-w-0 flex-1 truncate rounded-full border-transparent bg-white/18 px-3 font-mono text-[11px] text-white/90 shadow-none placeholder:text-white/60 @min-[36rem]/browser:block md:text-[11px]"
                 readOnly
                 tabIndex={-1}
                 title={preview.url}
@@ -397,7 +381,7 @@ export function ComputerUsePreviewPanel({
                 </WebPreviewNavigationButton>
                 {mode === "agent" || mode === "recovery" ? (
                   <Button
-                    className={cn(TOOLBAR_ACTION, "border-blurple/30 bg-blurple/10 text-blurple-bright hover:bg-blurple/20")}
+                    className={cn(TOOLBAR_ACTION, "rounded-full border-white/70 bg-white text-blurple-bright hover:bg-white/90 hover:text-blurple-bright")}
                     data-testid="take-control"
                     disabled={!takeoverAvailable || transitionPending}
                     title={!takeoverAvailable ? "A chat session, noVNC viewer and native release acknowledgment are required" : undefined}
@@ -412,7 +396,7 @@ export function ComputerUsePreviewPanel({
                 ) : null}
                 {mode === "human" ? (
                   <Button
-                    className={cn(TOOLBAR_ACTION, "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20")}
+                    className={cn(TOOLBAR_ACTION, "rounded-full border-white/70 bg-white text-emerald-700 hover:bg-white/90 hover:text-emerald-700")}
                     data-testid="relinquish"
                     disabled={transitionPending || !onReleaseControl}
                     onClick={releaseControl}
@@ -478,7 +462,7 @@ export function ComputerUsePreviewPanel({
 
               {pendingApproval && mode === "agent" ? (
                 <Alert
-                  className="absolute inset-x-2 top-2 z-20 mx-auto max-w-xl border-amber-500/30 bg-background/92 shadow-[0_16px_40px_-16px_oklch(0.05_0.01_285/0.9)] backdrop-blur-md"
+                  className="absolute inset-x-2 top-2 z-20 mx-auto max-w-xl border-amber-500/30 bg-background/92 shadow-lift backdrop-blur-md"
                   data-testid="computer-use-approval"
                 >
                   <AlertTitle>Approval required</AlertTitle>
@@ -500,7 +484,7 @@ export function ComputerUsePreviewPanel({
 
               {handoffError || controlError ? (
                 <Alert
-                  className="absolute inset-x-2 top-2 z-20 mx-auto max-w-xl border-destructive/40 bg-background/92 shadow-[0_16px_40px_-16px_oklch(0.05_0.01_285/0.9)] backdrop-blur-md"
+                  className="absolute inset-x-2 top-2 z-20 mx-auto max-w-xl border-destructive/40 bg-background/92 shadow-lift backdrop-blur-md"
                   data-testid="browser-handoff-error"
                   role="alert"
                   variant="destructive"
@@ -530,7 +514,7 @@ export function ComputerUsePreviewPanel({
 
               {preview.intent && mode === "agent" ? (
                 <p
-                  className="pointer-events-none absolute bottom-2 left-2 z-10 max-w-[calc(100%-1rem)] truncate rounded-md border border-white/[0.06] bg-background/85 px-2 py-1 font-mono text-[11px] text-muted-foreground backdrop-blur-sm"
+                  className="pointer-events-none absolute bottom-2 left-2 z-10 max-w-[calc(100%-1rem)] truncate rounded-md border border-border bg-background/85 px-2 py-1 font-mono text-[11px] text-muted-foreground backdrop-blur-sm"
                   data-testid="desktop-intent"
                 >
                   <span className="font-medium text-foreground">{preview.action}</span>
@@ -541,7 +525,7 @@ export function ComputerUsePreviewPanel({
             </div>
 
             {showSteering ? (
-              <div className="shrink-0 border-t border-white/[0.06] bg-background/85 p-2 backdrop-blur-sm">
+              <div className="shrink-0 border-t border-border bg-background/85 p-2 backdrop-blur-sm">
                 <PromptInput className="w-full" onSubmit={giveControl}>
                   <PromptInputBody>
                     <PromptInputTextarea

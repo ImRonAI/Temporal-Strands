@@ -355,26 +355,31 @@ def check(files: dict[str, str]) -> list[dict]:
     tree = trees.get(workflow_path)
     if tree is not None:
         calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
-        browser = [node for node in calls if dotted(node.func, {}).endswith("activity_as_tool") and node.args
-                   and dotted(node.args[0], {}).rsplit(".", 1)[-1] == "browser_activity"]
+        binding_path = "orchestrator/agent_tools.py" if "orchestrator/agent_tools.py" in trees else workflow_path
+        binding_tree = trees[binding_path]
+        binding_calls = [node for node in ast.walk(binding_tree) if isinstance(node, ast.Call)]
+        browser = [node for node in binding_calls if dotted(node.func, {}).endswith("activity_as_tool") and node.args
+                    and dotted(node.args[0], {}).rsplit(".", 1)[-1] == "browser_activity"]
         if not browser:
             report(workflow_path, tree, "native-browser-routing", "Missing native activity_as_tool(browser_activity, task_queue=...) binding")
         for call in browser:
-            args = call_options(call, workflow_path)
+            args = call_options(call, binding_path)
             queue = args.get("task_queue")
             if not isinstance(queue, ast.Constant) or queue.value != "desktop-browser":
                 report(workflow_path, call, "native-browser-routing", "Browser activity must route to the desktop-browser worker, not the host")
             retry = args.get("retry_policy")
-            attempt = call_options(retry, workflow_path).get("maximum_attempts") if isinstance(retry, ast.Call) else None
+            attempt = call_options(retry, binding_path).get("maximum_attempts") if isinstance(retry, ast.Call) else None
             if not isinstance(attempt, ast.Constant) or type(attempt.value) is not int or attempt.value != 1:
                 report(workflow_path, call, "mutation-retry", "Browser mutations require a verified RetryPolicy(maximum_attempts=1)")
         think_bound = False
-        think_tool = symbols.get((workflow_path, "THINK_TOOL"))
+        think_tool = symbols.get((binding_path, "THINK_TOOL"))
         if isinstance(think_tool, ast.Call) and dotted(think_tool.func, {}).endswith("activity_as_tool") and think_tool.args:
-            think_bound = dotted(think_tool.args[0], imports[workflow_path]) == "think_activity.think"
+            think_bound = dotted(think_tool.args[0], imports[binding_path]) == "think_activity.think"
+        native_think = any(dotted(node, imports[workflow_path]) == "strands_tools.think.think"
+                           for node in ast.walk(tree) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load))
         think_used = any(isinstance(node, ast.Name) and node.id == "THINK_TOOL" and isinstance(node.ctx, ast.Load) for node in ast.walk(tree))
-        if not think_bound or not think_used:
-            report(workflow_path, tree, "preserve-think", "Preserve think as THINK_TOOL = activity_as_tool(think_activity.think) on the session agent")
+        if not ((think_bound and think_used) or native_think):
+            report(workflow_path, tree, "preserve-think", "Preserve installed Think on the session agent, with native durable model/tool dispatch")
         rollover = [node for node in calls if dotted(node.func, {}).endswith(".continue_as_new")]
         carried = [node for call in rollover for node in ast.walk(call) if isinstance(node, ast.Call) and dotted(node.func, {}) == "ChatInput"]
         if not carried:

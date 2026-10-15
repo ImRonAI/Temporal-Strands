@@ -20,6 +20,7 @@ All seven route files here are **PROTECTED**: `orchestrator/route.ts`, `orchestr
 - Native tool ids: `sandbox-{call_id}`, `mcp-{id}`, `file-{call_id}`; `share_file` URLs rewrite to `/api/orchestrator/file?path=...`.
 - A placeholder `reasoning-start` (`turn-pending`) is written before any orchestrator I/O so `useChat` flips to `streaming` immediately; every real part closes it. Each contiguous reasoning run gets a fresh id so Chain of Thought interleaves correctly with tools.
 - Session continuity: `data-session` is emitted on the first turn and reused by `AgentChat`; the turn body forwards `model` as `model_id` plus `reasoning_effort` for per-turn switching ("POST per-turn model switching" compatibility test).
+- Per-turn tool/skill allowlist: the turn body also forwards `tools` and `skills` (`string[]`, both defaulting to `[]` when the client omits them) so each turn can restrict which native tools and skills the agent may use ("forwards the request body tools and skills arrays on the turn POST" compatibility test).
 
 ## Graph contract (implemented 2026-08-12)
 

@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server"
-import type { UIMessage } from "ai"
+import type { DynamicToolUIPart, UIMessage } from "ai"
 import { describe, expect, it } from "vitest"
 import { AgentActivity } from "./agent-activity"
 
@@ -236,9 +236,126 @@ describe("native tool steps", () => {
     expect(render({ type: "skill_loaded", name: "research" })).toContain("Loaded research")
   })
 
+  it("renders an in-flight image search as an active step listing its queries", () => {
+    const html = render({
+      type: "response.reasoning.image_search_queries",
+      call_id: "img_1",
+      queries: ["saturn rings"],
+    })
+    expect(html).toContain("Searching images · 1 query")
+    expect(html).toContain("saturn rings")
+  })
+
+  it("renders image search results as ChainOfThoughtImages linking to their origin pages", () => {
+    // docs.perplexity.ai/docs/agent-api/tools/image-search ImageResult shape.
+    const html = render({
+      type: "image_search_results",
+      call_id: "img_1",
+      queries: ["saturn rings"],
+      results: [
+        {
+          image_url: "https://images.example/saturn.jpg",
+          origin_url: "https://nasa.gov/saturn",
+          width: 1200,
+          height: 800,
+          title: "Saturn's rings",
+        },
+        {
+          image_url: "https://images.example/untitled.png",
+          origin_url: "https://wikimedia.org/w/untitled",
+          width: 640,
+          height: 480,
+        },
+      ],
+    })
+    expect(html).toContain("Images · saturn rings")
+    expect(html).toContain('src="https://images.example/saturn.jpg"')
+    expect(html).toContain('href="https://nasa.gov/saturn"')
+    expect(html).toContain("Saturn&#x27;s rings · 1200×800")
+    // Untitled results fall back to the origin hostname badge and dimensions.
+    expect(html).toContain("wikimedia.org")
+    expect(html).toContain("640×480")
+    expect(html).toContain('alt="Image result"')
+  })
+
+  it("renders a failed image search as a native tool error, not an empty gallery", () => {
+    const html = render({
+      type: "image_search_results",
+      call_id: "img_2",
+      queries: ["nothing"],
+      results: [],
+      error: "image_search_failed",
+    })
+    expect(html).toContain("image_search_failed")
+    expect(html).not.toContain("<img")
+  })
+
   it("renders reasoning thoughts as MessageResponse inside a Thinking step", () => {
     const html = render({ type: "response.reasoning.stopped", thought: "Plan the **query**." })
     expect(html).toContain("Thinking")
     expect(html).toContain('data-streamdown="strong">query<')
+  })
+})
+
+describe("Think chain continuity", () => {
+  const think: DynamicToolUIPart = {
+    type: "dynamic-tool",
+    toolName: "think",
+    toolCallId: "think-1",
+    state: "input-available",
+    input: { thought: "Check the evidence", cycle_count: 1 },
+  }
+  const tool: DynamicToolUIPart = {
+    type: "dynamic-tool",
+    toolName: "http_request",
+    toolCallId: "request-1",
+    state: "input-available",
+    input: { method: "GET", url: "https://example.com" },
+  }
+  const reasoning: UIMessage["parts"][number] = {
+    type: "reasoning", text: "Check the published evidence.", state: "done",
+  }
+
+  it("keeps Think and its streamed text visible in one open chain across nested events", () => {
+    const parts: UIMessage["parts"] = [think, reasoning]
+    const stages: UIMessage["parts"][] = [
+      [...parts],
+      [...parts, tool],
+      [...parts, { ...tool, state: "output-available", output: "Page retrieved." }],
+      [...parts, { ...tool, state: "output-available", output: "Page retrieved." }, {
+        type: "data-native-tool", id: "search-1",
+        data: { type: "response.reasoning.search_queries", queries: ["published evidence"] },
+      }],
+    ]
+    for (const stage of stages) {
+      const html = renderToStaticMarkup(<AgentActivity parts={stage} isThinking />)
+      expect(html.match(/not-prose w-full/g)).toHaveLength(1)
+      expect(html).toContain('data-think-call-id="think-1"')
+      expect(html).toContain('data-activity-status="active" data-think-call-id="think-1"')
+      expect(html.match(/Check the published evidence\./g)).toHaveLength(1)
+      expect(html).not.toContain('data-state="closed"')
+    }
+
+    const completed: UIMessage["parts"] = [
+      { ...think, state: "output-available", output: {
+        status: "success", content: [{ text: "Cycle 1/1:\nCheck the published evidence." }],
+      } },
+      reasoning,
+      { ...tool, state: "output-available", output: "Page retrieved." },
+      { type: "data-native-tool", id: "search-1", data: {
+        type: "search_results",
+        results: [{ id: 1, url: "https://example.com", title: "Published evidence", snippet: "" }],
+      } },
+      { type: "reasoning", text: "The result confirms the evidence.", state: "done" },
+    ]
+    const html = renderToStaticMarkup(<AgentActivity parts={completed} isThinking={false} />)
+    expect(html.match(/not-prose w-full/g)).toHaveLength(1)
+    expect(html).toContain('data-activity-status="complete" data-think-call-id="think-1"')
+    expect(html.match(/Check the published evidence\./g)).toHaveLength(1)
+    expect(html).toContain("The result confirms the evidence.")
+    expect(html).toContain("Page retrieved.")
+    expect(html).toContain("Published evidence")
+    expect(html).not.toContain("Cycle 1/1")
+    expect(html).not.toContain('data-state="closed"')
   })
 })

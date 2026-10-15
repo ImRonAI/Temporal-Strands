@@ -273,6 +273,9 @@ class ChatWorkflow:
         self._stream.detach_pollers()
         await workflow.wait_condition(workflow.all_handlers_finished)
         if self._done or self._agent is None:
+            # One container = one session, so a plain stop is sufficient here:
+            # nothing else inherits the display, and all_handlers_finished has
+            # already waited for an in-flight turn before end_chat reaches this.
             if self._desktop is not None:
                 await workflow.execute_activity(
                     teardown_desktop,

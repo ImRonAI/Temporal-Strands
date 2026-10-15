@@ -174,3 +174,39 @@ def test_desktop_hook_claims_only_before_desktop_tools():
     asyncio.run(hook._before(event("browser")))
     asyncio.run(hook._before(event("take_screenshot")))
     assert ensure.await_count == 2
+
+
+def test_desktop_tool_names_are_registered_activity_names():
+    from temporalio import activity
+
+    from agent_tools import DESKTOP_ACTIVITIES, DESKTOP_TOOL_NAMES
+    from computer_use_activity import COMPUTER_USE_ACTIVITIES, COMPUTER_USE_TOOL_NAMES
+
+    assert DESKTOP_TOOL_NAMES == {"browser", *COMPUTER_USE_TOOL_NAMES}
+    assert DESKTOP_TOOL_NAMES == frozenset(DESKTOP_ACTIVITIES)
+    for fn in COMPUTER_USE_ACTIVITIES:
+        assert DESKTOP_ACTIVITIES[activity._Definition.must_from_callable(fn).name] is fn
+
+
+def test_bound_tool_binds_only_the_requested_desktop_activity():
+    from unittest.mock import patch
+
+    import agent_tools
+    import load_tool
+
+    calls: list[object] = []
+    real = agent_tools.activity_as_tool
+
+    def recording(fn, **options):
+        calls.append(fn)
+        return real(fn, **options)
+
+    info = type("Info", (), {"workflow_id": "session-1"})()
+    with patch("temporalio.contrib.strands.workflow.activity_as_tool", recording), \
+            patch("temporalio.workflow.in_workflow", return_value=True), \
+            patch("temporalio.workflow.info", return_value=info):
+        bound = load_tool._bound_tool("take_screenshot")
+
+    assert bound.tool_name == "take_screenshot"
+    assert bound._options["task_queue"] == desktop_task_queue("session-1")
+    assert calls == [agent_tools.DESKTOP_ACTIVITIES["take_screenshot"]]

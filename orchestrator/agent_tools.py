@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from strands.tools.mcp import MCPClient
-from temporalio import workflow
+from temporalio import activity, workflow
 from temporalio.contrib.strands import TemporalMCPClient
 from temporalio.contrib.strands.workflow import activity_as_tool
 
@@ -65,9 +65,17 @@ def desktop_activity_options(session_id: str) -> dict[str, Any]:
     )
 
 
-DESKTOP_TOOL_NAMES = frozenset(
-    {"browser", *(activity.__name__ for activity in COMPUTER_USE_ACTIVITIES)}
-)
+def activity_name(fn: Callable[..., Any]) -> str:
+    """The registered ``@activity.defn`` name, which is also the bound tool's name."""
+    return activity._Definition.must_from_callable(fn).name
+
+
+# Registered activity names: the single source of truth for which tool names
+# hop to the session's desktop queue (DesktopHook, load_tool._bound_tool).
+DESKTOP_ACTIVITIES: dict[str, Callable[..., Any]] = {
+    activity_name(fn): fn for fn in (browser_activity, *COMPUTER_USE_ACTIVITIES)
+}
+DESKTOP_TOOL_NAMES = frozenset(DESKTOP_ACTIVITIES)
 
 
 def desktop_tools(session_id: str) -> tuple[Any, ...]:

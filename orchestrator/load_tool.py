@@ -80,18 +80,23 @@ def _bound_tool(name: str) -> Any | None:
     """Existing bindings whose native invocation contracts must be preserved.
 
     Desktop tools (browser + computer-use) are bound to the calling session's
-    own desktop task queue; the module-level tuples only serve schemas.
+    own desktop task queue; the module-level tuples only serve schemas. Only the
+    requested activity is bound: ``TemporalActivityTool`` extracts a schema on
+    construction, and this runs in workflow code, so on every replay.
     """
-    from agent_tools import COMPUTER_USE_TOOLS, PERMANENT_COMMUNITY_TOOLS, desktop_tools
+    from agent_tools import (
+        COMPUTER_USE_TOOLS, DESKTOP_ACTIVITIES, DESKTOP_TOOL_NAMES, PERMANENT_COMMUNITY_TOOLS,
+        desktop_activity_options,
+    )
     from strands_tools.think import think
+    from temporalio.contrib.strands.workflow import activity_as_tool
 
     if name == "think":
         return think
-    desktop_names = {"browser", *(tool.tool_name for tool in COMPUTER_USE_TOOLS)}
-    if name in desktop_names and workflow.in_workflow():
-        for bound in desktop_tools(workflow.info().workflow_id):
-            if bound.tool_name == name:
-                return bound
+    if name in DESKTOP_TOOL_NAMES and workflow.in_workflow():
+        return activity_as_tool(
+            DESKTOP_ACTIVITIES[name], **desktop_activity_options(workflow.info().workflow_id)
+        )
     for bound in (*COMPUTER_USE_TOOLS, *PERMANENT_COMMUNITY_TOOLS):
         if bound.tool_name == name and (
             bound in COMPUTER_USE_TOOLS or name in {"graph", "browser", "use_agent"}

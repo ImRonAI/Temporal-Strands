@@ -529,6 +529,36 @@ describe("ComputerUsePreviewPanel ownership", () => {
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
+  it("keeps re-checking an unconfirmed mount status until the server confirms, then stops", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      // The desktop worker has not claimed ownership for this chat yet.
+      vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "Desktop control status unavailable" }, { status: 409 })))
+      const panel = panelHandlers()
+      await panel.flushEffects()
+      expect(panel.render()).toContain("Could not verify desktop control")
+      expect(fetch).toHaveBeenCalledTimes(1)
+
+      // Ownership lands between polls: the next scheduled check succeeds.
+      vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ready: true, mode: "agent", epoch: desktopEpoch })))
+      await panel.flushEffects()
+      await vi.advanceTimersByTimeAsync(1_000)
+      await panel.flushEffects()
+      const html = panel.render()
+      expect(html).not.toContain("Could not verify desktop control")
+      expect(html).not.toContain("Desktop unavailable or recovery required")
+      expect(html).toContain('data-testid="take-control"')
+      expect(fetch).toHaveBeenCalledTimes(1)
+
+      // Confirmed and healthy: no timer keeps hitting the server.
+      await panel.flushEffects()
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(fetch).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.each(["stopping", "human", "relinquishing", "instructions", "resuming", "recovery"])("restores server mode %s instead of defaulting to agent", async mode => {
     h.serverMode = mode
     const panel = panelHandlers()

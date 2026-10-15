@@ -115,7 +115,7 @@ def test_mcp_json_servers_use_temporal_mcp_client(monkeypatch) -> None:
     expected = set(json.loads(MCP_CONFIG_PATH.read_text())["mcpServers"])
     factories = mcp_client_factories()
     assert set(factories) == expected
-    assert {"shell", "openapi", "telnyx-readonly", "telnyx-docs", "unsloth"} <= expected
+    assert {"shell", "agent-sops", "telnyx-readonly", "telnyx-docs", "cms-coverage"} <= expected
     # Handles capture the worker environment at import, before workflow replay.
     result = subprocess.run(
         [sys.executable, "-c", """

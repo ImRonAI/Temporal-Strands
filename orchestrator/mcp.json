@@ -37,17 +37,6 @@
       "args": ["--from", "openapi-mcp-server", "openapi_mcp_server", "--openapi-spec-path", "cms-coverage-mcp-server/coverageapi.json", "--api-base-url", "https://api.cms.gov/mcd"],
       "continue_on_error": true
     },
-    "openapi": {
-      "command": "npx",
-      "args": ["-y", "@ivotoby/openapi-mcp-server"],
-      "env": {"API_BASE_URL": "", "OPENAPI_SPEC_PATH": ""},
-      "continue_on_error": true
-    },
-    "unsloth": {
-      "command": "npm",
-      "args": ["--prefix", "unsloth-mcp-server", "run", "start"],
-      "continue_on_error": true
-    },
     "mcp-installer": {
       "command": "npx",
       "args": ["@anaisbetts/mcp-installer"],

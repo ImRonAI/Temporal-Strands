@@ -51,6 +51,9 @@ export type BrowserControlMode =
   | "resuming"
   | "recovery"
 
+const CONTROL_RETRY_BASE_MS = 1_000
+const CONTROL_RETRY_MAX_MS = 15_000
+
 const controlStatusSchema = z.object({
   ready: z.boolean(),
   mode: z.enum(["agent", "stopping", "human", "relinquishing", "instructions", "resuming", "recovery"]),
@@ -190,6 +193,28 @@ export function ComputerUsePreviewPanel({
     // Retry only on new evidence while unconfirmed, never on every healthy action.
     if (control?.sessionId !== sessionId || controlError) void refreshControl()
   }, [sessionId, observationId, checkingControl, transitionPending, control?.sessionId, controlError, refreshControl])
+
+  // The mount request races the desktop worker's ownership claim: the panel
+  // opens on the first browser tool part, before runtime.json names this
+  // session, so that first GET legitimately answers 409/503. Keep asking with
+  // backoff until the server confirms, then stop; a confirmed healthy state is
+  // never re-polled on a timer.
+  const unconfirmed = Boolean(sessionId) && !checkingControl && !transitionPending && (control?.sessionId !== sessionId || Boolean(controlError))
+  useEffect(() => {
+    if (!unconfirmed) return
+    let attempt = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const schedule = () => {
+      const delay = Math.min(CONTROL_RETRY_BASE_MS * 2 ** attempt, CONTROL_RETRY_MAX_MS)
+      attempt += 1
+      timer = setTimeout(() => {
+        if (handoffPending.current) { schedule(); return }
+        void refreshControl()?.then(schedule)
+      }, delay)
+    }
+    schedule()
+    return () => { if (timer !== undefined) clearTimeout(timer) }
+  }, [unconfirmed, refreshControl])
 
   let iframeSrc = ""
   if (preview.viewerType === "novnc" && preview.livePreviewUrl) {

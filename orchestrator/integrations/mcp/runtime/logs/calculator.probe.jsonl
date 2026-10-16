@@ -1,0 +1,3 @@
+{"event": "initialized", "server_name": "Calculator Server", "server_version": "1.29.1", "protocol": "2025-06-18", "ts": "2026-09-07T06:58:02.252168+00:00"}
+{"event": "tools", "count": 4, "names": ["add", "subtract", "multiply", "divide"], "ts": "2026-09-07T06:58:02.260658+00:00"}
+{"event": "call", "tool": "add", "args": {"x": 2, "y": 3}, "is_error": false, "content": ["5.0"], "ts": "2026-09-07T06:58:02.272390+00:00"}

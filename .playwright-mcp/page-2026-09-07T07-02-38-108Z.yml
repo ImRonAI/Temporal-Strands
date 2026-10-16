@@ -1,0 +1,188 @@
+- generic [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: v0 / studio
+      - navigation [ref=e9]:
+        - button "Community" [ref=e10]
+        - button "Pricing" [ref=e11]
+        - button "Enterprise" [ref=e12]
+        - button "Docs" [ref=e13]
+      - generic [ref=e14]:
+        - button "Compare models" [ref=e15] [cursor=pointer]
+        - button "Sign in" [ref=e16]
+        - button "Start building" [ref=e17]
+    - generic [ref=e77]:
+      - generic [ref=e79]:
+        - log [ref=e80]:
+          - generic [ref=e82]:
+            - paragraph [ref=e87]: Write a file called hello.html with a simple hello world page, then run ls to confirm.
+            - generic [ref=e90]:
+              - generic [ref=e91]:
+                - button "Chain of Thought" [expanded] [ref=e311]
+                - generic [ref=e106]:
+                  - generic [ref=e130]:
+                    - button [expanded] [ref=e131]:
+                      - paragraph [ref=e136] [cursor=pointer]: Wrote /home/user/workspace/hello.html
+                    - generic [ref=e139]: /home/user/workspace/hello.html
+                  - generic [ref=e147]:
+                    - button [expanded] [ref=e148]:
+                      - paragraph [ref=e153] [cursor=pointer]: Running commands
+                    - code [ref=e161]: $ ls -l /home/user/workspace/hello.html -rw-r--r-- 1 user user 221 Sep 7 07:01 /home/user/workspace/hello.html
+                  - generic [ref=e162]:
+                    - button [expanded] [ref=e163]:
+                      - paragraph [ref=e168] [cursor=pointer]: hello.html
+                    - generic [ref=e173]:
+                      - paragraph [ref=e179]: hello.html
+                      - generic [ref=e180]:
+                        - tree [ref=e181]:
+                          - treeitem "hello.html" [selected] [ref=e183] [cursor=pointer]
+                        - code [ref=e193]:
+                          - generic [ref=e194]: <!doctype html>
+                          - generic [ref=e195]: <html lang="en">
+                          - generic [ref=e196]: <head>
+                          - generic [ref=e197]: <meta charset="utf-8">
+                          - generic [ref=e198]: <meta name="viewport" content="width=device-width, initial-scale=1">
+                          - generic [ref=e199]: <title>Hello World</title>
+                          - generic [ref=e200]: </head>
+                          - generic [ref=e201]: <body>
+                          - generic [ref=e202]: <h1>Hello, world!</h1>
+                          - generic [ref=e203]: </body>
+                          - generic [ref=e204]: </html>
+                        - generic [ref=e206]:
+                          - textbox "Enter URL..." [ref=e208]: /api/orchestrator/file?path=%2Fv1%2Fresponses%2Fresp_ca04ae50-d43f-4bfe-9fab-ab456e6f9d9d%2Ffiles%2Fb74a03a2-3206-4253-8a8e-1438f6d10002%2Fcontent
+                          - iframe [ref=e210]:
+                            - heading "Hello, world!" [level=1] [ref=f1e2]
+                        - paragraph [ref=e211]:
+                          - link "Download" [ref=e212] [cursor=pointer]:
+                            - /url: /api/orchestrator/file?path=%2Fv1%2Fresponses%2Fresp_ca04ae50-d43f-4bfe-9fab-ab456e6f9d9d%2Ffiles%2Fb74a03a2-3206-4253-8a8e-1438f6d10002%2Fcontent
+                  - generic [ref=e280]:
+                    - generic [ref=e281]: Thinking
+                    - generic [ref=e282]:
+                      - heading "DECOMPOSE" [level=3] [ref=e283]
+                      - paragraph [ref=e284]:
+                        - text: "Question: Can a simple Hello World HTML file be created as"
+                        - code [ref=e285]: hello.html
+                        - text: and confirmed with
+                        - code [ref=e286]: ls
+                        - text: "?"
+                      - heading "APPRAISE" [level=3] [ref=e287]
+                      - list [ref=e288]:
+                        - listitem [ref=e289]:
+                          - text: "File-write result:"
+                          - code [ref=e290]: hello.html
+                          - text: "created successfully, 221 bytes. Quality: HIGH"
+                        - listitem [ref=e291]:
+                          - code [ref=e292]: ls -l
+                          - text: "result:"
+                          - generic [ref=e293]:
+                            - generic [ref=e294]: text
+                            - generic [ref=e296]:
+                              - button "Download file" [ref=e297] [cursor=pointer]
+                              - button "Copy Code" [ref=e300] [cursor=pointer]
+                            - code [ref=e314]:
+                              - generic [ref=e315]: "-rw-r--r-- 1 user user 221 Sep 7 07:01 /home/user/workspace/hello.html"
+                          - text: "Exit code:"
+                          - code [ref=e307]: "0"
+                          - text: ". Quality: HIGH"
+                        - listitem [ref=e308]: No contradictions found.
+                      - heading "SYNTHESIZE" [level=3] [ref=e309]
+                      - paragraph [ref=e310]: The file was successfully created and its presence confirmed.
+                      - paragraph [ref=e316]:
+                        - text: "FINDINGS:"
+                        - code [ref=e317]: hello.html
+                        - text: "exists and contains a simple Hello World page. [HIGH] CONFIDENCE: high — direct filesystem write and successful"
+                        - code [ref=e318]: ls
+                        - text: "confirmation. GAPS: None. NEXT ACTION: READY:"
+                        - 'generic "Blocked URL: undefined" [ref=e319]':
+                          - text: Download
+                          - code [ref=e320]: hello.html
+                          - text: "[blocked]"
+                  - generic [ref=e321]:
+                    - button [expanded] [ref=e322]:
+                      - paragraph [ref=e327] [cursor=pointer]: Wrote /home/user/workspace/hello.html
+                    - generic [ref=e330]: /home/user/workspace/hello.html
+                  - generic [ref=e338]:
+                    - button [expanded] [ref=e339]:
+                      - paragraph [ref=e344] [cursor=pointer]: Running commands
+                    - code [ref=e352]: $ ls -l /home/user/workspace/hello.html -rw-r--r-- 1 user user 221 Sep 7 07:01 /home/user/workspace/hello.html
+                  - generic [ref=e353]:
+                    - button [expanded] [ref=e354]:
+                      - paragraph [ref=e359] [cursor=pointer]: hello.html
+                    - generic [ref=e364]:
+                      - paragraph [ref=e370]: hello.html
+                      - generic [ref=e371]:
+                        - tree [ref=e372]:
+                          - treeitem "hello.html" [selected] [ref=e374] [cursor=pointer]
+                        - code [ref=e384]:
+                          - generic [ref=e385]: <!doctype html>
+                          - generic [ref=e386]: <html lang="en">
+                          - generic [ref=e387]: <head>
+                          - generic [ref=e388]: <meta charset="utf-8">
+                          - generic [ref=e389]: <meta name="viewport" content="width=device-width, initial-scale=1">
+                          - generic [ref=e390]: <title>Hello World</title>
+                          - generic [ref=e391]: </head>
+                          - generic [ref=e392]: <body>
+                          - generic [ref=e393]: <h1>Hello, world!</h1>
+                          - generic [ref=e394]: </body>
+                          - generic [ref=e395]: </html>
+                        - generic [ref=e397]:
+                          - textbox "Enter URL..." [ref=e399]: /api/orchestrator/file?path=%2Fv1%2Fresponses%2Fresp_0b001bbe-e0c9-4ac1-9632-b629ef299e94%2Ffiles%2F43001460-3b83-4fc4-a8c7-b8985c960638%2Fcontent
+                          - iframe [ref=e401]:
+                            - heading "Hello, world!" [level=1] [ref=f3e2]
+                        - paragraph [ref=e402]:
+                          - link "Download" [ref=e403] [cursor=pointer]:
+                            - /url: /api/orchestrator/file?path=%2Fv1%2Fresponses%2Fresp_0b001bbe-e0c9-4ac1-9632-b629ef299e94%2Ffiles%2F43001460-3b83-4fc4-a8c7-b8985c960638%2Fcontent
+              - generic [ref=e404]:
+                - paragraph [ref=e405]:
+                  - text: Created
+                  - code [ref=e406]: hello.html
+                  - text: and confirmed it with
+                  - code [ref=e407]: ls
+                  - text: ":"
+                - generic [ref=e408]:
+                  - generic [ref=e409]: text
+                  - generic [ref=e411]:
+                    - button "Download file" [ref=e412] [cursor=pointer]
+                    - button "Copy Code" [ref=e415] [cursor=pointer]
+                  - code [ref=e420]:
+                    - generic [ref=e421]: "-rw-r--r-- 1 user user 221 Sep 7 07:01 /home/user/workspace/hello.html"
+                - paragraph [ref=e422]:
+                  - 'generic "Blocked URL: undefined" [ref=e423]': Download hello.html [blocked]
+          - button [ref=e424]
+        - generic [ref=e113]:
+          - button "Open IDE" [ref=e425]
+          - group [ref=e116]:
+            - group [ref=e117]
+            - textbox "Ask for a change, or start something new…" [ref=e119]
+            - group [ref=e120]:
+              - generic [ref=e121]:
+                - button [ref=e122]
+                - button "High (preset)" [ref=e123]
+                - button "Web preview" [ref=e127]
+              - button "Submit" [disabled]
+      - generic [ref=e214]:
+        - generic [ref=e215]:
+          - generic [ref=e216]:
+            - paragraph [ref=e220]: Project
+            - generic [ref=e221]: 2 files
+          - generic [ref=e222]:
+            - generic [ref=e223]:
+              - button "Code" [ref=e224] [cursor=pointer]
+              - button "Preview" [pressed] [ref=e229] [cursor=pointer]
+              - button "Terminal" [ref=e233] [cursor=pointer]
+            - button "Idle"
+            - button "Fullscreen" [ref=e238]
+            - button "Close project IDE" [active] [ref=e240]:
+              - generic [aria-hidden] [ref=e241]: Close
+              - generic [ref=e242]: Close
+        - generic [ref=e244]:
+          - generic [ref=e245]:
+            - button "Code" [ref=e246] [cursor=pointer]
+            - button "Preview" [pressed] [ref=e251] [cursor=pointer]
+            - button "Terminal" [ref=e255] [cursor=pointer]
+          - generic [ref=e426]:
+            - textbox "Enter URL..." [ref=e428]: /api/orchestrator/file?path=%2Fv1%2Fresponses%2Fresp_ca04ae50-d43f-4bfe-9fab-ab456e6f9d9d%2Ffiles%2Fb74a03a2-3206-4253-8a8e-1438f6d10002%2Fcontent
+            - iframe [ref=e430]:
+              - heading "Hello, world!" [level=1] [ref=f4e2]
+  - button "Open Next.js Dev Tools" [ref=e69] [cursor=pointer]
+  - alert [ref=e76]

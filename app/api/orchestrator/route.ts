@@ -10,6 +10,12 @@ import {
 
 import { DEFAULT_MODEL } from "@/lib/perplexity"
 import { COMPUTER_USE_TOOL_NAMES } from "@/components/v0/computer-use"
+import { createSkillRunSnapshot, foldSkillEvent, type SkillRunSnapshot } from "@/components/v0/skill-run"
+import {
+  createGraphRunSnapshot,
+  foldGraphEvent,
+  type GraphRunSnapshot,
+} from "@/components/v0/graph-run"
 
 // The orchestrator's frames are a discriminated union validated structurally
 // by the handlers below, so this only satisfies parseJsonEventStream's schema
@@ -232,6 +238,7 @@ type PerplexityNative =
   | {
       type: "mcp_list_tools"
       id: string
+      connector_id?: string | null
       server_label: string
       tools: Array<{ name: string; description?: string | null }>
       error?: string | null
@@ -296,56 +303,14 @@ type AgentRunState = {
 }
 
 // Cumulative snapshot re-emitted as ONE reconciled `data-graph-run` part per
-// graph tool call, folded from the tool's raw native multiagent_* events
-// (shapes live-captured in docs/evidence/GWEN-30/event-log.json). Consumed
-// by components/v0/graph-run.ts.
-type GraphRunSnapshot = {
-  toolUseId: string
-  status: "running" | "done" | "failed"
-  nodes: Record<
-    string,
-    { status: "running" | "streaming" | "done"; kind: string; text: string }
-  >
-  handoffs: Array<{ from: string[]; to: string[] }>
-  resultText: string | null
-}
-
-// Fold one native graph event into the snapshot. The tool yields flat
-// node_id-tagged events (verified live, GWEN-30): lifecycle start/stop,
-// per-node streams whose inner `event.data` is the model delta text, a
-// handoff between node sets, and a final {status, content} tool result.
-function foldGraphEvent(snap: GraphRunSnapshot, data: Record<string, unknown>) {
-  const type = typeof data.type === "string" ? data.type : ""
-  const nodeId = typeof data.node_id === "string" ? data.node_id : ""
-  const node = (id: string) =>
-    (snap.nodes[id] ??= { status: "running", kind: "agent", text: "" })
-
-  if (type === "multiagent_node_start" && nodeId) {
-    const n = node(nodeId)
-    n.status = "running"
-    if (typeof data.node_type === "string") n.kind = data.node_type
-  } else if (type === "multiagent_node_stream" && nodeId) {
-    const n = node(nodeId)
-    const inner = data.event as { data?: unknown } | undefined
-    if (typeof inner?.data === "string") {
-      n.status = "streaming"
-      n.text += inner.data
-    }
-  } else if (type === "multiagent_node_stop" && nodeId) {
-    node(nodeId).status = "done"
-  } else if (type === "multiagent_handoff") {
-    const from = Array.isArray(data.from_node_ids) ? (data.from_node_ids as string[]) : []
-    const to = Array.isArray(data.to_node_ids) ? (data.to_node_ids as string[]) : []
-    snap.handoffs.push({ from, to })
-  } else if (typeof data.status === "string" && Array.isArray(data.content)) {
-    // The tool's final yield: {status: "success"|"error", content: [{text}]}.
-    snap.status = data.status === "success" ? "done" : "failed"
-    snap.resultText = (data.content as Array<{ text?: string }>)
-      .map((block) => block.text ?? "")
-      .filter(Boolean)
-      .join("\n")
-  }
-}
+// graph tool call, folded from the frames orchestrator/graph_activity.py
+// publishes (initial graph_topology, flattened path-qualified multiagent_*
+// events with full leaf agent events, terminal {status, content}). The
+// snapshot type and fold live in components/v0/graph-run.ts so the route and
+// the canvas share one definition — the compatibility tests in route.test.ts
+// ("POST graph nested topology, tool actions, and cancellation") proved the
+// previous inline folding discarded topology, tool actions, NodeResult
+// failure states, and the cancelled terminal status the backend produces.
 
 type OrchestratorEvent =
   | AgentRunFrame
@@ -365,7 +330,7 @@ type OrchestratorEvent =
       | { messageStart: { role: string } }
       | { messageStop: { stopReason: string } }
       | { metadata: unknown }
-      | { perplexity: PerplexityNative }
+      | { perplexity: PerplexityNative | { type: "response.output_item.done"; item: PerplexityNative } }
       | {
           gemini:
             | {
@@ -410,15 +375,19 @@ type OrchestratorEvent =
 
 export async function POST(req: Request) {
   const {
-    messages,
-    model = DEFAULT_MODEL,
-    reasoningEffort,
-    sessionId,
+messages,
+model = DEFAULT_MODEL,
+reasoningEffort,
+sessionId,
+tools = [],
+    skills = [],
   }: {
     messages: UIMessage[]
     model?: string
     reasoningEffort?: string
     sessionId?: string
+    tools?: string[]
+    skills?: string[]
   } = await req.json()
 
   const lastUser = lastUserMessage(messages)
@@ -451,6 +420,12 @@ export async function POST(req: Request) {
       // they happened.
       let reasoningSeq = 0
       let openReasoningId: string | null = null
+      // The sub-agent speaker ([skill_name] / [agent_name]) already announced
+      // in the open reasoning block. The orchestrator publishes one thinking
+      // frame per model token; labeling every delta rendered as
+      // "Using[skill] the[skill] sandbox[skill]...". Label only when the
+      // speaker changes, and forget it when the block closes.
+      let announcedSpeaker: string | null = null
 
       // Strands lifecycle events (messageStart/messageStop) carry no renderable
       // payload — only contentBlockDelta / tool frames become UI parts. On
@@ -490,6 +465,7 @@ export async function POST(req: Request) {
         if (openReasoningId !== null) {
           writer.write({ type: "reasoning-end", id: openReasoningId })
           openReasoningId = null
+          announcedSpeaker = null
         }
       }
 
@@ -505,13 +481,14 @@ export async function POST(req: Request) {
               `Orchestrator unreachable (${startRes.status}). Is the worker + Temporal dev server running? See orchestrator/README.md.`
             )
           }
-          const started = (await startRes.json()) as { session_id: string }
+          const started = (await startRes.json()) as { session_id: string; desktop_url?: string }
           activeSessionId = started.session_id
-          // Tell the client which session to reuse on the next turn.
+          // Tell the client which session to reuse on the next turn, and where
+          // that session's own Linux desktop (noVNC) is served from.
           writer.write({
             type: "data-session",
             id: "session",
-            data: { sessionId: activeSessionId },
+            data: { sessionId: activeSessionId, desktopUrl: started.desktop_url },
           })
         }
 
@@ -523,7 +500,9 @@ export async function POST(req: Request) {
             // model_id enables per-turn model switching: the orchestrator
             // validates it against the worker catalog and rebuilds the
             // session's agent when it differs from the current model.
-            body: JSON.stringify({ prompt, images, documents, videos, model_id: model, reasoning_effort: reasoningEffort }),
+            // tools/skills are the per-turn allowlist of native tool names
+            // and skills the agent may use for this turn (empty = default set).
+            body: JSON.stringify({ prompt, images, documents, videos, model_id: model, reasoning_effort: reasoningEffort, tools, skills }),
           }
         )
         if (!turnRes.ok || !turnRes.body) {
@@ -559,6 +538,7 @@ export async function POST(req: Request) {
         // Formation graph runs, one cumulative snapshot per graph tool call
         // (same reconciliation pattern as agentRuns). Keyed by toolUseId.
         const graphRuns = new Map<string, GraphRunSnapshot>()
+        const skillRuns = new Map<string, SkillRunSnapshot>()
         // parseJsonEventStream is the AI SDK's own SSE reader: it decodes,
         // frames on the event-source protocol, drops [DONE], and safely
         // parses each payload. Hand-rolling this missed \r\n framing.
@@ -580,17 +560,36 @@ export async function POST(req: Request) {
             // snapshot re-emitted as ONE reconciled data-graph-run part —
             // identical reconciliation pattern to data-agent-run below.
             if (
+              "topic" in event && event.topic === "thinking" &&
+              "tool_use" in event && event.tool_use?.name === "use_skill" &&
+              typeof event.tool_use.toolUseId === "string" &&
+              "data" in event && event.data && typeof event.data === "object"
+            ) {
+              const id = event.tool_use.toolUseId
+              const run = skillRuns.get(id) ?? createSkillRunSnapshot(id)
+              skillRuns.set(id, run)
+              foldSkillEvent(run, event.data as Record<string, unknown>)
+              clearTurnPending()
+              closeReasoning()
+              writer.write({ type: "data-skill-run", id: `skill-${id}`, data: structuredClone(run) })
+              continue
+            }
+
+            if (
               "topic" in event &&
               event.topic === "thinking" &&
               "tool_use" in event &&
-              event.tool_use?.name === "use_skill" &&
+              event.tool_use?.name === "use_agent" &&
               typeof event.tool_use.toolUseId === "string" &&
               "data" in event &&
               typeof event.data === "object" &&
               event.data !== null
             ) {
+              // use_agent retains its existing reasoning presentation;
+              // use_skill is handled above as an isolated Agent snapshot.
               const frame = event.data as {
                 skill_name?: string
+                agent_name?: string
                 text?: string
                 event?: Record<string, unknown>
               }
@@ -611,13 +610,23 @@ export async function POST(req: Request) {
               }
               if (delta) {
                 clearTurnPending()
-                const label =
+                const name =
                   typeof frame.skill_name === "string" && frame.skill_name
-                    ? `[${frame.skill_name}] `
+                    ? frame.skill_name
+                    : typeof frame.agent_name === "string" && frame.agent_name
+                      ? frame.agent_name
+                      : ""
+                const id = ensureReasoning()
+                // Announce the speaker once per reasoning block (and again on
+                // speaker change) — never per token delta.
+                const label =
+                  name && announcedSpeaker !== name
+                    ? `${announcedSpeaker !== null ? "\n" : ""}[${name}] `
                     : ""
+                if (name) announcedSpeaker = name
                 writer.write({
                   type: "reasoning-delta",
-                  id: ensureReasoning(),
+                  id,
                   delta: `${label}${delta}`,
                 })
               }
@@ -637,7 +646,7 @@ export async function POST(req: Request) {
               const toolUseId = event.tool_use.toolUseId
               let snap = graphRuns.get(toolUseId)
               if (!snap) {
-                snap = { toolUseId, status: "running", nodes: {}, handoffs: [], resultText: null }
+                snap = createGraphRunSnapshot(toolUseId)
                 graphRuns.set(toolUseId, snap)
               }
               foldGraphEvent(snap, event.data as Record<string, unknown>)
@@ -770,17 +779,20 @@ export async function POST(req: Request) {
             }
 
             if ("perplexity" in event) {
-              const native = event.perplexity
-              // mcp_list_tools is the MCP transport handshake -- the server
-              // announcing its catalog once per connection, identical every
-              // turn. It is not something either agent did.
-              if (native.type === "mcp_list_tools") continue
+              const payload = event.perplexity
+              const native = payload.type === "response.output_item.done" && payload.item.type === "mcp_list_tools"
+                ? payload.item : payload
+              // Healthy catalogs and remote MCP handshakes are not actions.
+              // Only connector empty/error catalogs surface as availability notices.
+              if (native.type === "mcp_list_tools" &&
+                (!native.connector_id || (!native.error && native.tools.length > 0))) continue
               let id: string
               switch (native.type) {
                 case "sandbox_results":
                   id = `sandbox-${native.call_id}`
                   break
                 case "mcp_call":
+                case "mcp_list_tools":
                   id = `mcp-${native.id}`
                   break
                 case "share_file":

@@ -1,26 +1,32 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import Script from 'next/script'
-import { Geist, Geist_Mono, Instrument_Serif } from 'next/font/google'
+import { Fraunces, Geist_Mono, Plus_Jakarta_Sans } from 'next/font/google'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import './globals.css'
 
-const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] })
+// Gwen type system: Plus Jakarta Sans (warm, open geometric sans) for the UI,
+// Fraunces with its SOFT axis for friendly-but-couture display type, and
+// Geist Mono for code and paths only.
+const jakarta = Plus_Jakarta_Sans({
+  variable: '--font-jakarta',
+  subsets: ['latin'],
+})
+const fraunces = Fraunces({
+  variable: '--font-fraunces',
+  subsets: ['latin'],
+  axes: ['SOFT', 'WONK', 'opsz'],
+  style: ['normal', 'italic'],
+})
 const geistMono = Geist_Mono({
   variable: '--font-geist-mono',
   subsets: ['latin'],
 })
-const instrumentSerif = Instrument_Serif({
-  variable: '--font-instrument-serif',
-  weight: '400',
-  subsets: ['latin'],
-})
 
 export const metadata: Metadata = {
-  title: 'v0 — Ship something interesting',
+  title: 'Gwen — your super agent for anything',
   description:
-    'Describe it, and ship it. An AI design engineer that turns prompts into production-ready interfaces.',
-  generator: 'v0.app',
+    'Gwen is a friendly AI super agent for everyone and any task: research, build, browse, plan, and get things done together.',
   // Without this the browser falls back to requesting /favicon.ico, which does
   // not exist and 404s on every page load. These files are already in public/.
   icons: {
@@ -34,8 +40,9 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  colorScheme: 'dark',
-  themeColor: '#1a1726',
+  colorScheme: 'light',
+  // Matches --background: pure white daylight canvas.
+  themeColor: '#ffffff',
 }
 
 export default function RootLayout({
@@ -47,7 +54,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} bg-background`}
+      className={`${jakarta.variable} ${fraunces.variable} ${geistMono.variable} bg-background`}
       // Browser extensions (e.g. the rtrvr automation extension seen in the
       // console) inject attributes onto <html>/<body> before React hydrates,
       // which React reports as a hydration mismatch. This is the documented

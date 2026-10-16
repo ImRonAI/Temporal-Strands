@@ -1,0 +1,33 @@
+- generic [active] [ref=f2e1]:
+  - main [ref=f2e2]:
+    - generic [ref=f2e3]:
+      - generic [ref=f2e4]: v0 / studio
+      - navigation [ref=f2e9]:
+        - button "Community" [ref=f2e10]
+        - button "Pricing" [ref=f2e11]
+        - button "Enterprise" [ref=f2e12]
+        - button "Docs" [ref=f2e13]
+      - generic [ref=f2e14]:
+        - button "Compare models" [ref=f2e15] [cursor=pointer]
+        - button "Sign in" [ref=f2e16]
+        - button "Start building" [ref=f2e17]
+    - generic [ref=f2e175]:
+      - log [ref=f2e176]:
+        - generic [ref=f2e178]:
+          - paragraph [ref=f2e183]: Remember the phrase amber kite for this conversation. Use Think for one low-effort cycle, then confirm the phrase briefly. No research or other tools are needed.
+          - generic [ref=f2e187]:
+            - button "Thinking…" [expanded] [ref=f2e189]
+            - generic [ref=f2e201]: Working
+      - group [ref=f2e218]:
+        - group [ref=f2e219]
+        - textbox "Ask for a change, or start something new…" [ref=f2e221]
+        - group [ref=f2e222]:
+          - generic [ref=f2e223]:
+            - button [ref=f2e224]
+            - button "claude-fable-5-1 / High" [ref=f2e225]:
+              - generic [ref=f2e226]: claude-fable-5-1
+              - generic [ref=f2e227]: / High
+            - button "Web preview" [ref=f2e230]
+          - button "Stop" [ref=f2e232]
+  - button "Open Next.js Dev Tools" [ref=f2e69] [cursor=pointer]
+  - alert [ref=f2e76]

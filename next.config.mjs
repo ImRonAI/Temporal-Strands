@@ -3,6 +3,8 @@ import { dirname } from "node:path"
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Separate build state for concurrent local acceptance-test servers.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   // Pin the workspace root. Without this Next walks up looking for a lockfile,
   // finds /Users/tims-stuff/package-lock.json, and treats the HOME directory as
   // the project root — which changes how it resolves files and watches for

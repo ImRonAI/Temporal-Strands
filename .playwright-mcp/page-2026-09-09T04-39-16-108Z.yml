@@ -1,0 +1,35 @@
+- generic [active] [ref=f11e1]:
+  - main [ref=f11e2]:
+    - generic [ref=f11e3]:
+      - generic [ref=f11e4]: v0 / studio
+      - navigation [ref=f11e9]:
+        - button "Community" [ref=f11e10]
+        - button "Pricing" [ref=f11e11]
+        - button "Enterprise" [ref=f11e12]
+        - button "Docs" [ref=f11e13]
+      - generic [ref=f11e14]:
+        - button "Compare models" [ref=f11e15] [cursor=pointer]
+        - button "Sign in" [ref=f11e16]
+        - button "Start building" [ref=f11e17]
+    - generic [ref=f11e179]:
+      - log [ref=f11e180]:
+        - generic [ref=f11e182]:
+          - paragraph [ref=f11e187]:
+            - text: "Browser UI verification. Use the native browser yourself, no delegation: initialize session novnc-demo, navigate to"
+            - link "https://example.com" [ref=f11e188] [cursor=pointer]:
+              - /url: https://example.com/
+            - text: . Describe the actual screenshot briefly, then click the Learn more link using the native browser click action. Capture a screenshot and report the resulting page title. Before the click emit a short progress update stating the action. Do not use search, shell, DOM evaluation, or HTTP tools. Leave the browser open. Maximum five browser tool actions. Think may plan; outer agent executes.
+          - generic [ref=f11e192]:
+            - button "Thinking…" [expanded] [ref=f11e194]
+            - generic [ref=f11e206]: Working
+      - group [ref=f11e217]:
+        - group [ref=f11e218]
+        - textbox "Ask for a change, or start something new…" [ref=f11e220]
+        - group [ref=f11e221]:
+          - generic [ref=f11e222]:
+            - button [ref=f11e223]
+            - button "gpt-6-astra" [ref=f11e224]
+            - button "Web preview" [ref=f11e228]
+          - button "Stop" [ref=f11e230]
+  - button "Open Next.js Dev Tools" [ref=f11e69] [cursor=pointer]
+  - alert [ref=f11e76]

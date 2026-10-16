@@ -1,41 +1,481 @@
 {
-  "preset:fast": ["minimal", "low", "medium", "high", "xhigh", "max"],
-  "preset:low": ["minimal", "low", "medium", "high", "xhigh", "max"],
-  "preset:medium": ["minimal", "low", "medium", "high", "xhigh", "max"],
-  "preset:high": ["minimal", "low", "medium", "high", "xhigh", "max"],
-  "preset:xhigh": ["minimal", "low", "medium", "high", "xhigh", "max"],
-  "preset:wide-research": ["minimal", "low", "medium", "high", "xhigh", "max"],
-  "gemini-3.8-flash": ["low", "medium", "high"],
-  "gemini-3.7-flash": ["low", "medium", "high"],
-  "gemini-flash-latest": ["low", "medium", "high"],
-  "anthropic/claude-fable-5": ["low", "medium", "high", "xhigh", "max"],
-  "anthropic/claude-fable-5-1": ["low", "medium", "high", "xhigh", "max"],
-  "anthropic/claude-opus-5": ["low", "medium", "high", "xhigh", "max"],
-  "anthropic/claude-opus-4-8": ["low", "medium", "high", "xhigh", "max"],
-  "anthropic/claude-opus-4-7": ["low", "medium", "high", "xhigh", "max"],
-  "anthropic/claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
-  "anthropic/claude-opus-4-6": ["low", "medium", "high", "max"],
-  "anthropic/claude-sonnet-4-6": ["low", "medium", "high", "max"],
-  "anthropic/claude-opus-4-5": ["low", "medium", "high"],
-  "openai/gpt-5": ["minimal", "low", "medium", "high"],
-  "openai/gpt-5.1": ["low", "medium", "high"],
-  "openai/gpt-5.2": ["low", "medium", "high", "xhigh"],
-  "openai/gpt-5.3-codex": ["low", "medium", "high", "xhigh"],
-  "openai/gpt-5.4": ["low", "medium", "high", "xhigh"],
-  "openai/gpt-5.4-mini": ["low", "medium", "high", "xhigh"],
-  "openai/gpt-5.4-nano": ["low", "medium", "high", "xhigh"],
-  "openai/gpt-5.5": ["low", "medium", "high", "xhigh"],
-  "openai/gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
-  "openai/gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max"],
-  "openai/gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max"],
-  "openai/gpt-6-astra": ["low", "medium", "high", "xhigh", "max"],
-  "xai/grok-4.6": ["low", "medium", "high", "xhigh"],
-  "xai/grok-4.5": ["low", "medium", "high"],
-  "xai/grok-4.3": ["low", "medium", "high", "xhigh"],
-  "perplexity/deepseek-v4-flash-0731": ["low", "high", "max"],
-  "perplexity/deepseek-v4-pro-0813": ["low", "high", "max"],
-  "perplexity/glm-5.2": ["minimal", "high", "max"],
-  "perplexity/glm-5.3": ["low", "high", "max"],
-  "perplexity/glm-5.3-flash": ["low", "high", "max"],
-  "perplexity/kimi-k3": ["minimal", "low", "medium", "high", "xhigh", "max"]
+  "gemini-3.8-flash": [
+    "low",
+    "medium",
+    "high"
+  ],
+  "gemini-3.7-flash": [
+    "low",
+    "medium",
+    "high"
+  ],
+  "gemini-flash-latest": [
+    "low",
+    "medium",
+    "high"
+  ],
+  "preset:fast": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "preset:low": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "preset:medium": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "preset:high": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "preset:xhigh": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "preset:wide-research": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "anthropic/claude-fable-5": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "anthropic/claude-fable-5-1": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "anthropic/claude-haiku-4-5": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "anthropic/claude-haiku-5-5": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "anthropic/claude-opus-4-5": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "anthropic/claude-opus-4-6": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "anthropic/claude-opus-4-7": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "anthropic/claude-opus-4-8": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "anthropic/claude-opus-5": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "anthropic/claude-opus-5-5": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "anthropic/claude-sonnet-4-5": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "anthropic/claude-sonnet-4-6": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "anthropic/claude-sonnet-5": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "anthropic/claude-sonnet-5-5": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "google/gemini-3-flash-preview": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "google/gemini-3.1-flash-lite": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "google/gemini-3.1-pro-preview": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "google/gemini-3.5-flash": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "google/gemini-3.5-flash-lite": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "google/gemini-3.6-flash": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "google/gemini-3.7-flash": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "google/gemini-3.8-flash": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-5": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-5-mini": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-5-nano": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-5.1": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-5.2": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-5.3-codex": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-5.4": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-5.4-mini": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-5.4-nano": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-5.5": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-5.6-luna": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-5.6-sol": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-5.6-terra": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-6-astra": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-6-luna": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-6-sol": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "openai/gpt-6.1-sol": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "perplexity/deepseek-v4-pro-0813": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "perplexity/glm-5.3": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "perplexity/glm-5.3-flash": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "perplexity/kimi-k3": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "perplexity/nemotron-3-ultra-550b-a55b": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "perplexity/sonar": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "xai/grok-4.20-multi-agent": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "xai/grok-4.20-non-reasoning": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "xai/grok-4.20-reasoning": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "xai/grok-4.3": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "xai/grok-4.5": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "xai/grok-4.6": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "xai/grok-4.7": [
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ]
 }

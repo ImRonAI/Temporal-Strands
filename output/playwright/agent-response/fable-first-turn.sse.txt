@@ -1,0 +1,53 @@
+data: {"type":"reasoning-start","id":"turn-pending"}
+
+data: {"type":"data-session","id":"session","data":{"sessionId":"chat-7c3fcc30c4919406"}}
+
+data: {"type":"tool-input-start","toolCallId":"toolu_01RKf37LQ8W3waWR6moWUjQy","toolName":"think","dynamic":true}
+
+data: {"type":"tool-input-available","toolCallId":"toolu_01RKf37LQ8W3waWR6moWUjQy","toolName":"think","input":{"thought":"The user asks me to remember the phrase \"amber kite\" for this conversation and confirm it briefly. No research needed.","reasoning_effort":"low","cycle_count":1},"dynamic":true}
+
+data: {"type":"reasoning-end","id":"turn-pending"}
+
+data: {"type":"reasoning-start","id":"reasoning-0"}
+
+data: {"type":"reasoning-delta","id":"reasoning-0","delta":"I"}
+
+data: {"type":"reasoning-delta","id":"reasoning-0","delta":"â€™ll"}
+
+data: {"type":"reasoning-delta","id":"reasoning-0","delta":" remember"}
+
+data: {"type":"reasoning-delta","id":"reasoning-0","delta":" **"}
+
+data: {"type":"reasoning-delta","id":"reasoning-0","delta":"amber"}
+
+data: {"type":"reasoning-delta","id":"reasoning-0","delta":" kite"}
+
+data: {"type":"reasoning-delta","id":"reasoning-0","delta":"**"}
+
+data: {"type":"reasoning-delta","id":"reasoning-0","delta":" for"}
+
+data: {"type":"reasoning-delta","id":"reasoning-0","delta":" this"}
+
+data: {"type":"reasoning-delta","id":"reasoning-0","delta":" conversation"}
+
+data: {"type":"reasoning-delta","id":"reasoning-0","delta":"."}
+
+data: {"type":"reasoning-end","id":"reasoning-0"}
+
+data: {"type":"tool-output-available","toolCallId":"toolu_01RKf37LQ8W3waWR6moWUjQy","output":"Cycle 1/1:\nIâ€™ll remember **amber kite** for this conversation.","dynamic":true}
+
+data: {"type":"text-start","id":"response"}
+
+data: {"type":"text-delta","id":"response","delta":"Got"}
+
+data: {"type":"text-delta","id":"response","delta":" it â€” I'll remember the"}
+
+data: {"type":"text-delta","id":"response","delta":" phrase **amber kite"}
+
+data: {"type":"text-delta","id":"response","delta":"** for this conversation."}
+
+data: {"type":"text-end","id":"response"}
+
+data: [DONE]
+
+

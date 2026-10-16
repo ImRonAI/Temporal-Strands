@@ -1,0 +1,2 @@
+{"event": "initialized", "server_name": "Strands Agent MCP Server", "server_version": "1.29.1", "protocol": "2025-06-18", "ts": "2026-09-07T07:06:36.218555+00:00"}
+{"event": "tools", "count": 1, "names": ["real_estate_expert"], "ts": "2026-09-07T07:06:36.242311+00:00"}

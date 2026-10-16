@@ -1,0 +1,70 @@
+- generic [active] [ref=f10e1]:
+  - main [ref=f10e2]:
+    - generic [ref=f10e3]:
+      - generic [ref=f10e4]: v0 / studio
+      - navigation [ref=f10e9]:
+        - button "Community" [ref=f10e10]
+        - button "Pricing" [ref=f10e11]
+        - button "Enterprise" [ref=f10e12]
+        - button "Docs" [ref=f10e13]
+      - generic [ref=f10e14]:
+        - button "Compare models" [ref=f10e15] [cursor=pointer]
+        - button "Sign in" [ref=f10e16]
+        - button "Start building" [ref=f10e17]
+    - generic [ref=f10e95]:
+      - log [ref=f10e96]:
+        - generic [ref=f10e98]:
+          - paragraph [ref=f10e103]: "Use the graph tool with action execute exactly once: graph_id \"verify-008\", task \"each node replies with one short word\", topology nodes: {node_id:\"researchers\", node_type:\"parallel\", children:[{node_id:\"r1\"},{node_id:\"r2\"}]}, {node_id:\"pipeline\", node_type:\"graph\", children:[{node_id:\"transform\"},{node_id:\"subgraph\", node_type:\"graph\", children:[{node_id:\"inner\"}]}], edges within pipeline: transform->subgraph}, {node_id:\"fanout\", node_type:\"parallel\", children:[{node_id:\"f1\"}]}; top-level edges: researchers->pipeline, pipeline->fanout. Do not call any other tool. After it finishes reply \"done\"."
+          - generic [ref=f10e106]:
+            - generic [ref=f10e107]:
+              - button "Chain of Thought" [expanded] [ref=f10e146]
+              - generic [ref=f10e122]:
+                - generic [ref=f10e158]:
+                  - generic [ref=f10e159]: Thinking
+                  - paragraph [ref=f10e161]:
+                    - text: "Unable to execute: the"
+                    - code [ref=f10e162]: graph
+                    - text: tool is not available in this session. No tools were called.
+                - generic [ref=f10e168]:
+                  - generic [ref=f10e169]: graph
+                  - button "graph Completed" [ref=f10e171]:
+                    - generic [ref=f10e172]:
+                      - generic [ref=f10e175]: graph
+                      - generic [ref=f10e176]: Completed
+            - paragraph [ref=f10e180]: done
+          - paragraph [ref=f10e201]: "Call the graph tool now with {\"action\":\"execute\",\"graph_id\":\"verify-008\",\"task\":\"reply with one word\",\"topology\":{\"nodes\":[{\"node_id\":\"researchers\",\"node_type\":\"parallel\",\"nodes\":[{\"node_id\":\"r1\"},{\"node_id\":\"r2\"}]},{\"node_id\":\"pipeline\",\"node_type\":\"graph\",\"nodes\":[{\"node_id\":\"transform\"},{\"node_id\":\"subgraph\",\"node_type\":\"graph\",\"nodes\":[{\"node_id\":\"inner\"}]}],\"edges\":[{\"from\":\"transform\",\"to\":\"subgraph\"}]},{\"node_id\":\"fanout\",\"node_type\":\"parallel\",\"nodes\":[{\"node_id\":\"f1\"}]}],\"edges\":[{\"from\":\"researchers\",\"to\":\"pipeline\"},{\"from\":\"pipeline\",\"to\":\"fanout\"}]}}"
+          - generic [ref=f10e205]:
+            - button "Thinking…" [expanded] [ref=f10e207]
+            - generic [ref=f10e232]:
+              - generic [ref=f10e233]: Thinking
+              - generic [ref=f10e234]:
+                - paragraph [ref=f10e235]: "DECOMPOSE: Can the specified nested multi-agent graph be executed exactly as provided?"
+                - paragraph [ref=f10e236]:
+                  - text: "APPRAISE: No"
+                  - code [ref=f10e237]: graph
+                  - text: tool is available in the current tool interface. [HIGH] The requested topology also uses
+                  - code [ref=f10e238]: node_id
+                  - text: /
+                  - code [ref=f10e239]: node_type
+                  - text: ", which differs from the documented"
+                  - code [ref=f10e240]: id
+                  - text: /
+                  - code [ref=f10e241]: type
+                  - text: schema. [MEDIUM]
+                - paragraph [ref=f10e242]:
+                  - text: "FINDINGS: The requested graph was not executed. [HIGH] CONFIDENCE: high — tool availability is directly observable. GAPS: A runtime exposing the"
+                  - code [ref=f10e243]: graph
+                  - text: "tool; schema validation by that runtime. NEXT ACTION: REFINE: Enable the"
+                  - code [ref=f10e244]: graph
+                  - text: tool and resubmit the topology using its supported schema.
+      - group [ref=f10e132]:
+        - group [ref=f10e133]
+        - textbox "Ask for a change, or start something new…" [ref=f10e135]
+        - group [ref=f10e136]:
+          - generic [ref=f10e137]:
+            - button [ref=f10e138]
+            - button "High (preset)" [ref=f10e139]
+            - button "Web preview" [ref=f10e143]
+          - button "Stop" [ref=f10e145]
+  - button "Open Next.js Dev Tools" [ref=f10e71] [cursor=pointer]
+  - alert [ref=f10e75]

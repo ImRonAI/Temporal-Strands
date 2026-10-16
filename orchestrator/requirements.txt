@@ -1,10 +1,11 @@
 strands-agents[gemini]==1.50.2
 strands-agents-tools[local_chromium_browser]==0.8.5
-strands-heterogeneous-graph-tool @ file:../../strands-tools
+# The graph implementation is orchestrator/graph_tool.py; no sibling checkout.
 # Agent Skills catalog (skills_config.py). Pinned to the commit verified on
 # 2026-09-05; the package is not on PyPI.
 strands_agentskills @ git+https://github.com/aws-samples/sample-strands-agents-agentskills@c5564fcd2e7c249ec57b32027ffbea49e9abeb7b
 strands-shell==0.3.3
+strands-agents-sops==1.1.4
 google-genai==2.19.0
 temporalio[strands-agents,pydantic]==1.31.0
 perplexityai==0.42.0
@@ -15,5 +16,7 @@ httpx==0.28.1
 mcp==1.29.0
 python-dotenv==1.2.2
 opentelemetry-exporter-otlp-proto-http==1.44.0
+pydicom==3.0.2
+pypdf==6.19.0
 pytest==9.1.1
 pytest-asyncio==1.4.0

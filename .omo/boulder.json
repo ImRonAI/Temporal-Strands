@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "active_work_id": "framework-adherence-reset",
+  "works": {
+    "framework-adherence-reset": {
+      "work_id": "framework-adherence-reset",
+      "active_plan": ".omo/plans/framework-adherence-reset.md",
+      "plan_name": "framework-adherence-reset",
+      "session_ids": ["codex:current-session"],
+      "status": "active",
+      "worktree_path": null
+    }
+  }
+}

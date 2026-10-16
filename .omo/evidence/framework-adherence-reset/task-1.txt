@@ -1,0 +1,87 @@
+Framework Adherence Reset — Task 1: Collapse duplicated activity-options helper
+==============================================================================
+Date: 2026-09-08
+Files changed: orchestrator/workflow.py, orchestrator/tests/test_workflow.py
+
+TDD RED (new test, unchanged tree)
+-----------------------------------
+$ .venv/bin/python -m pytest tests/test_workflow.py::test_workflow_uses_config_closable -q
+>       assert not hasattr(workflow, "_closable")
+E       AssertionError: assert not True
+E        +  where True = hasattr(<module 'workflow' from '.../workflow.py'>, '_closable')
+1 failed in 1.02s
+-> FAILED on _closable still being defined (the duplication to collapse).
+
+TDD GREEN (after refactor)
+--------------------------
+$ .venv/bin/python -m pytest tests/test_workflow.py::test_workflow_uses_config_closable -q
+.                                                                        [100%]
+1 passed in 0.85s
+
+Gate: grep _closable|_UNCAPPED_FALLBACK on orchestrator/workflow.py (expect 0 lines)
+-------------------------------------------------------------------------------
+$ grep -n "_closable\|_UNCAPPED_FALLBACK" orchestrator/workflow.py
+(no output — 0 matches; grep exit=1)
+exit=1
+
+Gate: grep -c closable_activity_options on orchestrator/workflow.py (expect >=5)
+------------------------------------------------------------------------------
+$ grep -c "closable_activity_options" orchestrator/workflow.py
+6
+(1 import + 5 call sites)
+
+Gate: full orchestrator pytest suite (post-edit, re-verified)
+-------------------------------------------------------------
+$ .venv/bin/python -m pytest tests -q
+334 passed, 18 warnings in 22.33s
+(test_workflow.py subset: 13 passed — 12 existing + 1 new; temporal CLI present)
+
+Note: baseline suite was ~333 passing; 334 now reflects the added
+test_workflow_uses_config_closable. test_config.py (with its 31 pre-existing
+uncommitted batch-interval test lines) passes unchanged; no config.py edits
+were made. Fallback value unchanged (config.UNCAPPED_FALLBACK_SCHEDULE_TO_CLOSE
+= timedelta(days=1)); config.py:87-106 docstring untouched.
+
+Full pytest transcript (verbatim) follows.
+
+VERBATIM PYTEST TRANSCRIPT (full suite, post-edit)
+==============================================
+........................................................................ [ 21%]
+........................................................................ [ 43%]
+........................................................................ [ 64%]
+........................................................................ [ 86%]
+..............................................                           [100%]
+=============================== warnings summary ===============================
+tests/test_hot_load.py::test_load_tool_file_read_runs_as_activity
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_mcp_shell.py::test_load_tool_registers_io_community_tool_as_activity
+  /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands_tools/load_tool.py:222: DeprecationWarning: load_tool_from_filepath is deprecated and will be removed in Strands SDK 2.0. `process_tools` automatically handles loading tools from a filepath.
+    current_agent.tool_registry.load_tool_from_filepath(tool_name=name, tool_path=path)
+
+tests/test_hot_load.py::test_load_tool_file_read_runs_as_activity
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_mcp_shell.py::test_load_tool_registers_io_community_tool_as_activity
+  /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/tools/registry.py:186: DeprecationWarning: ToolLoader.load_tools is deprecated and will be removed in Strands SDK 2.0. Use the `load_tools_from_string` or `load_tools_from_module` methods instead.
+    loaded_tools = ToolLoader.load_tools(tool_path, tool_name)
+
+tests/test_hot_load.py::test_load_tool_file_read_runs_as_activity
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_mcp_shell.py::test_load_tool_registers_io_community_tool_as_activity
+  /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/tools/loader.py:346: DeprecationWarning: ToolLoader.load_python_tool is deprecated and will be removed in Strands SDK 2.0. Use the `load_tools_from_string` or `load_tools_from_module` methods instead.
+    return cls.load_python_tools(abs_path, tool_name)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+334 passed, 18 warnings in 22.33s
+Transient error HTTPSConnectionPool(host='collector.example', port=443): Max retries exceeded with url: /v1/traces?token=secret/v1/traces (Caused by NameResolutionError("HTTPSConnection(host='collector.example', port=443): Failed to resolve 'collector.example' ([Errno 8] nodename nor servname provided, or not known)")) encountered while exporting span batch, retrying in 1.07s.
+Transient error HTTPSConnectionPool(host='collector.example', port=443): Max retries exceeded with url: /v1/traces?token=secret/v1/traces (Caused by NameResolutionError("HTTPSConnection(host='collector.example', port=443): Failed to resolve 'collector.example' ([Errno 8] nodename nor servname provided, or not known)")) encountered while exporting span batch, retrying in 2.26s.
+Transient error HTTPSConnectionPool(host='collector.example', port=443): Max retries exceeded with url: /v1/traces?token=secret/v1/traces (Caused by NameResolutionError("HTTPSConnection(host='collector.example', port=443): Failed to resolve 'collector.example' ([Errno 8] nodename nor servname provided, or not known)")) encountered while exporting span batch, retrying in 3.97s.
+Failed to export span batch due to timeout, max retries or shutdown.

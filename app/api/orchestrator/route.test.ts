@@ -124,6 +124,346 @@ describe("POST graph activity streaming", () => {
   })
 })
 
+// Compatibility tests for the implemented nested-graph backend contract
+// (orchestrator/graph_activity.py, 2026-09-07). The activity publishes:
+//   1. one initial {type:"graph_topology", graph_id, nodes, edges} frame with
+//      path-qualified node_id, label, parent_id, node_type, skill?, model?;
+//   2. flattened native events whose leaf multiagent_node_stream frames keep
+//      the WHOLE sanitized agent event (tool use + tool results, not text
+//      only) and whose node_stop frames carry a NodeResult status;
+//   3. a terminal {status:"success"|"error"|"cancelled", content, toolUseId}.
+// The existing folding discards the topology (nodes/edges/parent_id/skill/
+// model), discards leaf tool actions, marks every node_stop "done" even when
+// the NodeResult failed, and maps a cancelled terminal to "failed" — data the
+// backend already produces but the client never receives, so no backend-only
+// change can satisfy the frontend contract. These tests prove that loss.
+describe("POST graph nested topology, tool actions, and cancellation", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const graphFrame = (data: unknown) => ({
+    topic: "thinking",
+    tool_use: { name: "graph", toolUseId: "graph-tool-1" },
+    data,
+  })
+
+  async function postUpstream(frames: unknown[]): Promise<string> {
+    const upstream =
+      [
+        ...frames.map((frame) => `data: ${JSON.stringify(frame)}`),
+        `data: ${JSON.stringify({ done: true, reply: "Complete" })}`,
+      ].join("\n\n") + "\n\n"
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(upstream, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        })
+      )
+    )
+
+    const response = await POST(
+      new Request("http://localhost/api/orchestrator", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "session-1",
+          messages: [
+            {
+              id: "message-1",
+              role: "user",
+              parts: [{ type: "text", text: "Run the nested graph" }],
+            },
+          ],
+        }),
+      })
+    )
+    return response.text()
+  }
+
+  const lastGraphSnapshot = (body: string) => {
+    const parts = body
+      .split("\n")
+      .filter((line) => line.startsWith("data: ") && !line.includes("[DONE]"))
+      .map((line) => JSON.parse(line.slice("data: ".length)))
+      .filter((c) => c.type === "data-graph-run")
+    return parts.at(-1)?.data as
+      | {
+          status: string
+          graphId: string | null
+          nodes: Record<
+            string,
+            {
+              status: string
+              label: string
+              parentId: string | null
+              kind: string
+              skill?: string
+              model?: string
+              text: string
+              tools: Array<{
+                id: string
+                name: string
+                status: string
+                input: string
+                output: string
+              }>
+            }
+          >
+          edges: Array<{ from: string; to: string }>
+          handoffs: Array<{ from: string[]; to: string[] }>
+        }
+      | undefined
+  }
+
+  it("preserves the planned topology: containment, node types, skill/model, structural edges", async () => {
+    const body = await postUpstream([
+      graphFrame({
+        type: "graph_topology",
+        graph_id: "demo",
+        nodes: [
+          { node_id: "research", label: "research", parent_id: null, node_type: "agent" },
+          { node_id: "team", label: "team", parent_id: null, node_type: "swarm" },
+          {
+            node_id: "team/coder",
+            label: "coder",
+            parent_id: "team",
+            node_type: "agent",
+            model: "fake/text",
+          },
+          {
+            node_id: "team/writer",
+            label: "writer",
+            parent_id: "team",
+            node_type: "skill_agent",
+            skill: "wf-skill",
+          },
+        ],
+        edges: [{ from: "research", to: "team" }],
+      }),
+    ])
+
+    const snap = lastGraphSnapshot(body)
+    expect(snap).toBeDefined()
+    expect(snap!.graphId).toBe("demo")
+    // Declared-but-not-yet-started nodes are pending, not absent.
+    expect(snap!.nodes["research"]).toMatchObject({ status: "pending", kind: "agent" })
+    expect(snap!.nodes["team"]).toMatchObject({ status: "pending", kind: "swarm" })
+    // Containment travels as parent_id, and duplicate-safe full paths are keys.
+    expect(snap!.nodes["team/coder"]).toMatchObject({
+      label: "coder",
+      parentId: "team",
+      model: "fake/text",
+    })
+    expect(snap!.nodes["team/writer"]).toMatchObject({
+      kind: "skill_agent",
+      skill: "wf-skill",
+    })
+    // Declared structural edges are preserved distinctly from handoffs.
+    expect(snap!.edges).toEqual([{ from: "research", to: "team" }])
+  })
+
+  it("reconciles leaf tool actions (start, input fragments, result) by toolUseId", async () => {
+    const body = await postUpstream([
+      graphFrame({
+        type: "multiagent_node_start",
+        node_id: "research",
+        node_type: "agent",
+        label: "research",
+        parent_id: null,
+      }),
+      graphFrame({
+        type: "multiagent_node_stream",
+        node_id: "research",
+        label: "research",
+        parent_id: null,
+        event: {
+          event: {
+            contentBlockStart: {
+              start: { toolUse: { name: "file_write", toolUseId: "t1" } },
+            },
+          },
+        },
+      }),
+      graphFrame({
+        type: "multiagent_node_stream",
+        node_id: "research",
+        label: "research",
+        parent_id: null,
+        event: {
+          type: "tool_use_stream",
+          delta: { toolUse: { input: '{"path":' } },
+          current_tool_use: { toolUseId: "t1", name: "file_write", input: '{"path":' },
+        },
+      }),
+      graphFrame({
+        type: "multiagent_node_stream",
+        node_id: "research",
+        label: "research",
+        parent_id: null,
+        event: {
+          type: "tool_use_stream",
+          delta: { toolUse: { input: '"a.txt"}' } },
+          current_tool_use: {
+            toolUseId: "t1",
+            name: "file_write",
+            input: '{"path":"a.txt"}',
+          },
+        },
+      }),
+      graphFrame({
+        type: "multiagent_node_stream",
+        node_id: "research",
+        label: "research",
+        parent_id: null,
+        event: {
+          message: {
+            role: "assistant",
+            content: [
+              {
+                toolUse: {
+                  toolUseId: "t1",
+                  name: "file_write",
+                  input: { path: "a.txt" },
+                },
+              },
+            ],
+          },
+        },
+      }),
+      graphFrame({
+        type: "multiagent_node_stream",
+        node_id: "research",
+        label: "research",
+        parent_id: null,
+        event: {
+          message: {
+            role: "user",
+            content: [
+              {
+                toolResult: {
+                  toolUseId: "t1",
+                  status: "success",
+                  content: [{ text: "wrote a.txt" }],
+                },
+              },
+            ],
+          },
+        },
+      }),
+    ])
+
+    const snap = lastGraphSnapshot(body)
+    const tools = snap?.nodes["research"]?.tools ?? []
+    // One reconciled action per toolUseId — never one card per frame.
+    expect(tools).toHaveLength(1)
+    expect(tools[0]).toMatchObject({
+      id: "t1",
+      name: "file_write",
+      status: "output-available",
+      output: "wrote a.txt",
+    })
+    expect(tools[0].input).toContain("a.txt")
+  })
+
+  it("maps NodeResult failure and a cancelled terminal frame accurately", async () => {
+    const body = await postUpstream([
+      graphFrame({
+        type: "multiagent_node_start",
+        node_id: "solo",
+        node_type: "agent",
+        label: "solo",
+        parent_id: null,
+      }),
+      graphFrame({
+        type: "multiagent_node_stop",
+        node_id: "solo",
+        label: "solo",
+        parent_id: null,
+        node_result: {
+          __type__: "NodeResult",
+          status: "failed",
+          result: { __type__: "Exception", error: "model exploded" },
+        },
+      }),
+      graphFrame({
+        status: "cancelled",
+        content: [{ text: "Graph run cancelled." }],
+        toolUseId: "graph-tool-1",
+      }),
+    ])
+
+    const snap = lastGraphSnapshot(body)
+    expect(snap?.nodes["solo"]?.status).toBe("failed")
+    expect(snap?.status).toBe("cancelled")
+  })
+
+  it("surfaces the NodeResult final message as node text when nothing streamed", async () => {
+    const body = await postUpstream([
+      graphFrame({
+        type: "multiagent_node_start",
+        node_id: "quiet",
+        node_type: "agent",
+        label: "quiet",
+        parent_id: null,
+      }),
+      graphFrame({
+        type: "multiagent_node_stop",
+        node_id: "quiet",
+        label: "quiet",
+        parent_id: null,
+        node_result: {
+          __type__: "NodeResult",
+          status: "completed",
+          result: {
+            __type__: "AgentResult",
+            message: {
+              role: "assistant",
+              content: [{ text: "Final answer from quiet node." }],
+            },
+          },
+        },
+      }),
+      graphFrame({
+        status: "success",
+        content: [{ text: "Graph demo executed in 10ms (completed)." }],
+        toolUseId: "graph-tool-1",
+      }),
+    ])
+
+    const snap = lastGraphSnapshot(body)
+    expect(snap?.nodes["quiet"]).toMatchObject({
+      status: "done",
+      text: "Final answer from quiet node.",
+    })
+  })
+
+  it("maps standalone use_agent thinking frames to reasoning like use_skill", async () => {
+    const body = await postUpstream([
+      {
+        topic: "thinking",
+        tool_use: { name: "use_agent", toolUseId: "agent-run-1" },
+        data: {
+          agent_name: "analyst",
+          text: "Analyst chunk",
+          event: { data: "Analyst chunk", delta: { text: "Analyst chunk" } },
+        },
+      },
+    ])
+
+    const chunks = body
+      .split("\n")
+      .filter((line) => line.startsWith("data: ") && !line.includes("[DONE]"))
+      .map((line) => JSON.parse(line.slice("data: ".length)))
+    const reasoning = chunks.filter((c) => c.type === "reasoning-delta")
+    expect(reasoning.some((c) => String(c.delta).includes("analyst"))).toBe(true)
+    expect(reasoning.some((c) => String(c.delta).includes("Analyst chunk"))).toBe(true)
+  })
+})
+
 // Nested Agent API preset runs (agent_runs topic): the backend envelope
 // carries per-run correlation metadata and verbatim Agent API events that the
 // pre-existing events/thinking mapping cannot represent — the route must fold
@@ -447,7 +787,25 @@ describe("POST model-activity retry handling", () => {
     expect(firstText).toBeGreaterThan(pendingEnd)
   })
 
-  it("maps use_skill thinking-topic frames to reasoning-delta", async () => {
+  it("preserves use_skill configuration and nested tools in a per-call agent stream", async () => {
+    stubTurnStream([
+      frame({ topic: "thinking", tool_use: { name: "use_skill", toolUseId: "skill-run-1" },
+        data: { skill_name: "demo-skill", configuration: { systemPrompt: "Exact instructions", userPrompt: "Do research", tools: [], skills: [] } } }),
+      frame({ topic: "thinking", tool_use: { name: "use_skill", toolUseId: "skill-run-1" },
+        data: { skill_name: "demo-skill", event: { type: "tool_use_stream", current_tool_use: { toolUseId: "read-1", name: "file_read", input: { path: "notes.md" } } } } }),
+      frame({ done: true, reply: "Done" }),
+    ])
+    const chunks = parseChunks(await (await postTurn()).text())
+    const runs = chunks.filter(c => c.type === "data-skill-run")
+    expect(runs).toHaveLength(2)
+    expect(runs.map(c => c.id)).toEqual(["skill-skill-run-1", "skill-skill-run-1"])
+    expect(runs[1].data).toMatchObject({
+      toolUseId: "skill-run-1", configuration: { systemPrompt: "Exact instructions" },
+      node: { tools: [{ id: "read-1", name: "file_read", input: '{"path":"notes.md"}' }] },
+    })
+  })
+
+  it("keeps use_skill text inside its agent instead of parent reasoning", async () => {
     stubTurnStream([
       frame({
         topic: "thinking",
@@ -459,8 +817,59 @@ describe("POST model-activity retry handling", () => {
 
     const chunks = parseChunks(await (await postTurn()).text())
     const reasoning = chunks.filter((c) => c.type === "reasoning-delta")
-    expect(reasoning.some((c) => String(c.delta).includes("demo-skill"))).toBe(true)
-    expect(reasoning.some((c) => String(c.delta).includes("Sub-agent chunk"))).toBe(true)
+    expect(reasoning.some((c) => String(c.delta).includes("Sub-agent chunk"))).toBe(false)
+    expect(chunks.find(c => c.type === "data-skill-run")?.data).toMatchObject({
+      skillName: "demo-skill", timeline: [{ kind: "text", text: "Sub-agent chunk" }],
+    })
+  })
+
+  it("reconciles use_skill tokens into one ordered agent update", async () => {
+    // The orchestrator publishes one thinking frame per model token. Gluing
+    // the [skill_name] label onto every delta rendered as
+    // "Using[skill] the[skill] sandbox[skill]..." in Chain of Thought.
+    const tokens = ["Using", " the", " sandbox", " skill", "."]
+    stubTurnStream([
+      ...tokens.map((text) =>
+        frame({
+          topic: "thinking",
+          tool_use: { name: "use_skill", toolUseId: "skill-run-1" },
+          data: { skill_name: "demo-skill", text },
+        })
+      ),
+      frame({ done: true, reply: "Done" }),
+    ])
+
+    const chunks = parseChunks(await (await postTurn()).text())
+    const runs = chunks.filter(c => c.type === "data-skill-run")
+    expect(new Set(runs.map(c => c.id)).size).toBe(1)
+    expect(runs.at(-1)?.data).toMatchObject({
+      timeline: [{ kind: "text", text: "Using the sandbox skill." }],
+    })
+  })
+
+  it("re-labels when the sub-agent speaker changes within one reasoning run", async () => {
+    stubTurnStream([
+      frame({
+        topic: "thinking",
+        tool_use: { name: "use_skill", toolUseId: "skill-run-1" },
+        data: { skill_name: "skill-a", text: "First." },
+      }),
+      frame({
+        topic: "thinking",
+        tool_use: { name: "use_agent", toolUseId: "agent-run-1" },
+        data: { agent_name: "analyst", text: "Second." },
+      }),
+      frame({ done: true, reply: "Done" }),
+    ])
+
+    const chunks = parseChunks(await (await postTurn()).text())
+    const joined = chunks
+      .filter((c) => c.type === "reasoning-delta")
+      .map((c) => String(c.delta))
+      .join("")
+    expect(joined).not.toContain("[skill-a]")
+    expect(joined.split("[analyst]").length - 1).toBe(1)
+    expect(chunks.find(c => c.type === "data-skill-run")?.data).toMatchObject({ skillName: "skill-a" })
   })
 
   it("collapses a retried thinking-topic message into separate reasoning blocks with a data-retry part", async () => {
@@ -635,6 +1044,44 @@ describe("POST multimodal attachments", () => {
   })
 })
 
+describe("POST per-session desktop viewer", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  // Compatibility test for per-session desktops: every chat session owns its
+  // own Linux desktop container with its own noVNC port, so the orchestrator's
+  // POST /sessions answers {session_id, desktop_url}. The panel cannot find
+  // that viewer unless the route carries desktop_url on the data-session part.
+  it("forwards the orchestrator's desktop_url on the data-session part", async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/sessions")) {
+        return Response.json({ session_id: "session-9", desktop_url: "http://localhost:51234/vnc.html?autoconnect=true" })
+      }
+      return new Response(`data: ${JSON.stringify({ done: true, reply: "ok" })}\n\n`, {
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    const response = await POST(new Request("http://localhost/api/orchestrator", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "perplexity/kimi-k3",
+        messages: [{ id: "message-1", role: "user", parts: [{ type: "text", text: "hello" }] }],
+      }),
+    }))
+    const text = await response.text()
+    const session = text.split("\n").map((line) => line.replace(/^data: /, "")).filter(Boolean)
+      .map((line) => { try { return JSON.parse(line) } catch { return null } })
+      .find((frame) => frame?.type === "data-session")
+    expect(session?.data).toEqual({
+      sessionId: "session-9",
+      desktopUrl: "http://localhost:51234/vnc.html?autoconnect=true",
+    })
+  })
+})
+
 describe("POST per-turn model switching", () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -701,6 +1148,202 @@ describe("POST per-turn model switching", () => {
     expect(turnCall).toBeDefined()
     const body = JSON.parse((turnCall?.[1] as RequestInit).body as string)
     expect(body.model_id).toBe("anthropic/claude-fable-5")
+  })
+
+  // Compatibility test for the per-turn tool/skill allowlist: the
+  // orchestrator's /turns/stream endpoint accepts optional tools and skills
+  // string arrays restricting which native tools and skills the agent may
+  // use this turn. The backend cannot satisfy that contract unless the route
+  // forwards the useChat body's tools/skills on the turn POST.
+  it("forwards the request body tools and skills arrays on the turn POST", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(`data: ${JSON.stringify({ done: true, reply: "ok" })}\n\n`, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    await POST(
+      new Request("http://localhost/api/orchestrator", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "session-1",
+          model: "anthropic/claude-fable-5",
+          tools: ["journal"],
+          skills: ["office"],
+          messages: [
+            {
+              id: "message-1",
+              role: "user",
+              parts: [{ type: "text", text: "hello" }],
+            },
+          ],
+        }),
+      })
+    )
+
+    const turnCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).includes("/turns/stream")
+    )
+    expect(turnCall).toBeDefined()
+    const body = JSON.parse((turnCall?.[1] as RequestInit).body as string)
+    expect(body.tools).toEqual(["journal"])
+    expect(body.skills).toEqual(["office"])
+  })
+
+  it("sends empty tools and skills arrays when the body omits them", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(`data: ${JSON.stringify({ done: true, reply: "ok" })}\n\n`, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    await POST(
+      new Request("http://localhost/api/orchestrator", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "session-1",
+          model: "anthropic/claude-fable-5",
+          messages: [
+            {
+              id: "message-1",
+              role: "user",
+              parts: [{ type: "text", text: "hello" }],
+            },
+          ],
+        }),
+      })
+    )
+
+    const turnCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).includes("/turns/stream")
+    )
+    expect(turnCall).toBeDefined()
+    const body = JSON.parse((turnCall?.[1] as RequestInit).body as string)
+    expect(body.tools).toEqual([])
+    expect(body.skills).toEqual([])
+  })
+})
+
+describe("POST connector availability", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  async function postNative(payloads: Record<string, unknown>[]) {
+    const frames = [
+      ...payloads.map((perplexity) => ({ topic: "events", perplexity })),
+      { topic: "events", contentBlockDelta: { delta: { text: "Independent work continues." } } },
+      { done: true, reply: "Independent work continues." },
+    ]
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join(""),
+      { headers: { "Content-Type": "text/event-stream" } }
+    )))
+    const response = await POST(new Request("http://localhost/api/orchestrator", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "session-1",
+        messages: [{ id: "message-1", role: "user", parts: [{ type: "text", text: "Check project updates" }] }],
+      }),
+    }))
+    return (await response.text()).split("\n")
+      .filter((line) => line.startsWith("data: ") && !line.includes("[DONE]"))
+      .map((line): Record<string, unknown> => JSON.parse(line.slice(6)))
+  }
+
+  const catalog = {
+    type: "mcp_list_tools",
+    id: "catalog-1",
+    connector_id: "connector_github",
+    server_label: "github",
+    tools: [],
+  }
+  const completed = (item: Record<string, unknown>) => ({
+    type: "response.output_item.done", output_index: 0, sequence_number: 2, item,
+  })
+
+  it.each(["completed", "direct"])("preserves an empty %s connector catalog as native availability, not an action", async (shape) => {
+    const chunks = await postNative([shape === "completed" ? completed(catalog) : catalog])
+    expect(chunks.filter((chunk) => chunk.type === "data-native-tool")).toEqual([
+      { type: "data-native-tool", id: "mcp-catalog-1", data: catalog },
+    ])
+    expect(chunks.some((chunk) => String(chunk.type).startsWith("tool-"))).toBe(false)
+    expect(chunks.some((chunk) => chunk.type === "error")).toBe(false)
+    expect(chunks.findIndex((chunk) => chunk.type === "data-native-tool"))
+      .toBeLessThan(chunks.findIndex((chunk) => chunk.type === "text-delta"))
+  })
+
+  it("preserves a direct harness notice before independent work continues", async () => {
+    const notice = {
+      ...catalog,
+      id: "availability-connector_github",
+      error: "Connector unavailable for this request. Continue independent work; do not claim access to it.",
+    }
+    const chunks = await postNative([notice])
+    expect(chunks.filter((chunk) => chunk.type === "data-native-tool")).toEqual([
+      { type: "data-native-tool", id: "mcp-availability-connector_github", data: notice },
+    ])
+    expect(chunks.some((chunk) => String(chunk.type).startsWith("tool-"))).toBe(false)
+    expect(chunks.findIndex((chunk) => chunk.type === "data-native-tool"))
+      .toBeLessThan(chunks.findIndex((chunk) => chunk.type === "text-delta"))
+  })
+
+  it.each(["AUTH_REQUIRED", "CONNECTOR_UNAVAILABLE", "unexpected catalog error"])("preserves completed connector catalog error %s even with tools", async (error) => {
+    const item = { ...catalog, tools: [{ name: "search" }], error }
+    const chunks = await postNative([completed(item)])
+    expect(chunks.filter((chunk) => chunk.type === "data-native-tool")).toEqual([
+      { type: "data-native-tool", id: "mcp-catalog-1", data: item },
+    ])
+  })
+
+  it("suppresses healthy connector catalogs and remote MCP handshakes, including remote errors", async () => {
+    const items = [
+      { ...catalog, tools: [{ name: "search" }], error: null },
+      { ...catalog, connector_id: undefined },
+      { ...catalog, connector_id: null, tools: [{ name: "search" }] },
+      { ...catalog, connector_id: undefined, error: "AUTH_REQUIRED" },
+    ]
+    const chunks = await postNative(items.flatMap((item) => [item, completed(item)]))
+    expect(chunks.filter((chunk) => chunk.type === "data-native-tool")).toEqual([])
+  })
+
+  it("preserves unknown remote MCP calls and their errors unchanged", async () => {
+    const call = { type: "mcp_call", id: "remote-1", server_label: "custom-server", name: "custom_tool", arguments: "{}", error: "Unknown remote error" }
+    const chunks = await postNative([call])
+    expect(chunks.filter((chunk) => chunk.type === "data-native-tool")).toEqual([
+      { type: "data-native-tool", id: "mcp-remote-1", data: call },
+    ])
+  })
+
+  // The worker forwards completed output items as the bare item
+  // (perplexity_model._native_payload), so every documented tool result —
+  // including the image_search item and the sandbox's call_id-keyed results —
+  // arrives as a renderable data-native-tool part with a stable id.
+  it("forwards bare image search and sandbox items with stable ids", async () => {
+    const images = {
+      type: "image_search_results",
+      call_id: "img_1",
+      queries: ["saturn rings"],
+      results: [{ image_url: "https://i.example/s.jpg", origin_url: "https://nasa.gov", width: 800, height: 600, title: "Saturn" }],
+    }
+    const imageQueries = { type: "response.reasoning.image_search_queries", call_id: "img_1", queries: ["saturn rings"] }
+    const sandbox = {
+      type: "sandbox_results", call_id: "sb_1", language: "python", code: "print(1)", status: "completed",
+      results: [{ stdout: "1\n", stderr: "", exit_code: 0, duration_ms: 3, status: "completed" }],
+    }
+    const chunks = await postNative([imageQueries, images, sandbox])
+    expect(chunks.filter((chunk) => chunk.type === "data-native-tool")).toEqual([
+      { type: "data-native-tool", id: "native-response.reasoning.image_search_queries-0", data: imageQueries },
+      { type: "data-native-tool", id: "native-image_search_results-1", data: images },
+      { type: "data-native-tool", id: "sandbox-sb_1", data: sandbox },
+    ])
   })
 })
 

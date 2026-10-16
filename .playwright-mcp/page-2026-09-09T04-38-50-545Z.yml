@@ -1,0 +1,40 @@
+- generic [ref=f11e1]:
+  - main [ref=f11e2]:
+    - generic [ref=f11e3]:
+      - generic [ref=f11e4]: v0 / studio
+      - navigation [ref=f11e9]:
+        - button "Community" [ref=f11e10]
+        - button "Pricing" [ref=f11e11]
+        - button "Enterprise" [ref=f11e12]
+        - button "Docs" [ref=f11e13]
+      - generic [ref=f11e14]:
+        - button "Compare models" [ref=f11e15] [cursor=pointer]
+        - button "Sign in" [ref=f11e16]
+        - button "Start building" [ref=f11e17]
+    - generic [ref=f11e19]:
+      - generic [ref=f11e20]: Now in beta
+      - heading "What should we ship today?" [level=1] [ref=f11e23]:
+        - generic [ref=f11e24]: What
+        - generic [ref=f11e26]: should
+        - generic [ref=f11e28]: we
+        - generic [ref=f11e30]: ship
+        - generic [ref=f11e32]: today?
+      - paragraph [ref=f11e35]: Describe an interface in plain language. v0 turns it into clean, production-ready React — components, styling, and all.
+      - generic [ref=f11e36]:
+        - group [ref=f11e38]:
+          - group [ref=f11e39]
+          - textbox "Describe what you want to ship…" [ref=f11e41]
+          - group [ref=f11e42]:
+            - generic [ref=f11e43]:
+              - button [ref=f11e44]
+              - button "gpt-6-astra" [active] [ref=f11e163]
+            - button "Submit" [disabled]
+        - generic [ref=f11e51]:
+          - button "A pricing page with a yearly toggle" [ref=f11e53] [cursor=pointer]
+          - button "An analytics dashboard with charts" [ref=f11e55] [cursor=pointer]
+          - button "A waitlist landing page" [ref=f11e57] [cursor=pointer]
+          - button "A Kanban board with drag and drop" [ref=f11e59] [cursor=pointer]
+          - button "A settings page with tabs" [ref=f11e61] [cursor=pointer]
+      - paragraph [ref=f11e63]: Trusted by design engineers shipping at the edge of the web.
+  - button "Open Next.js Dev Tools" [ref=f11e69] [cursor=pointer]
+  - alert [ref=f11e76]

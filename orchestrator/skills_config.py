@@ -4,20 +4,21 @@ Patterns from sample-strands-agents-agentskills:
 - Pattern 2: ``create_skill_tool`` → inline ``skill(skill_name)`` (progressive disclosure)
 - Pattern 3: ``create_skill_agent_tool`` → ``use_skill(skill_name, request)`` (isolated sub-agent)
 
-Skills directory defaults to sibling ``../../strands-tools/skills``; override with ``SKILLS_DIR``.
-``configure_skills`` registers names for graph ``skill_agent`` nodes (``strands_graph_tool``).
+Skills directory defaults to ``../../strands-tools/src/skills``; override with ``SKILLS_DIR``.
+``configure_skills`` registers names for graph ``skill_agent`` nodes (``graph_tool``).
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from strands_graph_tool import configure_skills
+from graph_tool import configure_skills
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +26,11 @@ _ROOT = Path(__file__).resolve().parent
 _REPO_ROOT = _ROOT.parent
 _STRANDS_TOOLS = _REPO_ROOT.parent / "strands-tools"
 
-# Intended catalog (AGENTS.md). ``src/skills`` is a skills-CLI dump — load_tool
-# can open a specific file there; discover_skills must not walk it at startup.
-_DEFAULT_SKILLS_DIRS = ((_STRANDS_TOOLS / "skills").resolve(),)
+# User-supplied catalog: the skills-CLI dump at ``src/skills`` IS the collection
+# (supersedes the earlier plan of a curated sibling ``skills`` root, which was
+# never created). discover_skills walks it once per process; entries missing
+# required metadata are logged and skipped by the agentskills validator.
+_DEFAULT_SKILLS_DIRS = ((_STRANDS_TOOLS / "src" / "skills").resolve(),)
 
 # Vendored agentskills (aws-samples/sample-strands-agents-agentskills layout).
 # Optional: when neither location is present the skills catalog is simply
@@ -65,6 +68,48 @@ def _import_agentskills() -> Any | None:
             )
             _import_agentskills._warned = True  # type: ignore[attr-defined]
         return None
+    # Imported SKILL.md headers include flow collections and free-text fields.
+    # Adapt the pinned SDK's parser for discovery AND instruction loading;
+    # never rewrite the installed Markdown or reject it for optional metadata.
+    from agentskills import parser
+
+    if not getattr(parser._parse_skill_md, "_supports_flow", False):
+        original = parser._parse_skill_md
+
+        def parse_skill_md(content: str) -> tuple[dict, str]:
+            try:
+                return original(content)
+            except parser.ParseError:
+                match = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", content, re.DOTALL)
+                if match is None:
+                    raise
+                try:
+                    data = parser.strictyaml.dirty_load(match[1], allow_flow_style=True).data
+                except parser.strictyaml.YAMLError:
+                    # Only these fields drive the skill loader. Other imported
+                    # metadata may be prose, duplicate keys, or vendor-specific.
+                    data = {}
+                    fields = list(re.finditer(r"^([\w-]+):", match[1], re.MULTILINE))
+                    for index, field in enumerate(fields):
+                        key = field[1]
+                        if key not in {"name", "description", "license", "compatibility", "allowed-tools", "metadata"}:
+                            continue
+                        end = fields[index + 1].start() if index + 1 < len(fields) else len(match[1])
+                        block = match[1][field.start():end]
+                        try:
+                            data.update(parser.strictyaml.dirty_load(block, allow_flow_style=True).data)
+                        except parser.strictyaml.YAMLError:
+                            text = block.split(":", 1)[1].strip()
+                            if key in {"name", "description"} and text and text[0] not in "[{|>\"'!&*":
+                                data[key] = text
+                if not isinstance(data, dict):
+                    raise parser.ParseError("SKILL.md frontmatter must be a mapping")
+                if isinstance(data.get("metadata"), dict):
+                    data["metadata"] = {str(k): str(v) for k, v in data["metadata"].items()}
+                return data, match[2].strip()
+
+        parse_skill_md._supports_flow = True
+        parser._parse_skill_md = parse_skill_md
     return agentskills
 
 
@@ -79,18 +124,22 @@ def skills_dir() -> Path:
 
 
 def _dedupe_skills(skills: list[Any]) -> list[Any]:
-    """Keep one entry per skill name (last discovery wins — log duplicates)."""
+    """Prefer canonical directory names, then stable path order, without spam."""
     by_name: dict[str, Any] = {}
-    for skill in skills:
+    for skill in sorted(skills, key=lambda s: (
+        Path(s.path).parent.name != s.name, str(s.path),
+    )):
         prior = by_name.get(skill.name)
         if prior is not None and prior.path != skill.path:
-            logger.warning(
+            logger.debug(
                 "duplicate skill name %r: keeping %s over %s",
                 skill.name,
-                skill.path,
                 prior.path,
+                skill.path,
             )
-        by_name[skill.name] = skill
+        by_name.setdefault(skill.name, skill)
+    if len(skills) != len(by_name):
+        logger.info("Resolved %d duplicate skill entries to canonical paths", len(skills) - len(by_name))
     return sorted(by_name.values(), key=lambda s: s.name)
 
 
@@ -119,10 +168,59 @@ def discovered_skills() -> tuple[Any, ...]:
 
 
 def skill_subagent_tools() -> list[Any]:
-    """Tools isolated skill sub-agents may call (Pattern 3 example parity)."""
-    from strands_tools import file_read, file_write
+    """Tools isolated skill sub-agents may call (Pattern 3 example parity).
 
-    return [file_read, file_write]
+    ``shell`` reads ``references/`` and runs non-Python ``scripts/``;
+    ``python_repl`` runs Python scripts. ``file_read``/``file_write`` were
+    removed from the install as redundant with these.
+    """
+    from strands_tools import python_repl, shell
+
+    return [shell, python_repl]
+
+
+def skill_resource_note(skill_name: str, skill_dir: str | Path | None = None) -> str:
+    """Absolute ``references/`` and ``scripts/`` paths for one skill.
+
+    Official ``scan_skill_resources`` lists those files. The skill agent
+    reads references with ``shell`` and runs a relevant script with
+    ``python_repl`` or ``shell``. Skills with neither directory get no note.
+    ``skill_dir`` is the skill the caller already resolved. Without it the
+    name is looked up in the discovered catalog.
+    """
+    if skill_dir is not None:
+        root = Path(skill_dir)
+    else:
+        matches = [skill for skill in discovered_skills() if skill.name == skill_name]
+        if not matches:
+            return ""
+        root = Path(matches[0].skill_dir)
+    from agentskills.tool_utils import scan_skill_resources
+    references: list[Path] = []
+    scripts: list[Path] = []
+    for item in scan_skill_resources(root):
+        path = Path(item)
+        try:
+            parts = path.relative_to(root).parts
+        except ValueError:
+            continue
+        if "references" in parts:
+            references.append(path)
+        elif "scripts" in parts:
+            scripts.append(path)
+    lines: list[str] = []
+    if references:
+        lines.append(
+            "References. Read these with shell (cat) and use them as the knowledge base for this task:"
+        )
+        lines.extend(f"- {path}" for path in references)
+    if scripts:
+        lines.append(
+            "Scripts. When one of these is relevant to the task, run it with "
+            "python_repl if it is Python, otherwise with shell. Do not rewrite it:"
+        )
+        lines.extend(f"- {path}" for path in scripts)
+    return "\n".join(lines)
 
 
 def ensure_skills_configured(model_factory: Any | None = None) -> int:
@@ -137,56 +235,159 @@ def ensure_skills_configured(model_factory: Any | None = None) -> int:
     return len(skills)
 
 
-def skills_system_prompt_suffix() -> str:
-    """Compact catalog header — full list via ``list_skills`` tool."""
-    skills = discovered_skills()
-    directory = skills_dir()
-    if not skills:
-        return (
-            "\n\n## Agent Skills\n"
-            f"No skills discovered at `{directory}`. "
-            "Install with `pnpm skills:add owner/repo` or set `SKILLS_DIR`.\n"
-        )
-    loader = _ROOT / "skills_loader.py"
-    return (
-        "\n\n## Agent Skills\n"
-        f"{len(skills)} skills registered under `{directory}`.\n"
-        f"- **Discover**: `load_tool(path=\"{loader}\", name=\"list_skills\")` "
-        "then call `list_skills`.\n"
-        f"- **Pattern 2 (inline)**: `load_tool(path=\"{loader}\", name=\"skill\")` "
-        "then `skill(skill_name=...)` loads full instructions into your context.\n"
-        "- **Pattern 3 (meta-tool)**: permanent `use_skill(skill_name, request)` runs an "
-        "isolated sub-agent with the skill's SKILL.md as system prompt.\n"
-        "- **Graph formations**: `skill_agent` nodes reference skill names from the registry "
-        "(same names as `list_skills`).\n"
-        "- **Install more**: `pnpm skills:add <owner/repo>` (npx skills CLI).\n"
+def resolve_skills(skill_names: list[str]) -> list[Any]:
+    """The catalog entries for the given names, in the given order.
+
+    Validation is the reference's own: ``agentskills.tool_utils.
+    validate_skill_name`` raises ``SkillNotFoundError`` (listing the
+    available names) for anything not in the discovered catalog.
+    """
+    agentskills = _import_agentskills()
+    if agentskills is None:
+        raise SkillsUnavailable("agentskills is not installed; Agent Skills are disabled")
+    from agentskills.tool_utils import validate_skill_name
+
+    skill_map = {skill.name: skill for skill in discovered_skills()}
+    return [validate_skill_name(name, skill_map) for name in skill_names]
+
+
+def skills_prompt(skill_names: list[str] | None = None) -> str:
+    """The reference Phase-1 catalog prompt: ``agentskills.generate_skills_prompt``.
+
+    Exact aws-samples/sample-strands-agents-agentskills wiring (examples 2
+    and 3): every skill's name, description, and SKILL.md location in an
+    ``<available_skills>`` XML block plus the ``<skills_instructions>``
+    usage policy. ``skill_names`` scopes the catalog to that subset (same
+    reference function over fewer skills). Empty string when the package or
+    catalog is unavailable.
+    """
+    agentskills = _import_agentskills()
+    if agentskills is None:
+        return ""
+    skills = (
+        resolve_skills(skill_names)
+        if skill_names is not None
+        else list(discovered_skills())
     )
+    return agentskills.generate_skills_prompt(skills)
 
 
-def augmented_system_prompt(base: str) -> str:
-    return base.rstrip() + skills_system_prompt_suffix()
+@lru_cache(maxsize=1)
+def catalog_skills() -> tuple[Any, ...]:
+    """The catalog as official ``strands.Skill`` instances, loaded once per process.
+
+    ``Skill.from_directory`` walks ``skills_dir()`` on the worker (never inside
+    workflow code) and returns sandbox-independent ``Skill`` objects whose
+    instructions are already in memory. Empty tuple when the directory is
+    missing (optional infrastructure, telemetry.py convention).
+    """
+    from strands import Skill
+
+    directory = skills_dir()
+    if not directory.is_dir():
+        logger.warning("skills directory missing: %s", directory)
+        return ()
+    # Per-skill resilience, as the plugin's own ``_load_skill_paths`` does:
+    # one malformed SKILL.md is logged and skipped, never aborts its siblings
+    # (``Skill.from_directory`` only tolerates ValueError/FileNotFoundError,
+    # and two catalog entries raise ``yaml.ScannerError``).
+    skills: list[Any] = []
+    for child in sorted(directory.iterdir()):
+        if not child.is_dir() or not any((child / name).is_file() for name in ("SKILL.md", "skill.md")):
+            continue
+        try:
+            skills.append(Skill.from_file(child))
+        except Exception as error:  # noqa: BLE001 - a broken SKILL.md must not kill the catalog
+            logger.warning("path=<%s> | skipping skill: %s", child, error)
+    logger.info("loaded %d strands Skill entries from %s", len(skills), directory)
+    return tuple(skills)
 
 
-def create_inline_skill_tool() -> Any:
-    """Pattern 2: ``skill(skill_name)`` factory product."""
+def agent_skills_plugin(skill_names: list[str] | None = None) -> Any:
+    """The official ``strands.AgentSkills`` plugin over the catalog.
+
+    https://strandsagents.com/docs/user-guide/concepts/plugins/skills
+
+    Used ONLY for scoped nested agents (``use_agent(skills=[...])``). The
+    plugin injects a name/description ``<available_skills>`` block on
+    ``BeforeInvocationEvent`` and returns a skill's full SKILL.md only when the
+    model calls its ``skills`` tool. The orchestrator itself never carries the
+    catalog: ~700 skills is ~300KB of metadata per model call. Skills run
+    through the permanent ``use_skill`` activity.
+
+    Skills are supplied as ``Skill`` instances (``catalog_skills``), the
+    plugin's sandbox-independent source: filesystem paths would be read
+    through ``agent.sandbox`` inside workflow code, which Temporal forbids.
+
+    ``skill_names`` scopes the plugin to that subset; an unknown name raises
+    ``LookupError`` listing the available names.
+    """
+    from strands import AgentSkills
+
+    skills = list(catalog_skills())
+    if skill_names is not None:
+        by_name = {skill.name: skill for skill in skills}
+        missing = [name for name in skill_names if name not in by_name]
+        if missing:
+            raise LookupError(
+                f"unknown skill(s) {missing!r}; available: {sorted(by_name)}"
+            )
+        skills = [by_name[name] for name in skill_names]
+    return AgentSkills(skills=skills)
+
+
+def create_inline_skill_tool(skill_names: list[str] | None = None) -> Any:
+    """Pattern 2: ``skill(skill_name)`` factory product.
+
+    ``skill_names`` scopes the tool to that subset of the catalog — the
+    factory's ``skills`` list IS the tool's whole universe (reference
+    ``create_skill_tool`` builds its ``skill_map`` from it), so a scoped
+    tool can only ever load the assigned skills' instructions.
+    """
     agentskills = _import_agentskills()
     if agentskills is None:
         raise SkillsUnavailable("agentskills is not installed; Agent Skills are disabled")
 
-    return agentskills.create_skill_tool(list(discovered_skills()), skills_dir())
+    skills = (
+        resolve_skills(skill_names)
+        if skill_names is not None
+        else list(discovered_skills())
+    )
+    return agentskills.create_skill_tool(skills, skills_dir())
 
 
-def create_use_skill_tool(model: Any) -> Any:
-    """Pattern 3: ``use_skill(skill_name, request)`` factory product."""
+def create_use_skill_tool(
+    model: Any,
+    assigned_skills: list[str] | None = None,
+    tools: list[Any] | None = None,
+) -> Any:
+    """Pattern 3: ``use_skill(skill_name, request)`` factory product.
+
+    ``assigned_skills`` names skills the caller assigns to each skill
+    sub-agent as **inline tools** (Pattern 2): the sub-agent gets a scoped
+    ``skill(skill_name)`` tool plus those skills' catalog metadata, and
+    consumes them in its own context — the reference ``additional_tools``
+    parameter, filled with the reference ``create_skill_tool`` product.
+
+    ``tools`` are parent-registry entries (tool objects or the recorded
+    file of a ``load_tool``-ed name) the caller assigns to each skill
+    sub-agent on top of the reference tools (``shell``, ``python_repl``) —
+    the same ``additional_tools`` slot.
+    """
     agentskills = _import_agentskills()
     if agentskills is None:
         raise SkillsUnavailable("agentskills is not installed; Agent Skills are disabled")
 
+    additional_tools = skill_subagent_tools()
+    if assigned_skills:
+        additional_tools.append(create_inline_skill_tool(assigned_skills))
+    if tools:
+        additional_tools.extend(tools)
     return agentskills.create_skill_agent_tool(
         list(discovered_skills()),
         skills_dir(),
         base_agent_model=model,
-        additional_tools=skill_subagent_tools(),
+        additional_tools=additional_tools,
     )
 
 

@@ -14,20 +14,24 @@ https://developers.google.com/maps/documentation/javascript/reference/places-wid
 from __future__ import annotations
 
 import base64
-import copy
 import json
 import mimetypes
 from collections.abc import AsyncGenerator
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any
 
 from google import genai
 from strands.models.gemini import GeminiModel as _GeminiModel
 from strands.types.content import ContentBlock, Messages
-from strands.types.exceptions import ContextWindowOverflowException, ModelThrottledException
 from strands.types.streaming import StreamEvent
 from strands.types.tools import ToolChoice, ToolSpec
+from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
-from computer_use_activity import COMPUTER_USE_TOOL_NAMES, capture_page_png
+from desktop_observation import latest_observation, resolve_observation
+from desktop_provision_activity import session_artifact_root
+from workspace_state import StateConflict
 
 
 def _unwrap_activity_payload(text: str) -> dict[str, Any]:
@@ -143,26 +147,112 @@ def search_from_grounding(event: object) -> dict[str, Any] | None:
     return payload
 
 
+class _GroundingTapModels:
+    """``client.aio.models`` proxy that taps grounding metadata off raw events."""
+
+    def __init__(self, models: Any, sink: dict[str, Any]) -> None:
+        self._models = models
+        self._sink = sink
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._models, name)
+
+    async def generate_content_stream(self, **kwargs: Any) -> AsyncGenerator[Any, None]:
+        response = await self._models.generate_content_stream(**kwargs)
+
+        async def tapped() -> AsyncGenerator[Any, None]:
+            async for event in response:
+                maps = maps_from_grounding(event)
+                if maps is not None:
+                    self._sink["maps"] = maps
+                search = search_from_grounding(event)
+                if search is not None:
+                    self._sink["search"] = search
+                yield event
+
+        return tapped()
+
+
+class _GroundingTapAio:
+    def __init__(self, aio: Any, sink: dict[str, Any]) -> None:
+        self._aio = aio
+        self.models = _GroundingTapModels(aio.models, sink)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._aio, name)
+
+
+class _GroundingTapClient:
+    """Proxy around ``genai.Client`` that observes grounding metadata.
+
+    The parent stream loop drops ``candidates[0].grounding_metadata``; this
+    proxy records the latest maps/search grounding on ``sink`` while yielding
+    every raw event unchanged, so the parent frames are byte-identical.
+    """
+
+    def __init__(self, client: genai.Client, sink: dict[str, Any]) -> None:
+        self._client = client
+        self.aio = _GroundingTapAio(client.aio, sink)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+
+@dataclass
+class _Invocation:
+    """Per-turn stream state: reasoning effort and the grounding tap sink."""
+
+    grounding: dict[str, Any] = field(default_factory=dict)
+    effort: str | None = None
+
+
 class GeminiModel(_GeminiModel):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        # Temporal's ModelActivity caches one model instance per name per
+        # worker. Per-turn effort and grounding must not leak across
+        # concurrent sessions sharing that instance.
+        self._invocation: ContextVar[_Invocation | None] = ContextVar(
+            "gemini_invocation", default=None
+        )
+        super().__init__(*args, **kwargs)
+
     def _format_request_content(self, messages: Messages) -> list[genai.types.Content]:
-        names: dict[str, str] = {}
-        last_cu: str | None = None
-        for message in messages:
-            for block in message.get("content") or []:
-                if not isinstance(block, dict):
-                    continue
-                if "toolUse" in block:
-                    names[block["toolUse"]["toolUseId"]] = block["toolUse"]["name"]
-                result = block.get("toolResult")
-                if result:
-                    tool_use_id = result["toolUseId"]
-                    if names.get(tool_use_id) in COMPUTER_USE_TOOL_NAMES:
-                        last_cu = tool_use_id
-        self._latest_cu_tool_result_id = last_cu
+        contents = super()._format_request_content(messages)
         try:
-            return super()._format_request_content(messages)
-        finally:
-            self._latest_cu_tool_result_id = None
+            observation = latest_observation(messages)
+            if observation:
+                call_id, name, ref = observation
+                info = activity.info()
+                if not info.workflow_id:
+                    raise ValueError("Desktop observation requires a workflow identity")
+                png = resolve_observation(
+                    ref, namespace=info.namespace, workflow_id=info.workflow_id,
+                    root=session_artifact_root(info.workflow_id),
+                )
+        except (OSError, ValueError, StateConflict, RuntimeError) as error:
+            raise ApplicationError(
+                "Desktop observation unavailable; obtain a fresh screenshot",
+                type="DesktopObservationUnavailable", non_retryable=True,
+            ) from error
+        if observation:
+            if name == "browser":
+                contents.append(genai.types.Content(role="user", parts=[
+                    genai.types.Part(text=f"Desktop screenshot from tool call {call_id}"),
+                    genai.types.Part.from_bytes(data=png, mime_type="image/png"),
+                ]))
+            else:
+                # Gemini's native Computer Use contract requires pixels on the
+                # corresponding FunctionResponse, never captured on this host.
+                for content in reversed(contents):
+                    for part in content.parts or []:
+                        response = part.function_response
+                        if response is not None and response.id == call_id:
+                            response.parts = [genai.types.FunctionResponsePart.from_bytes(
+                                data=png, mime_type="image/png",
+                            )]
+                            return contents
+                raise ValueError("Desktop observation has no matching function response")
+        return contents
 
     def _computer_use_function_response(
         self,
@@ -185,23 +275,12 @@ class GeminiModel(_GeminiModel):
             parsed.pop("screenshot", None)
             parsed.pop("mediaType", None)
             payload.update(parsed)
-        png = None
-        if tool_use_id == getattr(self, "_latest_cu_tool_result_id", None):
-            png, page_url = capture_page_png()
-            if page_url:
-                payload["url"] = page_url
         response = payload or {"url": ""}
-        parts = (
-            [genai.types.FunctionResponsePart.from_bytes(data=png, mime_type="image/png")]
-            if png
-            else None
-        )
         return genai.types.Part(
             function_response=genai.types.FunctionResponse(
                 id=tool_use_id,
                 name=function_name,
                 response=response,
-                parts=parts,
             )
         )
 
@@ -217,6 +296,14 @@ class GeminiModel(_GeminiModel):
                     mime_type=mime,
                 ),
             )
+        if "document" in content:
+            fmt = content["document"]["format"]
+            return genai.types.Part(
+                inline_data=genai.types.Blob(
+                    data=_blob_bytes(content["document"]["source"]["bytes"]),
+                    mime_type=mimetypes.types_map.get(f".{fmt}", "application/octet-stream"),
+                ),
+            )
         if "video" in content:
             fmt = content["video"]["format"]
             mime = mimetypes.types_map.get(f".{fmt}", f"video/{fmt}")
@@ -227,6 +314,8 @@ class GeminiModel(_GeminiModel):
                 ),
             )
         if "toolResult" in content:
+            from computer_use_activity import COMPUTER_USE_TOOL_NAMES
+
             tool_use_id = content["toolResult"]["toolUseId"]
             function_name = tool_use_id_to_name.get(tool_use_id, tool_use_id)
             if function_name in COMPUTER_USE_TOOL_NAMES:
@@ -242,12 +331,43 @@ class GeminiModel(_GeminiModel):
         navigate. Custom FunctionDeclarations are only for other tools
         (https://ai.google.dev/gemini-api/docs/generate-content/computer-use).
         """
+        from computer_use_activity import COMPUTER_USE_TOOL_NAMES
+
         filtered = [
             spec
             for spec in (tool_specs or [])
             if spec.get("name") not in COMPUTER_USE_TOOL_NAMES
         ]
         return super()._format_request_tools(filtered or None)
+
+    def _format_request_config(
+        self,
+        tool_specs: list[ToolSpec] | None,
+        system_prompt: str | None,
+        params: dict[str, Any] | None,
+    ) -> genai.types.GenerateContentConfig:
+        """Merge per-turn ``reasoning_effort`` into ``thinking_config``.
+
+        https://ai.google.dev/gemini-api/docs/thinking#set-budget
+        """
+        state = self._invocation.get()
+        effort = state.effort if state is not None else None
+        if effort is not None:
+            thinking = (params or {}).get("thinking_config") or {}
+            if isinstance(thinking, genai.types.ThinkingConfig):
+                thinking = thinking.model_dump(exclude_none=True)
+            params = {
+                **(params or {}),
+                "thinking_config": {**thinking, "thinking_level": effort},
+            }
+        return super()._format_request_config(tool_specs, system_prompt, params)
+
+    def _get_client(self) -> genai.Client:
+        state = self._invocation.get()
+        # Outside a stream turn (e.g. structured_output) no one consumes the
+        # sink; the tap writes into a throwaway dict.
+        sink = state.grounding if state is not None else {}
+        return _GroundingTapClient(super()._get_client(), sink=sink)  # type: ignore[return-value]
 
     async def stream(
         self,
@@ -257,90 +377,29 @@ class GeminiModel(_GeminiModel):
         tool_choice: ToolChoice | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[StreamEvent, None]:
-        # Identical to strands.models.gemini.GeminiModel.stream except we keep
-        # GroundingMetadata across chunks. generateContent docs put maps sources
-        # on candidates[0].grounding_metadata.grounding_chunks[].maps
-        # (title, uri, placeId) — the last stream event is often usage-only.
+        # Delegate frame production to the parent stream; the grounding tap
+        # client records maps/search GroundingMetadata that the parent loop
+        # drops (candidates[0].grounding_metadata — the last stream event is
+        # often usage-only), and we append it as trailing {"gemini": …} frames.
         # https://ai.google.dev/gemini-api/docs/generate-content/maps-grounding
-        params = copy.deepcopy(self.config.get("params") or {})
-        effort = (kwargs.get("invocation_state") or {}).get("reasoning_effort")
-        if effort is not None:
-            thinking = params.get("thinking_config") or {}
-            if isinstance(thinking, genai.types.ThinkingConfig):
-                thinking = thinking.model_dump(exclude_none=True)
-            params["thinking_config"] = {**thinking, "thinking_level": effort}
-        request = self._format_request(messages, tool_specs, system_prompt, params)
-        client = self._get_client().aio
+        # A fresh sink per turn: a replayed activity attempt or a concurrent
+        # session on the same cached instance must not surface the previous
+        # turn's grounding frames or effort.
+        state = _Invocation(
+            effort=(kwargs.get("invocation_state") or {}).get("reasoning_effort")
+        )
+        token = self._invocation.set(state)
         try:
-            response = await client.models.generate_content_stream(**request)
-            yield self._format_chunk({"chunk_type": "message_start"})
-            data_type: str | None = None
-            tool_used = False
-            candidate = None
-            event = None
-            maps = None
-            search = None
-            async for event in response:
-                found_maps = maps_from_grounding(event)
-                if found_maps:
-                    maps = found_maps
-                found_search = search_from_grounding(event)
-                if found_search:
-                    search = found_search
-                candidates = event.candidates
-                candidate = candidates[0] if candidates else None
-                content = candidate.content if candidate else None
-                parts = content.parts if content and content.parts else []
-                # Thought tokens must stream before tool-use frames so the SSE
-                # bridge can emit reasoning-delta before tool-input-start closes
-                # the open reasoning block during native Computer Use loops.
-                for part in parts:
-                    if part.text:
-                        new_data_type = "reasoning_content" if part.thought else "text"
-                        if new_data_type != data_type:
-                            if data_type is not None:
-                                yield self._format_chunk({"chunk_type": "content_stop", "data_type": data_type})
-                            yield self._format_chunk({"chunk_type": "content_start", "data_type": new_data_type})
-                            data_type = new_data_type
-                        yield self._format_chunk(
-                            {
-                                "chunk_type": "content_delta",
-                                "data_type": data_type,
-                                "data": part,
-                            },
-                        )
-                    if part.function_call:
-                        if data_type is not None:
-                            yield self._format_chunk({"chunk_type": "content_stop", "data_type": data_type})
-                            data_type = None
-                        yield self._format_chunk({"chunk_type": "content_start", "data_type": "tool", "data": part})
-                        yield self._format_chunk({"chunk_type": "content_delta", "data_type": "tool", "data": part})
-                        yield self._format_chunk({"chunk_type": "content_stop", "data_type": "tool", "data": part})
-                        tool_used = True
-            if data_type is not None:
-                yield self._format_chunk({"chunk_type": "content_stop", "data_type": data_type})
-            yield self._format_chunk(
-                {
-                    "chunk_type": "message_stop",
-                    "data": "TOOL_USE" if tool_used else (candidate.finish_reason if candidate else "STOP"),
-                }
-            )
-            if search:
+            async for chunk in super().stream(
+                messages, tool_specs, system_prompt, tool_choice, **kwargs
+            ):
+                yield chunk
+            if search := state.grounding.get("search"):
                 yield {"gemini": search}  # type: ignore[typeddict-item]
-            if maps:
+            if maps := state.grounding.get("maps"):
                 yield {"gemini": maps}  # type: ignore[typeddict-item]
-            if event:
-                yield self._format_chunk({"chunk_type": "metadata", "data": event.usage_metadata})
-        except genai.errors.ClientError as error:
-            match error.status:
-                case "RESOURCE_EXHAUSTED" | "UNAVAILABLE":
-                    raise ModelThrottledException(error.message or str(error)) from error
-                case "INVALID_ARGUMENT":
-                    if error.message and "exceeds the maximum number of tokens" in error.message:
-                        raise ContextWindowOverflowException(error.message) from error
-                    raise error
-                case _:
-                    raise error
+        finally:
+            self._invocation.reset(token)
 
 
 __all__ = ["GeminiModel", "maps_from_grounding", "search_from_grounding"]

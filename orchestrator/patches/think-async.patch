@@ -1,0 +1,112 @@
+--- a/think.py
++++ b/think.py
+@@ -99,11 +99,12 @@
++import io
+ import logging
+ import os
+ import traceback
+-import uuid
+ from typing import Any, Dict, List, Optional
+ 
+ from rich.console import Console
+ from strands import Agent, tool
++from strands.types.tools import ToolContext
+ from strands.telemetry.metrics import metrics_to_string
+ from typing_extensions import deprecated
+ 
+@@ -124,5 +125,4 @@
+         self.system_prompt = tool_context.get("system_prompt", "")
+         self.messages = tool_context.get("messages", [])
+-        self.tool_use_id = str(uuid.uuid4())
+         self.console = console
+ 
+@@ -161,7 +162,7 @@
+ """
+         return prompt.strip()
+ 
+-    def process_cycle(
++    async def process_cycle(
+         self,
+         thought: str,
+         cycle: int,
+@@ -253,7 +254,7 @@
+         logger.debug(f"--- Model Info ---\n{model_info}\n")
+ 
+         # Initialize the new Agent with selected model
+-        agent = Agent(
++        agent = kwargs.get("agent_factory", Agent)(
+             model=selected_model,
+             messages=[],
+             tools=filtered_tools,
+@@ -263,7 +264,9 @@
+         )
+ 
+         # Run the agent with the provided prompt
+-        result = agent(prompt)
++        result = await agent.invoke_async(prompt, invocation_state=dict(kwargs.get("invocation_state") or {}))
++        if kwargs.get("interrupt_handler"):
++            result = await kwargs["interrupt_handler"](agent, result, kwargs.get("invocation_state"))
+ 
+         # Extract response
+         assistant_response = str(result)
+@@ -285,15 +287,15 @@
+ # invocation path is suppressed by Python's default warning filter. The message is
+ # spelled out here rather than passed as _DEPRECATION_MESSAGE because mypy only
+ # reports @deprecated when the argument is a string literal.
+-@tool
++@tool(context=True)
+ @deprecated(
+     "think is deprecated. This warning becomes an error log in v0.9.0. Migration path: enable native "
+     "extended thinking through your model provider's reasoning config instead of a tool. See "
+     "https://strandsagents.com/docs/user-guide/concepts/model-providers/amazon-bedrock/"
+ )
+-def think(
++async def think(
+     thought: str,
+-    cycle_count: int,
+-    system_prompt: str,
++    cycle_count: int = 3,
++    system_prompt: str = "",
+     tools: Optional[List[str]] = None,
+     model_provider: Optional[str] = None,
+@@ -300,6 +303,7 @@
+     model_settings: Optional[Dict[str, Any]] = None,
+     thinking_system_prompt: Optional[str] = None,
+     agent: Optional[Any] = None,
++    tool_context: Optional[ToolContext] = None,
+ ) -> Dict[str, Any]:
+     """Process a thought through multiple recursive thinking cycles for deep analysis.
+ 
+@@ -337,5 +340,5 @@
+     logger.warning("DEPRECATION WARNING: %s", _DEPRECATION_MESSAGE)
+ 
+-    console = console_util.create()
++    console = Console(file=io.StringIO())
+ 
+     try:
+@@ -346,7 +350,15 @@
+                 "You are an expert analytical thinker. Process the thought deeply and provide clear insights."
+             )
+ 
+-        kwargs = {"agent": agent}
++        state = tool_context.invocation_state if tool_context else {}
++        if state.get("think_agent_factory") and (model_provider is not None or model_settings is not None):
++            raise ValueError("Durable Think inherits the session model; switch models on the session turn")
++        kwargs = {
++            "agent": agent,
++            "agent_factory": state.get("think_agent_factory", Agent),
++            "interrupt_handler": state.get("think_interrupt_handler"),
++            "invocation_state": state,
++        }
+         # Create thought processor instance with the available context
+         processor = ThoughtProcessor(kwargs, console)
+ 
+@@ -361,7 +373,7 @@
+             if "thought" in cycle_kwargs:
+                 del cycle_kwargs["thought"]  # Prevent duplicate 'thought' parameter
+ 
+-            cycle_response = processor.process_cycle(
++            cycle_response = await processor.process_cycle(
+                 current_thought,
+                 cycle,
+                 cycle_count,

@@ -1,0 +1,152 @@
+- generic [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: v0 / studio
+      - navigation [ref=e9]:
+        - button "Community" [ref=e10]
+        - button "Pricing" [ref=e11]
+        - button "Enterprise" [ref=e12]
+        - button "Docs" [ref=e13]
+      - generic [ref=e14]:
+        - button "Compare models" [ref=e15] [cursor=pointer]
+        - button "Sign in" [ref=e16]
+        - button "Start building" [ref=e17]
+    - generic [ref=e79]:
+      - log [ref=e80]:
+        - generic [ref=e82]:
+          - paragraph [ref=e87]: "Immediately call your graph tool (action execute, graph_id verify-008, task: each leaf replies one word) with nested topology: parallel container \"researchers\" holding leaves r1 and r2; graph container \"pipeline\" holding leaf \"transform\" and nested graph \"subgraph\" (holding leaf \"inner\") with edge transform->subgraph; parallel container \"fanout\" holding leaf f1; top-level edges researchers->pipeline and pipeline->fanout. Call the tool, wait for it, then say done."
+          - generic [ref=e91]:
+            - button "Thinking…" [expanded] [ref=e93]
+            - generic [ref=e106]:
+              - generic [ref=e141]:
+                - generic [ref=e142]: Thinking
+                - generic [ref=e143]:
+                  - paragraph [ref=e144]:
+                    - text: "FINDINGS: The requested"
+                    - code [ref=e145]: graph
+                    - text: tool is not available in this session, so the topology was not executed. [HIGH]
+                  - paragraph [ref=e146]:
+                    - text: "CONFIDENCE: high — no callable"
+                    - code [ref=e147]: graph
+                    - text: tool is exposed.
+                  - paragraph [ref=e148]:
+                    - text: "GAPS: Graph execution requires the orchestration runtime to expose the"
+                    - code [ref=e149]: graph
+                    - text: tool.
+                  - paragraph [ref=e150]:
+                    - text: "NEXT ACTION: MORE_TOOLS: Enable"
+                    - code [ref=e151]: graph
+                    - text: ", then call it once with"
+                    - code [ref=e152]: action="execute"
+                    - text: ","
+                    - code [ref=e153]: graph_id="verify-008"
+                    - text: ", the specified nested topology, and task"
+                    - code [ref=e154]: "\"each leaf replies one word\""
+                    - text: .
+              - generic [ref=e160]:
+                - generic [ref=e161]: graph
+                - generic [ref=e162]:
+                  - button "graph Completed" [expanded] [ref=e163]:
+                    - generic [ref=e164]:
+                      - generic [ref=e167]: graph
+                      - generic [ref=e168]: Completed
+                  - generic [ref=e171]:
+                    - generic [ref=e172]:
+                      - heading "Parameters" [level=4] [ref=e173]
+                      - code [ref=e178]:
+                        - generic [ref=e179]: "{"
+                        - generic [ref=e180]: "\"action\": \"execute\","
+                        - generic [ref=e181]: "\"graph_id\": \"verify-008\","
+                        - generic [ref=e182]: "\"model_provider\": \"/agent\","
+                        - generic [ref=e183]: "\"model_settings\": {},"
+                        - generic [ref=e184]: "\"task\": \"each leaf replies one word\","
+                        - generic [ref=e185]: "\"tools\": [],"
+                        - generic [ref=e186]: "\"topology\": {}"
+                        - generic [ref=e187]: "}"
+                    - generic [ref=e188]:
+                      - heading "Result" [level=4] [ref=e189]
+                      - code [ref=e194]:
+                        - generic [ref=e195]: "{\"status\": \"error\", \"content\": [{\"text\": \"Graph verify-008 not found\"}], \"toolUseId\": \"5\"}"
+              - generic [ref=e201]:
+                - generic [ref=e202]: graph
+                - generic [ref=e203]:
+                  - button "graph Completed" [expanded] [ref=e204]:
+                    - generic [ref=e205]:
+                      - generic [ref=e208]: graph
+                      - generic [ref=e209]: Completed
+                  - generic [ref=e212]:
+                    - generic [ref=e213]:
+                      - heading "Parameters" [level=4] [ref=e214]
+                      - code [ref=e219]:
+                        - generic [ref=e220]: "{"
+                        - generic [ref=e221]: "\"action\": \"execute\","
+                        - generic [ref=e222]: "\"graph_id\": \"verify-008\","
+                        - generic [ref=e223]: "\"model_provider\": \"/agent\","
+                        - generic [ref=e224]: "\"model_settings\": {},"
+                        - generic [ref=e225]: "\"task\": \"Each leaf replies with exactly one word.\","
+                        - generic [ref=e226]: "\"tools\": [],"
+                        - generic [ref=e227]: "\"topology\": {}"
+                        - generic [ref=e228]: "}"
+                    - generic [ref=e229]:
+                      - heading "Result" [level=4] [ref=e230]
+                      - code [ref=e235]:
+                        - generic [ref=e236]: "{\"status\": \"error\", \"content\": [{\"text\": \"Graph verify-008 not found\"}], \"toolUseId\": \"8\"}"
+              - generic [ref=e242]:
+                - generic [ref=e243]: graph
+                - generic [ref=e244]:
+                  - button "graph Completed" [expanded] [ref=e245]:
+                    - generic [ref=e246]:
+                      - generic [ref=e249]: graph
+                      - generic [ref=e250]: Completed
+                  - generic [ref=e253]:
+                    - generic [ref=e254]:
+                      - heading "Parameters" [level=4] [ref=e255]
+                      - code [ref=e260]:
+                        - generic [ref=e261]: "{"
+                        - generic [ref=e262]: "\"action\": \"execute\","
+                        - generic [ref=e263]: "\"graph_id\": \"verify-008\","
+                        - generic [ref=e264]: "\"model_provider\": \"openai/gpt-5.4\","
+                        - generic [ref=e265]: "\"model_settings\": {},"
+                        - generic [ref=e266]: "\"task\": \"Each leaf replies one word.\","
+                        - generic [ref=e267]: "\"tools\": [],"
+                        - generic [ref=e268]: "\"topology\": {}"
+                        - generic [ref=e269]: "}"
+                    - generic [ref=e270]:
+                      - heading "Result" [level=4] [ref=e271]
+                      - code [ref=e276]:
+                        - generic [ref=e277]: "{\"status\": \"error\", \"content\": [{\"text\": \"Graph verify-008 not found\"}], \"toolUseId\": \"11\"}"
+              - generic [ref=e283]:
+                - generic [ref=e284]: graph
+                - generic [ref=e285]:
+                  - button "graph Completed" [expanded] [active] [ref=e286]:
+                    - generic [ref=e287]:
+                      - generic [ref=e290]: graph
+                      - generic [ref=e291]: Completed
+                  - generic [ref=e294]:
+                    - generic [ref=e295]:
+                      - heading "Parameters" [level=4] [ref=e296]
+                      - code [ref=e301]:
+                        - generic [ref=e302]: "{"
+                        - generic [ref=e303]: "\"action\": \"execute\","
+                        - generic [ref=e304]: "\"graph_id\": \"verify-008\","
+                        - generic [ref=e305]: "\"model_provider\": \"/agent\","
+                        - generic [ref=e306]: "\"model_settings\": {},"
+                        - generic [ref=e307]: "\"task\": \"each leaf replies one word\","
+                        - generic [ref=e308]: "\"tools\": [],"
+                        - generic [ref=e309]: "\"topology\": {}"
+                        - generic [ref=e310]: "}"
+                    - generic [ref=e311]:
+                      - heading "Result" [level=4] [ref=e312]
+                      - code [ref=e317]:
+                        - generic [ref=e318]: "{\"status\": \"error\", \"content\": [{\"text\": \"Graph verify-008 not found\"}], \"toolUseId\": \"14\"}"
+      - group [ref=e116]:
+        - group [ref=e117]
+        - textbox "Ask for a change, or start something new…" [ref=e119]
+        - group [ref=e120]:
+          - generic [ref=e121]:
+            - button [ref=e122]
+            - button "High (preset)" [ref=e123]
+            - button "Web preview" [ref=e127]
+          - button "Stop" [ref=e129]
+  - button "Open Next.js Dev Tools" [ref=e69] [cursor=pointer]
+  - alert [ref=e76]

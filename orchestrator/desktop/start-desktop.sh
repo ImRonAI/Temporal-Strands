@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Desktop services + Temporal desktop worker. Everything here is stock
+# software on stock configuration; the only app process is desktop_worker.py.
+set -euo pipefail
+
+pids=()
+cleanup() {
+    trap - EXIT TERM INT
+    if ((${#pids[@]})); then
+        kill "${pids[@]}" 2>/dev/null || true
+        # Bound shutdown even if a native service ignores TERM.
+        for ((attempt=0; attempt<10; attempt++)); do
+            kill -0 "${pids[@]}" 2>/dev/null || break
+            sleep 1
+        done
+        kill -KILL "${pids[@]}" 2>/dev/null || true
+        wait "${pids[@]}" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+
+# Every X client shares a fresh private cookie; never put it in argv or logs.
+umask 077
+export DISPLAY="${DISPLAY:-:99}"
+export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
+: > "$XAUTHORITY"
+chmod 600 "$XAUTHORITY"
+python -c 'import os, secrets; print("add", os.environ["DISPLAY"], "MIT-MAGIC-COOKIE-1", secrets.token_hex(16))' \
+    | xauth -q -f "$XAUTHORITY" source -
+
+Xvfb "$DISPLAY" -auth "$XAUTHORITY" -screen 0 1440x900x24 -nolisten tcp &
+pids+=("$!")
+for ((attempt=0; attempt<30; attempt++)); do
+    xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break
+    kill -0 "${pids[0]}" 2>/dev/null || exit 1
+    sleep 1
+done
+xdpyinfo -display "$DISPLAY" >/dev/null
+# Full XFCE desktop (xfwm4 + panel + xfdesktop + settings daemon) under a
+# private session bus. Stock software, stock configuration; no root, no
+# polkit/systemd-logind (unavailable in the container and not required).
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-$(id -u)}"
+mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+export XDG_SESSION_TYPE=x11 XDG_CURRENT_DESKTOP=XFCE
+dbus-launch --exit-with-session startxfce4 &
+pids+=("$!")
+for ((attempt=0; attempt<30; attempt++)); do
+    pgrep -x xfwm4 >/dev/null && pgrep -x xfce4-panel >/dev/null && break
+    kill -0 "${pids[1]}" 2>/dev/null || exit 1
+    sleep 1
+done
+
+# Input starts fenced (view-only). The API grants/revokes through x11vnc's
+# native remote-control commands on handoff.
+x11vnc -display "$DISPLAY" -auth "$XAUTHORITY" -localhost -rfbport 5900 -forever -shared -viewonly -nopw -nosel -noclipboard -nosetclipboard -nosetprimary -noxrandr -clear_all &
+pids+=("$!")
+
+websockify --web=/usr/share/novnc 6080 127.0.0.1:5900 &
+pids+=("$!")
+
+python -u desktop_worker.py &
+pids+=("$!")
+
+# Any service exit invalidates the shared desktop, including clean exits.
+wait -n "${pids[@]}" || exit "$?"
+exit 1

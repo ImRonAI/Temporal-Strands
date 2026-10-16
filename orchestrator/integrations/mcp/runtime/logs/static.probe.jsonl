@@ -1,0 +1,3 @@
+{"event": "initialized", "server_name": "Static Response Server", "server_version": "1.29.1", "protocol": "2025-06-18", "ts": "2026-09-07T06:58:08.712557+00:00"}
+{"event": "tools", "count": 2, "names": ["read_some_value", "write_value"], "ts": "2026-09-07T06:58:08.716861+00:00"}
+{"event": "call", "tool": "read_some_value", "args": {}, "is_error": false, "content": ["This is the response for a read operation"], "ts": "2026-09-07T06:58:08.721461+00:00"}

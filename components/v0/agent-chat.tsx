@@ -3,8 +3,8 @@
 import { useChat } from "@ai-sdk/react"
 import { isFileUIPart, isTextUIPart, DefaultChatTransport } from "ai"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { useEffect, useImperativeHandle, useState } from "react"
-import type { ReactNode, Ref } from "react"
+import { useEffect, useImperativeHandle, useRef, useState } from "react"
+import type { CSSProperties, ReactNode, Ref } from "react"
 import type { ChatStatus } from "ai"
 
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input"
@@ -27,35 +27,57 @@ import { Button } from "@/components/ui/button"
 import { DEFAULT_MODEL } from "@/lib/perplexity"
 import { cn } from "@/lib/utils"
 import { AgentActivity } from "@/components/v0/agent-activity"
+import { computerUseTextIndices } from "@/components/v0/computer-use-activity"
 import { BlurpleBackground } from "@/components/v0/blurple-background"
 import { GraphActivity } from "@/components/v0/graph-activity"
-import { computerUsePreview } from "@/components/v0/computer-use"
+import { computerUsePreview, desktopAspectRatio } from "@/components/v0/computer-use"
 import { ComputerUsePreviewPanel } from "@/components/v0/computer-use-preview"
 import { Composer } from "@/components/v0/composer"
-import { reasoningLevels } from "@/components/v0/model-picker"
+import { SentPastedPrompt } from "@/components/v0/pasted-prompt-attachment"
+import { pastedPromptText } from "@/components/v0/pasted-prompt"
+import { ModelPicker, reasoningLevels } from "@/components/v0/model-picker"
+import { useCatalog } from "@/components/v0/use-catalog"
+import type { ToolSelection } from "@/components/v0/tool-selector"
 import { projectIdePreview } from "@/components/v0/project-ide"
 import { ProjectIdePanel } from "@/components/v0/project-ide-panel"
 
 const LINK_SAFETY = { enabled: false } as const
+
+/** Height of the desktop panel's single toolbar (h-10) in rem. The fitted
+ *  viewer box adds it on top of the framebuffer's aspect-ratio height. */
+const DESKTOP_TOOLBAR_REM = 2.5
+
+/** Largest box with the remote framebuffer's proportions (plus the toolbar
+ *  strip) that fits the desktop slot. Width binds when the slot is tall,
+ *  height binds when it is wide; `cq*` units read the slot's own size, so the
+ *  fit is correct whether the chat is beside, above, or hidden. */
+export function desktopFitStyle(aspect: number): CSSProperties {
+  const toolbar = `${DESKTOP_TOOLBAR_REM}rem`
+  return {
+    width: `min(100cqw, calc((100cqh - ${toolbar}) * ${aspect}))`,
+    height: `min(100cqh, calc(100cqw / ${aspect} + ${toolbar}))`,
+  }
+}
 
 // One curve for the whole surface: fast attack, long silk tail. Every
 // entrance below uses it, which is what makes the page feel single-authored.
 const EASE: [number, number, number, number] = [0.16, 1, 0.3, 1]
 
 const SUGGESTIONS = [
-  "A pricing page with a yearly toggle",
-  "An analytics dashboard with charts",
-  "A waitlist landing page",
-  "A Kanban board with drag and drop",
-  "A settings page with tabs",
+  "Plan a cozy weekend trip to Lisbon",
+  "Research the best laptops under $1,000",
+  "Build me a habit-tracker web app",
+  "Summarize today's top tech news",
+  "Help me write a thank-you note",
 ]
 
 const HEADLINE: { word: string; accent?: boolean }[] = [
-  { word: "What" },
-  { word: "should" },
+  { word: "Hey," },
+  { word: "what" },
+  { word: "can" },
   { word: "we" },
-  { word: "ship", accent: true },
-  { word: "today?" },
+  { word: "tackle", accent: true },
+  { word: "together?" },
 ]
 
 /** Fade-rise-blur block used for every hero element; delay is the only
@@ -87,7 +109,7 @@ function Reveal({
  *  with a whisper of rotation. One-time, mount-only. */
 function Headline({ reduce }: { reduce: boolean }) {
   return (
-    <h1 className="text-balance text-center font-editorial text-5xl leading-[0.95] tracking-tight text-foreground sm:text-7xl">
+    <h1 className="text-balance text-center font-editorial text-[2.6rem] leading-[1.04] tracking-[-0.035em] text-foreground sm:text-[4.25rem]">
       {HEADLINE.map(({ word, accent }, i) => (
         <span
           key={word}
@@ -97,7 +119,7 @@ function Headline({ reduce }: { reduce: boolean }) {
             className={cn(
               "inline-block",
               accent &&
-                "italic text-blurple-bright [text-shadow:0_0_40px_oklch(0.7_0.2_285/0.35)]"
+                "text-sunrise pr-[0.06em] italic"
             )}
             initial={reduce ? false : { y: "115%", rotate: 3 }}
             animate={{ y: "0%", rotate: 0 }}
@@ -158,7 +180,10 @@ export function AgentChat({
   const [efforts, setEfforts] = useState<Record<string, string>>({})
   const selectedEffort = efforts[model] ?? "default"
   const reasoningEffort = reasoningLevels(model).includes(selectedEffort) ? selectedEffort : undefined
-  const turnBody = { model, reasoningEffort }
+  // Per-turn tool/skill allowlist, session-scoped React state: every turn body
+  // carries the checked names and ChatWorkflow's SelectionHook enforces them.
+  const [selection, setSelection] = useState<ToolSelection>({ tools: [], skills: [] })
+  const turnBody = { model, reasoningEffort, tools: selection.tools, skills: selection.skills }
   const reduce = useReducedMotion() ?? false
   // Reused across turns so they land as Updates on the same durable
   // orchestrator session (see orchestrator/workflow.py) instead of starting
@@ -191,7 +216,7 @@ export function AgentChat({
   // The orchestrator route reports the durable session as a `data-session`
   // part. It is message data, so derive it during render instead of mirroring
   // it into component state with an Effect.
-  const sessionId = (() => {
+  const streamedSessionId = (() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       for (const part of messages[i].parts) {
         if (part.type === "data-session") {
@@ -201,27 +226,48 @@ export function AgentChat({
     }
     return undefined
   })()
+  // Real tool and skill catalogs for the composer selector; with a session id
+  // the orchestrator also merges that workflow's loaded tools into "session".
+  const { catalog, status: catalogStatus } = useCatalog(streamedSessionId)
 
-  // A ChatWorkflow execution runs until it is signalled to end, so a session
-  // the browser walks away from would otherwise stay live in Temporal for
-  // good. `pagehide` is the reliable teardown event (unlike `beforeunload` it
-  // also fires on mobile/bfcache navigations), and sendBeacon survives the
-  // page going away where a plain fetch does not. /sessions/{id}/end is
-  // idempotent, so firing it for an already-finished session is harmless.
-  useEffect(() => {
-    if (!sessionId) return
-    const end = () => {
-      navigator.sendBeacon(
-        "/api/orchestrator/end",
-        new Blob([JSON.stringify({ sessionId })], { type: "application/json" }),
-      )
+  // The durable ChatWorkflow deliberately outlives this tab. Closing the
+  // laptop, losing Wi-Fi, or navigating away must never end a deployed
+  // session, so nothing here beacons /api/orchestrator/end on `pagehide` or
+  // unmount. Ending is the explicit action below; once it is acknowledged the
+  // next turn starts a fresh session instead of addressing the finished one.
+  // Reattaching this UI to a still-running session after a reload is not
+  // implemented yet (the client forgets the id with the page).
+  const [endedSessionId, setEndedSessionId] = useState<string | null>(null)
+  const [endConfirm, setEndConfirm] = useState(false)
+  const [endPending, setEndPending] = useState(false)
+  const [endError, setEndError] = useState("")
+  const sessionEnded = Boolean(streamedSessionId) && streamedSessionId === endedSessionId
+  const sessionId = sessionEnded ? undefined : streamedSessionId
+
+  async function endSession() {
+    if (!streamedSessionId || endPending) return
+    setEndPending(true)
+    setEndError("")
+    try {
+      if (status === "streaming" || status === "submitted") await stop()
+      const response = await fetch("/api/orchestrator/end", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: streamedSessionId }),
+      })
+      if (!response.ok) throw new Error(`End request failed (${response.status})`)
+      setEndedSessionId(streamedSessionId)
+      setEndConfirm(false)
+      // The desktop belonged to the ended session; the next session's first
+      // browser action (a new tool call id) reopens the viewer.
+      setDismissedPreview(browserPreview.sessionId)
+      setBrowserExpanded(false)
+    } catch (error) {
+      setEndError(error instanceof Error && error.message ? error.message : "Could not end the session.")
+    } finally {
+      setEndPending(false)
     }
-    window.addEventListener("pagehide", end)
-    return () => {
-      window.removeEventListener("pagehide", end)
-      end()
-    }
-  }, [sessionId])
+  }
 
   // A turn can park on a gated tool waiting for a human. The workflow PUSHES
   // that prompt down the same stream as everything else, so it arrives as a
@@ -243,44 +289,110 @@ export function AgentChat({
   const pendingApproval = approval && approval !== answered ? approval : ""
 
   async function answerApproval(response: string) {
-    setAnswered(approval)
-    await fetch("/api/orchestrator/approval", {
+    const result = await fetch("/api/orchestrator/approval", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId, response }),
     })
+    if (result.ok) setAnswered(approval)
   }
 
   const hasConversation = messages.length > 0
   const lastMessage = messages.at(-1)
   const awaitingAssistant =
     status === "submitted" && lastMessage?.role === "user"
-  const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant")
   const browserPreview = computerUsePreview(
-    lastAssistant?.parts,
+    messages.filter((message) => message.role === "assistant").flatMap((message) => message.parts),
     status === "streaming"
   )
   const projectIde = projectIdePreview(
-    lastAssistant?.parts,
+    messages.filter((message) => message.role === "assistant").flatMap((message) => message.parts),
     status === "streaming"
   )
   const [dismissedPreview, setDismissedPreview] = useState("")
-  const [dismissedIde, setDismissedIde] = useState("")
+  // Closing the IDE is scoped to the activity it was closed against: the next
+  // REAL activity (a new activityId) reopens it, and the composer's Preview
+  // button reopens it any time — reopening is never a dead end. Closing is
+  // presentation only: the turn keeps streaming and nothing is stopped.
+  const [dismissedIde, setDismissedIde] = useState<string | null>(null)
   const [previewRequested, setPreviewRequested] = useState(false)
-  const previewForced = previewRequested || projectIde.isDevServer || Boolean(projectIde.previewUrl)
+  // Fullscreen keeps the SAME mounted panel (all live IDE state survives) and
+  // only swaps layout classes: the chat column hides, the IDE takes the whole
+  // chat area. Restore returns to the normal split.
+  const [ideFullscreen, setIdeFullscreen] = useState(false)
+  // Same idea for the live desktop: expanding hides the chat column so the
+  // noVNC framebuffer owns the whole row. The chat stays mounted and
+  // streaming; the panel's own toolbar carries the collapse action.
+  const [browserExpanded, setBrowserExpanded] = useState(false)
+  // Auto-close: 10s after the last IDE tool activity the panel closes on its
+  // own — unless the user has the Preview tab selected (an explicit choice to
+  // keep the preview up) or an operation is still running. Project state is
+  // derived from the message stream, so closing loses nothing: any new
+  // activity (or the composer's Preview button) reopens it.
+  const ideLastActiveAtRef = useRef<number | null>(null)
+  const [idePreviewTab, setIdePreviewTab] = useState(false)
+  // Forcing the preview tab is the user's explicit request only; a live dev
+  // server engages the preview through the stream's own activeView instead,
+  // so tool activity (edits, commands) can still pull focus while it runs.
+  const previewForced = previewRequested
   const showBrowserPreview =
     browserPreview.open && dismissedPreview !== browserPreview.sessionId
-  const sessionKey = projectIde.sessionId || "manual"
   const showProjectIde =
     !showBrowserPreview &&
-    dismissedIde !== sessionKey &&
+    dismissedIde !== (projectIde.activityId ?? "closed") &&
     (previewRequested || projectIde.open)
   const splitPreview = showBrowserPreview || showProjectIde
+  const chatHidden =
+    (showProjectIde && ideFullscreen) || (showBrowserPreview && browserExpanded)
+  // Remote framebuffer proportions: a verified screenshot is the true display
+  // size; otherwise the configured X geometry.
+  const desktopAspect = desktopAspectRatio(browserPreview.observation)
 
-  function giveControl(message: PromptInputMessage) {
+  // The timestamp advances on every new project operation (activityId), so
+  // the idle window is measured from the agent's most recent IDE work. A ref
+  // (not state) — it never drives rendering, only the auto-close timer below,
+  // which already re-runs on the same open/activityId transitions.
+  useEffect(() => {
+    if (projectIde.open) ideLastActiveAtRef.current = Date.now()
+  }, [projectIde.open, projectIde.activityId])
+  useEffect(() => {
+    if (!showProjectIde || idePreviewTab || projectIde.isStreaming) return
+    const ideLastActiveAt = ideLastActiveAtRef.current
+    if (ideLastActiveAt == null) return
+    const remaining = 10_000 - (Date.now() - ideLastActiveAt)
+    const timer = setTimeout(() => {
+      setPreviewRequested(false)
+      setIdeFullscreen(false)
+      setDismissedIde(projectIde.activityId ?? "closed")
+    }, Math.max(0, remaining))
+    return () => clearTimeout(timer)
+  }, [
+    showProjectIde,
+    idePreviewTab,
+    projectIde.isStreaming,
+    projectIde.activityId,
+  ])
+
+  async function handoff(action: "take" | "release" | "give", message = "") {
+    if (!sessionId) throw new Error("No active browser session")
+    const response = await fetch("/api/orchestrator/handoff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, action, message }),
+    })
+    if (!response.ok) throw new Error(await response.text())
+  }
+
+  async function takeControl() {
+    await handoff("take")
+    await stop()
+  }
+
+  async function giveControl(message: PromptInputMessage) {
     const text = message.text?.trim()
     if (!text) return
-    sendMessage({ text }, { body: { ...turnBody, sessionId } })
+    await handoff("give", text)
+    void sendMessage({ text }, { body: { ...turnBody, sessionId } })
   }
 
   function submit(message: PromptInputMessage) {
@@ -303,6 +415,17 @@ export function AgentChat({
 
   useImperativeHandle(ref, () => ({ submit, stop }))
 
+  const modelControls = (
+    <>
+      <ModelPicker
+        value={model}
+        onValueChange={changeModel}
+        reasoningEffort={reasoningEffort ?? "default"}
+        onReasoningEffortChange={(value) => setEfforts({ ...efforts, [model]: value })}
+      />
+    </>
+  )
+
   return (
     <div className="@container/chat flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       {!paneId && <BlurpleBackground settled={hasConversation} />}
@@ -311,13 +434,21 @@ export function AgentChat({
           reads as a scene change rather than a layout jump. */}
       <AnimatePresence mode="wait">
         {hasConversation || paneId ? (
+          // The chat column is ALWAYS the same centered max-w-3xl shell. A
+          // split (IDE or browser preview) never restyles it — it only pads
+          // the row, so the chat is shoved over by the panel's width as the
+          // panel slides in, instead of snapping to a different track. The
+          // panel animates width 0 → its share, so the shove and the slide
+          // are the same motion.
           <motion.section
             key="chat"
             className={cn(
               "flex min-h-0 w-full flex-1 overflow-hidden",
-              splitPreview
-                ? "flex-col overflow-y-auto @min-[64rem]/chat:flex-row @min-[64rem]/chat:overflow-hidden"
-                : "mx-auto max-w-3xl flex-col px-4 pb-6"
+              // Below 64rem the desktop split stacks: chat on top, desktop
+              // below. Wide viewports put them side by side.
+              showBrowserPreview
+                ? "flex-col @min-[64rem]/chat:flex-row"
+                : splitPreview && "flex-row"
             )}
             initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -327,18 +458,22 @@ export function AgentChat({
             <div
               className={cn(
                 "flex min-h-0 flex-col",
-                splitPreview
-                  ? "order-2 min-h-96 w-full flex-1 shrink-0 border-t border-white/10 @min-[64rem]/chat:order-1 @min-[64rem]/chat:min-h-0 @min-[64rem]/chat:max-w-md @min-[64rem]/chat:flex-none @min-[64rem]/chat:border-r @min-[64rem]/chat:border-t-0"
-                  : "min-h-0 flex-1"
+                // Fullscreen IDE / expanded desktop: the chat column hides
+                // (CSS only — the chat stays mounted, streaming, and fully
+                // stateful) and the panel takes the entire chat area until
+                // Restore / Show chat.
+                chatHidden
+                  ? "hidden"
+                  : showBrowserPreview
+                    ? "order-1 flex h-2/5 min-h-0 w-full min-w-0 shrink-0 flex-col border-b border-border @min-[64rem]/chat:h-full @min-[64rem]/chat:w-1/3 @min-[64rem]/chat:border-b-0 @min-[64rem]/chat:border-r"
+                    : splitPreview
+                      ? "order-1 flex h-full min-h-0 w-1/3 min-w-0 shrink-0 flex-col border-r border-border"
+                      : "mx-auto min-h-0 w-full max-w-3xl flex-1 px-4 pb-6"
               )}
+              data-testid="chat-column"
             >
-            <div
-              className={cn(
-                "flex min-h-0 flex-1 flex-col",
-                splitPreview ? "mx-auto w-full px-4 pb-4 pt-3 @min-[64rem]/chat:pb-6" : "min-h-0"
-              )}
-            >
-            <Conversation className="min-h-0 flex-1">
+            <div className={cn("flex min-h-0 flex-1 flex-col", splitPreview && "px-4 pb-4 pt-3")}>
+            <Conversation className="h-0 min-h-0 flex-1">
               <ConversationContent className="gap-8 py-8">
                 {!hasConversation && (
                   <ConversationEmptyState
@@ -346,17 +481,50 @@ export function AgentChat({
                     description="Send a shared prompt or start this model's conversation below."
                   />
                 )}
-                {messages.map((message, messageIndex) => (
+                {messages.map((message, messageIndex) => {
+                  const sentPrompts = message.role === "user"
+                    ? message.parts.flatMap((part, index) =>
+                        isFileUIPart(part) && pastedPromptText(part) != null ? [{ part, index }] : [],
+                      )
+                    : []
+                  const showBubble = message.role === "assistant" || message.parts.some((part) => {
+                    if (isTextUIPart(part)) return true
+                    return isFileUIPart(part) && pastedPromptText(part) == null
+                  })
+                  const isLiveAssistant =
+                    message.role === "assistant" &&
+                    (status === "streaming" || status === "submitted") &&
+                    messageIndex === messages.length - 1
+                  const absorbedTextIndices = message.role === "assistant"
+                    ? computerUseTextIndices(message.parts, isLiveAssistant)
+                    : new Set<number>()
+                  return (
                   <MessageShell key={message.id} reduce={reduce}>
                     <Message from={message.role}>
-                      <MessageContent>
+                      {sentPrompts.length > 0 ? (
+                        <div className="flex w-full flex-col items-end gap-2">
+                          {sentPrompts.map(({ part, index }) => (
+                            <SentPastedPrompt
+                              id={`${message.id}-pasted-${index}`}
+                              key={`${message.id}-pasted-${index}`}
+                              part={part}
+                            />
+                          ))}
+                        </div>
+                      ) : null}
+                      {/* Vendored MessageContent is w-fit, which collapses
+                          width-only children: the GraphActivity canvas
+                          (w-full inside a fit-content parent) shrank to the
+                          React Flow intrinsic minimum (~142px). Assistant
+                          messages stretch instead; user bubbles keep w-fit.
+                          Pasted prompts stay outside this bubble so the card
+                          keeps the same glass treatment it had in the composer. */}
+                      {showBubble ? <MessageContent className="group-[.is-assistant]:w-full group-[.is-user]:rounded-[1.4rem] group-[.is-user]:rounded-br-md group-[.is-user]:border group-[.is-user]:border-coral/15 group-[.is-user]:bg-[linear-gradient(160deg,oklch(0.975_0.025_45),oklch(0.96_0.035_38))] group-[.is-user]:text-prose group-[.is-user]:text-foreground group-[.is-user]:shadow-soft">
                         {message.role === "assistant" && (
                           <AgentActivity
                             parts={message.parts}
-                            isThinking={
-                              (status === "streaming" || status === "submitted") &&
-                              messageIndex === messages.length - 1
-                            }
+                            sessionId={sessionId}
+                            isThinking={isLiveAssistant}
                           />
                         )}
                         {/* Formation graph canvas: renders only for messages
@@ -366,6 +534,7 @@ export function AgentChat({
                         )}
                         {message.parts.map((part, i) => {
                           if (isTextUIPart(part)) {
+                            if (message.role === "assistant" && absorbedTextIndices.has(i)) return null
                             return (
                               // isAnimating drives Streamdown's own streaming
                               // affordances — token fade-in and the caret. It
@@ -375,6 +544,7 @@ export function AgentChat({
                               // that must be live.
                               <MessageResponse
                                 key={`${message.id}-${i}`}
+                                className="text-prose text-foreground/90 [&_a]:font-medium [&_a]:text-blurple-bright [&_a]:underline-offset-4 [&_a]:decoration-blurple-bright/35 [&_strong]:text-foreground [&_code]:text-[0.875em] [&_h1]:font-editorial [&_h1]:text-3xl [&_h1]:tracking-normal [&_h2]:font-editorial [&_h2]:text-2xl [&_h2]:tracking-normal [&_blockquote]:border-blurple-bright/40"
                                 isAnimating={
                                   status === "streaming" &&
                                   messageIndex === messages.length - 1
@@ -395,6 +565,7 @@ export function AgentChat({
                           // the agent. useChat stores them as data: URLs, which is
                           // exactly what Image renders from.
                           if (isFileUIPart(part)) {
+                            if (pastedPromptText(part) != null) return null
                             return (
                               <Image
                                 key={`${message.id}-${i}`}
@@ -408,15 +579,16 @@ export function AgentChat({
                           }
                           return null
                         })}
-                      </MessageContent>
+                      </MessageContent> : null}
                     </Message>
                   </MessageShell>
-                ))}
+                  )
+                })}
                 {awaitingAssistant && (
                   <MessageShell key="awaiting-assistant" reduce={reduce}>
                     <Message from="assistant">
                       <MessageContent>
-                        <AgentActivity parts={[]} isThinking />
+                        <AgentActivity parts={[]} isThinking sessionId={sessionId} />
                       </MessageContent>
                     </Message>
                   </MessageShell>
@@ -439,7 +611,7 @@ export function AgentChat({
                 >
                   <Alert
                     variant="destructive"
-                    className="border-destructive/25 bg-card/80 backdrop-blur-xl"
+                    className="rounded-2xl border-destructive/25 bg-white/90 shadow-lift backdrop-blur-xl"
                     data-testid="chat-error"
                   >
                     <AlertTitle>Request failed</AlertTitle>
@@ -458,7 +630,7 @@ export function AgentChat({
                   exit={{ opacity: 0, y: 8, scale: 0.99 }}
                   transition={{ duration: 0.35, ease: EASE }}
                 >
-                  <Alert className="border-blurple/25 bg-card/80 shadow-[0_8px_32px_-12px_oklch(0.55_0.22_277/0.5)] backdrop-blur-xl">
+                  <Alert className="rounded-2xl border-coral/25 bg-white/90 shadow-lift backdrop-blur-xl">
                     <AlertTitle>Approval needed</AlertTitle>
                     <AlertDescription>
                       <div className="flex w-full flex-col gap-3">
@@ -486,6 +658,68 @@ export function AgentChat({
             </AnimatePresence>
 
             <div className="mt-2 shrink-0">
+              {projectIde.open && !showProjectIde && (
+                <Button type="button" variant="outline" size="sm" className="mb-2" onClick={() => { setDismissedIde(null); setPreviewRequested(true) }}>
+                  Open IDE
+                </Button>
+              )}
+              {/* Sessions are never ended implicitly (see the note above
+                  `endSession`). This is the one explicit release: it stops
+                  the live turn if any, signals end_chat, and frees the
+                  desktop for the next chat. Two clicks, so a stray tap on a
+                  laptop trackpad cannot kill deployed work. */}
+              {streamedSessionId && !sessionEnded ? (
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-xs" data-testid="session-controls">
+                  {endConfirm ? (
+                    <>
+                      <span className="text-muted-foreground">End this session and release the desktop?</span>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        className="h-7 px-2.5 text-[11px]"
+                        data-testid="end-session-confirm"
+                        disabled={endPending}
+                        onClick={endSession}
+                      >
+                        {endPending ? "Ending…" : "End session"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2.5 text-[11px]"
+                        data-testid="end-session-cancel"
+                        disabled={endPending}
+                        onClick={() => { setEndConfirm(false); setEndError("") }}
+                      >
+                        Keep running
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2.5 text-[11px] text-muted-foreground hover:text-foreground"
+                      data-testid="end-session"
+                      onClick={() => setEndConfirm(true)}
+                    >
+                      End session
+                    </Button>
+                  )}
+                  {endError ? (
+                    <span className="text-destructive" data-testid="end-session-error" role="alert">
+                      {endError}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+              {sessionEnded ? (
+                <p className="mb-2 text-xs text-muted-foreground" data-testid="session-ended">
+                  Session ended. Your next message starts a new one.
+                </p>
+              ) : null}
               <motion.div
                 initial={reduce ? false : { opacity: 0, y: 24 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -496,16 +730,26 @@ export function AgentChat({
                   onTextChange={setText}
                   onSubmit={submit}
                   model={model}
+                  modelControls={modelControls}
                   onModelChange={changeModel}
                   reasoningEffort={reasoningEffort ?? "default"}
                   onReasoningEffortChange={(value) => setEfforts({ ...efforts, [model]: value })}
                   status={status}
-                  onStop={stop}
+                   onStop={stop}
+                  selectedTools={selection.tools}
+                  selectedSkills={selection.skills}
+                  onSelectionChange={setSelection}
+                  catalog={catalog}
+                  catalogStatus={catalogStatus}
                   globalDrop={!paneId}
                   placeholder="Ask for a change, or start something new…"
-                  previewActive={showProjectIde}
+                  previewActive={showProjectIde || showBrowserPreview}
                   onPreview={() => {
-                    setDismissedIde("")
+                    if (browserPreview.open) {
+                      setDismissedPreview("")
+                      return
+                    }
+                    setDismissedIde(null)
                     setPreviewRequested(true)
                   }}
                 />
@@ -516,43 +760,84 @@ export function AgentChat({
 
             <AnimatePresence>
               {showBrowserPreview ? (
+                // The desktop slot takes every pixel the chat leaves. Inside
+                // it the panel is fitted to the remote framebuffer's aspect
+                // ratio (toolbar height added on top) and centered, so noVNC's
+                // `resize=scale` fills the iframe edge-to-edge instead of
+                // painting letterbox bars around a 16:10 screen in an
+                // arbitrary-shaped hole. Any leftover space is the app's own
+                // graphite, not dead viewer canvas.
                 <motion.div
                   key={browserPreview.sessionId}
-                  className="order-1 flex min-h-96 min-w-0 flex-1 shrink-0 flex-col @min-[64rem]/chat:order-2 @min-[64rem]/chat:min-h-0"
+                  className="@container/desktop order-2 flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center overflow-hidden bg-[oklch(0.975_0.008_55/0.7)] p-2 @min-[64rem]/chat:p-3"
+                  data-testid="desktop-slot"
                   initial={reduce ? false : { opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 12 }}
                   transition={{ duration: 0.45, ease: EASE }}
                 >
-                  <ComputerUsePreviewPanel
-                    preview={browserPreview}
-                    isStreaming={status === "streaming"}
-                    status={status}
-                    pendingApproval={pendingApproval}
-                    onApprove={() => answerApproval("approve")}
-                    onDeny={() => answerApproval("deny")}
-                    onClose={() => setDismissedPreview(browserPreview.sessionId)}
-                    onStop={stop}
-                    onGiveControl={giveControl}
-                  />
+                  <div
+                    className="flex min-h-0 max-w-full flex-col"
+                    data-testid="desktop-fit"
+                    style={desktopFitStyle(desktopAspect)}
+                  >
+                    <ComputerUsePreviewPanel
+                      preview={browserPreview}
+                      sessionId={sessionId}
+                      isStreaming={status === "streaming"}
+                      status={status}
+                      pendingApproval={pendingApproval}
+                      onApprove={() => answerApproval("approve")}
+                      onDeny={() => answerApproval("deny")}
+                      onClose={() => {
+                        setDismissedPreview(browserPreview.sessionId)
+                        setBrowserExpanded(false)
+                      }}
+                      onTakeControl={takeControl}
+                      onReleaseControl={() => handoff("release")}
+                      onGiveControl={giveControl}
+                      expanded={browserExpanded}
+                      onExpandedChange={setBrowserExpanded}
+                    />
+                  </div>
                 </motion.div>
               ) : showProjectIde ? (
+                // Full-height right column. The slot is a width track: it
+                // grows from 0 to two-thirds (fullscreen: full width) while the
+                // panel inside, pinned to a fixed viewport width and right-
+                // aligned, stays put — so the IDE slides in from the right edge
+                // while the chat (left third) is shoved left by the same single
+                // motion. transform-only would slide through space the chat had
+                // already vacated, reading as a jump cut instead of a shove.
                 <motion.div
-                  key={sessionKey}
-                  className="order-1 flex min-h-96 min-w-0 flex-1 shrink-0 flex-col @min-[64rem]/chat:order-2 @min-[64rem]/chat:min-h-0"
-                  initial={reduce ? false : { opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 12 }}
-                  transition={{ duration: 0.45, ease: EASE }}
+                  key="project-workspace"
+                  className="order-2 flex h-full min-h-0 shrink-0 flex-col overflow-hidden"
+                  initial={reduce ? false : { width: 0, opacity: 0 }}
+                  animate={{
+                    width: ideFullscreen ? "100%" : "67%",
+                    opacity: 1,
+                  }}
+                  exit={reduce ? { opacity: 0 } : { width: 0, opacity: 0 }}
+                  transition={{ duration: reduce ? 0 : 0.6, ease: [0.22, 0.68, 0, 1] }}
                 >
-                  <ProjectIdePanel
-                    ide={projectIde}
-                    previewForced={previewForced}
-                    onClose={() => {
-                      setDismissedIde(sessionKey)
-                      setPreviewRequested(false)
-                    }}
-                  />
+                  <div className="flex h-full min-h-0 w-[67vw] min-w-0 flex-1 flex-col self-end py-3 pr-3">
+                    <ProjectIdePanel
+                      ide={projectIde}
+                      previewForced={previewForced}
+                      fullscreen={ideFullscreen}
+                      onFullscreenChange={setIdeFullscreen}
+                      onViewChange={(view) => setIdePreviewTab(view === "preview")}
+                      onClose={() => {
+                        // Presentation-only: hides the panel, never stops or
+                        // ends the running turn/session. Scoped to the activity
+                        // it was closed against — the next real activity
+                        // (a new activityId) reopens it.
+                        setDismissedIde(projectIde.activityId ?? "closed")
+                        setPreviewRequested(false)
+                        setIdeFullscreen(false)
+                      }}
+                    />
+                  </div>
                 </motion.div>
               ) : null}
             </AnimatePresence>
@@ -568,18 +853,21 @@ export function AgentChat({
             }
           >
             <Reveal reduce={reduce} delay={0.05}>
-              <span className="mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground backdrop-blur-sm">
-                <span className="size-1.5 animate-pulse-soft rounded-full bg-blurple-bright" />
-                Now in beta
+              <span className="mb-8 inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/70 py-1 pl-1.5 pr-3.5 text-[13px] font-medium text-foreground/80 shadow-soft backdrop-blur-md">
+                <span className="grid size-5 place-items-center rounded-full bg-sunrise text-[11px] leading-none text-white shadow-glow">
+                  <span className="size-1.5 animate-pulse-soft rounded-full bg-white" />
+                </span>
+                Your super agent for anything
               </span>
             </Reveal>
 
             <Headline reduce={reduce} />
 
             <Reveal reduce={reduce} delay={0.55}>
-              <p className="mt-6 max-w-md text-pretty text-center text-base leading-relaxed text-muted-foreground">
-                Describe an interface in plain language. v0 turns it into clean,
-                production-ready React — components, styling, and all.
+              <p className="mt-6 max-w-[34rem] text-balance text-center text-[1.075rem] leading-relaxed text-muted-foreground">
+                Ask Gwen anything — research, plans, code, browsing, the
+                everyday stuff. She&apos;ll figure out the steps and see it
+                through with you.
               </p>
             </Reveal>
 
@@ -589,11 +877,17 @@ export function AgentChat({
                 onTextChange={setText}
                 onSubmit={submit}
                 model={model}
+                modelControls={modelControls}
                 onModelChange={changeModel}
                 reasoningEffort={reasoningEffort ?? "default"}
                 onReasoningEffortChange={(value) => setEfforts({ ...efforts, [model]: value })}
                 status={status}
                 onStop={stop}
+                selectedTools={selection.tools}
+                selectedSkills={selection.skills}
+                onSelectionChange={setSelection}
+                catalog={catalog}
+                catalogStatus={catalogStatus}
               />
 
               {/* Suggestions is a horizontally scrolling ScrollArea whose inner
@@ -603,7 +897,7 @@ export function AgentChat({
                   overflowed with the last chip clipped off-screen behind a
                   hidden scrollbar. Wrapping instead keeps every chip reachable
                   and lets them actually center. */}
-              <div className="mt-5">
+              <div className="mt-6 [&_[data-slot=scroll-area-scrollbar]]:hidden">
                 <Suggestions className="!w-full flex-wrap justify-center">
                   {SUGGESTIONS.map((suggestion, i) => (
                     <motion.span
@@ -622,7 +916,7 @@ export function AgentChat({
                       <Suggestion
                         suggestion={suggestion}
                         onClick={runSuggestion}
-                        className="border-white/10 bg-white/[0.03] text-muted-foreground backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-blurple/40 hover:bg-blurple/10 hover:text-foreground hover:shadow-[0_4px_20px_-6px_oklch(0.62_0.205_277/0.45)]"
+                        className="h-9 rounded-full border-white/90 bg-white/70 px-4 text-[13.5px] font-medium text-foreground/75 shadow-soft backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 hover:border-coral/30 hover:bg-white hover:text-foreground hover:shadow-[0_10px_28px_-12px_oklch(0.645_0.2_33/0.45)]"
                       />
                     </motion.span>
                   ))}
@@ -631,8 +925,8 @@ export function AgentChat({
             </Reveal>
 
             <Reveal reduce={reduce} delay={1.05}>
-              <p className="mt-16 max-w-sm text-center font-mono text-[11px] leading-relaxed tracking-wide text-muted-foreground/60">
-                Trusted by design engineers shipping at the edge of the web.
+              <p className="mt-14 max-w-md text-balance text-center text-xs leading-relaxed tracking-[0.02em] text-muted-foreground/70">
+                Made for curious people everywhere. Gwen&apos;s always happy to help.
               </p>
             </Reveal>
           </motion.section>

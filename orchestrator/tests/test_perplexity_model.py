@@ -1,730 +1,562 @@
+"""PerplexityModel as an OpenAIResponsesModel subclass.
+
+Every fixture serves a canned SSE body through ``httpx.MockTransport``: the
+parent's ``openai.AsyncOpenAI`` stream loop and this module's native-event tap
+both read that one body, exactly as they do against the live API. There is no
+fake client seam — the seam is the HTTP transport, so the parent parser under
+test is the real one.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
 import copy
+import json
 from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import pytest
+from openai import APIError
+from PIL import Image
 from pydantic import BaseModel
-from perplexity import (
-    AuthenticationError,
-    BadRequestError,
-    InternalServerError,
-    RateLimitError,
+from strands.models.openai_responses import OpenAIResponsesModel
+from strands.types.exceptions import (
+    ContextWindowOverflowException,
+    ModelThrottledException,
 )
 from temporalio.exceptions import ApplicationError
 
 import perplexity_model
-from perplexity_model import PerplexityModel
+from config import NATIVE_OUTPUT_ITEM_TYPES, PERPLEXITY_API_BASE, VISION_PROXY_EFFORT, VISION_PROXY_MODEL
+from perplexity_model import VISION_PROXY_INSTRUCTIONS, PerplexityModel
+from desktop_observation import resolve_observation, store_observation
+from desktop_provision_activity import session_artifact_root
+
+# ---------------------------------------------------------------------------
+# Canned SSE plumbing
+# ---------------------------------------------------------------------------
 
 
-def event(type_: str, **values: object) -> SimpleNamespace:
-    return SimpleNamespace(type=type_, **values)
+def sse(*payloads: dict[str, Any] | str) -> bytes:
+    """Serialize event dicts (or raw lines) as an SSE body."""
+    parts: list[bytes] = []
+    for payload in payloads:
+        if isinstance(payload, str):
+            parts.append(payload.encode())
+            continue
+        name = payload.get("type", "message")
+        parts.append(f"event: {name}\ndata: {json.dumps(payload)}\n\n".encode())
+    return b"".join(parts)
 
 
-class FakeResponses:
-    def __init__(self, events=None, error=None) -> None:
-        self.events = events or []
-        self.error = error
-        self.request = None
-
-    async def create(self, **request):
-        self.request = request
-        if self.error:
-            raise self.error
-
-        async def stream():
-            for item in self.events:
-                yield item
-
-        return stream()
-
-
-class FakeClient:
-    def __init__(self, events=None, error=None) -> None:
-        self.responses = FakeResponses(events, error)
-
-
-def completed(*, status="completed", output=None, usage=None):
-    return event(
-        "response.completed",
-        response=SimpleNamespace(status=status, output=output or [], usage=usage),
-    )
-
-
-async def collect(model, messages=None, **kwargs):
-    return [item async for item in model.stream(messages or [], **kwargs)]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("effort", ["minimal", "low", "medium", "high", "xhigh", "max"])
-async def test_per_turn_reasoning_does_not_change_shared_model_defaults(effort):
-    client = FakeClient([completed()])
-    model = PerplexityModel(model_id="perplexity/kimi-k3", client=client)
-    await collect(model, invocation_state={"reasoning_effort": effort})
-    assert client.responses.request["reasoning"] == {"effort": effort}
-    await collect(model)
-    assert "reasoning" not in client.responses.request
-    assert model.get_config()["params"] == {}
-
-
-@pytest.mark.asyncio
-async def test_message_start_has_no_attempt_outside_activity_context() -> None:
-    """Outside a Temporal activity the frame stays byte-identical to before."""
-    events = await collect(
-        PerplexityModel(model_id="sonar/test", client=FakeClient([completed()]))
-    )
-    assert events[0] == {"messageStart": {"role": "assistant"}}
-
-
-@pytest.mark.asyncio
-async def test_message_start_carries_attempt_inside_activity_context(monkeypatch) -> None:
-    """Inside an activity, messageStart carries activity.info().attempt (GWEN-6)."""
-    monkeypatch.setattr(perplexity_model.activity, "in_activity", lambda: True)
-    monkeypatch.setattr(
-        perplexity_model.activity, "info", lambda: SimpleNamespace(attempt=3)
-    )
-    events = await collect(
-        PerplexityModel(model_id="sonar/test", client=FakeClient([completed()]))
-    )
-    assert events[0] == {"messageStart": {"role": "assistant", "attempt": 3}}
-
-
-@pytest.mark.asyncio
-async def test_request_maps_messages_images_tools_and_exact_params_without_mutation() -> None:
-    native_tools = [{"type": "web_search", "filters": {"recency": "week"}}]
-    params = {"temperature": 0.2, "tools": native_tools, "reasoning": {"effort": "high"}}
-    original = copy.deepcopy(params)
-    client = FakeClient([completed()])
-    model = PerplexityModel(model_id="sonar/test", params=params, client=client)
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"text": "inspect"},
-                {"image": {"format": "png", "source": {"bytes": b"png"}}},
-            ],
-        }
-    ]
-    tools = [
-        {
-            "name": "lookup",
-            "description": "Lookup",
-            "inputSchema": {
-                "json": {
-                    "type": "object",
-                    "properties": {"filter": {"type": "object"}},
-                }
-            },
-        }
-    ]
-
-    await collect(model, messages, tool_specs=tools, system_prompt="be exact")
-
-    request = client.responses.request
-    assert request == {
+def response_obj(*, status: str = "completed", usage: dict | None = None, **extra: Any) -> dict:
+    body: dict[str, Any] = {
+        "id": "resp_1",
+        "object": "response",
+        "created_at": 1,
         "model": "sonar/test",
-        "input": [
-            {
-                "type": "message",
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": "inspect"},
-                    {"type": "input_image", "image_url": "data:image/png;base64,cG5n"},
-                ],
-            }
-        ],
-        "stream": True,
-        "temperature": 0.2,
-        "reasoning": {"effort": "high"},
-        "tools": [
-            {"type": "web_search", "filters": {"recency": "week"}},
-            {
-                "type": "function",
-                "name": "lookup",
-                "description": "Lookup",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "filter": {"type": "object", "properties": {}},
-                    },
-                },
-            },
-        ],
-        "instructions": "be exact",
-    }
-    assert params == original
-    assert model.get_config() == {"model_id": "sonar/test", "params": original}
-
-
-def test_format_request_exposes_the_provider_request_contract() -> None:
-    model = PerplexityModel(model_id="sonar/test", client=FakeClient())
-
-    assert model._format_request([], None, "be exact") == {
-        "model": "sonar/test",
-        "input": [],
-        "stream": True,
+        "status": status,
+        "output": [],
+        "parallel_tool_calls": True,
+        "tool_choice": "auto",
         "tools": [],
-        "instructions": "be exact",
+        **extra,
+    }
+    if usage is not None:
+        body["usage"] = usage
+    return body
+
+
+CREATED = {"type": "response.created", "response": response_obj(status="in_progress")}
+COMPLETED = {
+    "type": "response.completed",
+    "response": response_obj(usage={"input_tokens": 4, "output_tokens": 3, "total_tokens": 7}),
+}
+
+
+def text_delta(delta: str, *, index: int = 0) -> dict:
+    return {
+        "type": "response.output_text.delta",
+        "delta": delta,
+        "item_id": "msg_1",
+        "output_index": index,
+        "content_index": 0,
+        "sequence_number": index,
+        "logprobs": [],
     }
 
 
-def test_format_request_normalizes_null_native_tools() -> None:
-    model = PerplexityModel(model_id="sonar/test", params={"tools": None}, client=FakeClient())
+def function_call_item(
+    *, call_id: str = "call_1", name: str = "lookup", arguments: str = '{"q": "x"}',
+    item_id: str = "fc_1", status: str = "completed",
+) -> dict:
+    """A ``function_call`` output item as the Agent API emits it.
 
-    assert model._format_request([], None, None)["tools"] == []
+    Live capture (openai/gpt-6-astra, 2026-09-10): the complete JSON-string
+    ``arguments`` rides on the item in BOTH ``response.output_item.added`` and
+    ``.done``; the API defines no ``response.function_call_arguments.*`` events.
+    """
+    return {
+        "type": "function_call",
+        "id": item_id,
+        "call_id": call_id,
+        "name": name,
+        "arguments": arguments,
+        "status": status,
+    }
+
+
+def function_call_added(*, call_id: str = "call_1", name: str = "lookup",
+                        arguments: str = '{"q": "x"}', item_id: str = "fc_1") -> dict:
+    return {
+        "type": "response.output_item.added",
+        "output_index": 1,
+        "sequence_number": 10,
+        "item": function_call_item(call_id=call_id, name=name, arguments=arguments, item_id=item_id),
+    }
+
+
+def function_call_done(arguments: str = '{"q": "x"}', *, call_id: str = "call_1",
+                       name: str = "lookup", item_id: str = "fc_1") -> dict:
+    return {
+        "type": "response.output_item.done",
+        "output_index": 1,
+        "sequence_number": 11,
+        "item": function_call_item(call_id=call_id, name=name, arguments=arguments, item_id=item_id),
+    }
+
+
+def output_item_done(item: dict, *, index: int = 2) -> dict:
+    return {
+        "type": "response.output_item.done",
+        "output_index": index,
+        "sequence_number": 20 + index,
+        "item": item,
+    }
+
+
+SHARE_FILE_ITEM = {
+    "type": "share_file",
+    "file_id": "file-1",
+    "path": "/v1/responses/resp-1/files/file-1/content",
+    "status": "completed",
+}
+SEARCH_RESULTS_EVENT = {
+    "type": "response.reasoning.search_results",
+    "results": [{"url": "https://example.com", "title": "Example"}],
+}
+
+
+class Recorder:
+    """Captures the decoded request body of every POST the SDK makes."""
+
+    def __init__(self, body: bytes, *, status: int = 200, chunk_size: int | None = None) -> None:
+        self.body = body
+        self.status = status
+        self.chunk_size = chunk_size
+        self.requests: list[dict[str, Any]] = []
+        self.urls: list[str] = []
+        self.headers: list[httpx.Headers] = []
+        self.forwarded = bytearray()
+
+    @property
+    def request(self) -> dict[str, Any]:
+        assert self.requests, "no request was sent"
+        return self.requests[-1]
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.urls.append(str(request.url))
+        self.headers.append(request.headers)
+        self.requests.append(json.loads(request.content or b"{}"))
+        if self.status >= 400:
+            return httpx.Response(
+                self.status,
+                json={"error": {"message": "boom", "type": "invalid_request_error"}},
+            )
+        if self.chunk_size is None:
+            return httpx.Response(
+                self.status,
+                content=self.body,
+                headers={"content-type": "text/event-stream"},
+            )
+        body, size = self.body, self.chunk_size
+
+        async def stream_body():
+            for start in range(0, len(body), size):
+                yield body[start : start + size]
+
+        return httpx.Response(
+            self.status,
+            content=stream_body(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+
+def build(
+    recorder: Recorder,
+    *,
+    model_id: str = "sonar/test",
+    params: dict[str, Any] | None = None,
+    api_key: str = "pplx-test",
+    **config: Any,
+) -> PerplexityModel:
+    """A model whose HTTP transport is the recorder's MockTransport."""
+    return PerplexityModel(
+        model_id=model_id,
+        params=params,
+        api_key=api_key,
+        transport=httpx.MockTransport(recorder.handler),
+        **config,
+    )
+
+
+async def collect(model: PerplexityModel, messages=None, **kwargs) -> list[dict[str, Any]]:
+    return [event async for event in model.stream(messages or [], **kwargs)]
+
+
+@pytest.fixture
+def desktop_image(tmp_path, monkeypatch):
+    # The model activity runs on the host, where each session's desktop has its
+    # own artifact directory; the desktop worker wrote there under its mount.
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(tmp_path))
+    desktop = session_artifact_root("chat-1")
+    desktop.mkdir()
+    (desktop / "runtime.json").write_text(json.dumps({
+        "epoch": 7, "owner": {"namespace": "test", "workflow_id": "chat-1"}, "mode": "agent",
+    }))
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(desktop))
+    ref = store_observation(
+        Image.new("RGB", (16, 12), "blue"), namespace="test", workflow_id="chat-1",
+        operation_id="capture-1", desktop_epoch=7,
+    )
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(tmp_path))
+    monkeypatch.setattr(perplexity_model.activity, "info", lambda: SimpleNamespace(namespace="test", workflow_id="chat-1"))
+    return ref, resolve_observation(ref, namespace="test", workflow_id="chat-1", root=desktop)
+
+
+def desktop_messages(ref, name="take_screenshot"):
+    return [
+        {"role": "assistant", "content": [{"toolUse": {"toolUseId": "capture-1", "name": name, "input": {}}}]},
+        {"role": "user", "content": [{"toolResult": {"toolUseId": "capture-1", "status": "success", "content": [
+            {"text": json.dumps({"status": "success", "observation": ref.model_dump(mode="json")})},
+        ]}}]},
+    ]
 
 
 @pytest.mark.asyncio
-async def test_request_replays_function_calls_outputs_and_thought_signature() -> None:
-    client = FakeClient([completed()])
-    model = PerplexityModel(model_id="sonar/test", client=client)
-    messages = [
-        {
-            "role": "assistant",
-            "content": [
-                {"text": "checking"},
-                {
-                    "toolUse": {
-                        "toolUseId": "call-1",
-                        "name": "lookup",
-                        "input": {"q": "x"},
-                        "reasoningSignature": "opaque",
-                    }
-                },
-            ],
-        },
-        {
-            "role": "user",
-            "content": [
-                {
-                    "toolResult": {
-                        "toolUseId": "call-1",
-                        "content": [{"json": {"answer": 3}}],
-                    }
-                }
-            ],
-        },
-    ]
-
+@pytest.mark.parametrize("name", ["click", "take_screenshot"])
+async def test_desktop_observation_becomes_separate_user_image(desktop_image, name):
+    ref, png = desktop_image
+    recorder = Recorder(sse(CREATED, SEARCH_RESULTS_EVENT, text_delta("seen"), COMPLETED))
+    messages = desktop_messages(ref, name)
+    before = copy.deepcopy(messages)
+    model = build(recorder)
+    frames = await collect(model, messages)
+    inputs = recorder.request["input"]
+    assert inputs[-2]["type"] == "function_call_output"
+    assert isinstance(inputs[-2]["output"], str)
+    assert inputs[-1]["role"] == "user"
+    assert inputs[-1]["content"][0]["type"] == "input_text"
+    part = inputs[-1]["content"][1]
+    assert part["type"] == "input_image"
+    assert base64.b64decode(part["image_url"].split(",", 1)[1]) == png
+    assert messages == before
+    assert {"perplexity": SEARCH_RESULTS_EVENT} in frames
+    assert b"input_image" not in json.dumps(messages).encode()
     await collect(model, messages)
-
-    assert client.responses.request["input"] == [
-        {"type": "message", "role": "assistant", "content": "checking"},
-        {
-            "type": "function_call",
-            "call_id": "call-1",
-            "name": "lookup",
-            "arguments": '{"q": "x"}',
-            "thought_signature": "opaque",
-        },
-        {
-            "type": "function_call_output",
-            "call_id": "call-1",
-            "output": '{"answer": 3}',
-        },
-    ]
-    assert client.responses.request["tools"] == []
+    assert recorder.request["input"] == inputs
 
 
 @pytest.mark.asyncio
-async def test_stream_maps_fragmented_text_usage_and_terminal_stop() -> None:
-    usage = SimpleNamespace(input_tokens=4, output_tokens=3, total_tokens=7)
-    client = FakeClient(
-        [
-            event("response.output_text.delta", delta="hel"),
-            event("response.output_text.delta", delta="lo"),
-            event("response.output_text.done", text="hello"),
-            completed(usage=usage),
-        ]
+async def test_desktop_hydration_ignores_old_reference(desktop_image):
+    ref, _ = desktop_image
+    old = desktop_messages(ref.model_copy(update={"artifact_id": "missing-old-artifact"}))
+    old[0]["content"][0]["toolUse"]["toolUseId"] = "old"
+    old[1]["content"][0]["toolResult"]["toolUseId"] = "old"
+    recorder = Recorder(sse(COMPLETED))
+    await collect(build(recorder), old + desktop_messages(ref))
+    images = [part for item in recorder.request["input"] for part in item.get("content", []) if isinstance(part, dict) and part["type"] == "input_image"]
+    assert len(images) == 1
+
+
+@pytest.mark.asyncio
+async def test_desktop_hydration_fails_before_provider_on_missing_artifact(desktop_image):
+    ref, _ = desktop_image
+    from uuid import uuid4
+    recorder = Recorder(sse(COMPLETED))
+    with pytest.raises(ApplicationError) as error:
+        await collect(build(recorder), desktop_messages(ref.model_copy(update={"artifact_id": str(uuid4())})))
+    assert error.value.non_retryable
+    assert not recorder.requests
+
+
+@pytest.mark.asyncio
+async def test_desktop_hydration_rejects_wrong_native_scope(desktop_image, monkeypatch):
+    ref, _ = desktop_image
+    monkeypatch.setattr(perplexity_model.activity, "info", lambda: SimpleNamespace(namespace="other", workflow_id="chat-1"))
+    recorder = Recorder(sse(COMPLETED))
+    with pytest.raises(ApplicationError) as error:
+        await collect(build(recorder), desktop_messages(ref))
+    assert error.value.non_retryable
+    assert not recorder.requests
+
+
+@pytest.mark.asyncio
+async def test_unrelated_tool_reference_never_triggers_hydration(desktop_image):
+    ref, _ = desktop_image
+    recorder = Recorder(sse(COMPLETED))
+    await collect(build(recorder), desktop_messages(ref, "lookup"))
+    assert recorder.request["input"][-1]["type"] == "function_call_output"
+
+
+@pytest.mark.asyncio
+async def test_successful_desktop_result_requires_observation(desktop_image):
+    ref, _ = desktop_image
+    messages = desktop_messages(ref)
+    messages[-1]["content"][0]["toolResult"]["content"] = [{"text": '{"status":"success"}'}]
+    recorder = Recorder(sse(COMPLETED))
+    with pytest.raises(ApplicationError) as error:
+        await collect(build(recorder), messages)
+    assert error.value.non_retryable
+    assert not recorder.requests
+
+
+@pytest.mark.asyncio
+async def test_failed_desktop_result_can_report_error_without_image(desktop_image):
+    ref, _ = desktop_image
+    messages = desktop_messages(ref)
+    messages[-1]["content"][0]["toolResult"].update(status="error", content=[{"text": "Action failed"}])
+    recorder = Recorder(sse(COMPLETED))
+    await collect(build(recorder), messages)
+    assert recorder.request["input"][-1]["output"] == "Action failed"
+
+
+@pytest.mark.asyncio
+async def test_vision_incapable_model_gets_proxy_readout_not_image(desktop_image):
+    """A model listed in VISION_INCAPABLE_MODELS never receives image input.
+
+    The screenshot goes to the vision proxy (glm-5.3-flash, high effort, no
+    tools, the read-out instructions); the session request carries only the
+    proxy's text read-out.
+    """
+    ref, png = desktop_image
+    readout = "SCREEN: Example Domain\nTARGETS:\nMore information | link | 500,620"
+    recorder = Recorder(sse(CREATED, text_delta(readout), COMPLETED))
+    model = build(recorder, model_id="perplexity/glm-5.3")
+    await collect(model, desktop_messages(ref))
+    proxy, session = recorder.requests
+    assert proxy["model"] == VISION_PROXY_MODEL
+    assert proxy["reasoning"] == {"effort": VISION_PROXY_EFFORT}
+    assert proxy["instructions"] == VISION_PROXY_INSTRUCTIONS
+    assert not proxy.get("tools")
+    sent = proxy["input"][-1]["content"][-1]
+    assert sent["type"] == "input_image"
+    assert base64.b64decode(sent["image_url"].split(",", 1)[1]) == png
+    assert session["model"] == "perplexity/glm-5.3"
+    assert b"input_image" not in json.dumps(session).encode()
+    note = session["input"][-1]["content"][0]
+    assert note["type"] == "input_text"
+    assert "SCREEN: Example Domain" in note["text"]
+    # 16x12 fixture: pixel 500,620 clamps to the far edge of 0-999 click space.
+    assert "More information | link | 999,999" in note["text"]
+
+
+def test_vision_proxy_pixels_become_click_space():
+    readout = "TARGETS:\nTake control | button | 1293,191\nClose | icon | 1439, 899\nTEXT: 3 updates, 2 left"
+    assert PerplexityModel._normalise_targets(readout, 1440, 900) == (
+        "TARGETS:\nTake control | button | 898,212\nClose | icon | 999,999\nTEXT: 3 updates, 2 left"
     )
 
-    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
 
-    assert events == [
-        {"messageStart": {"role": "assistant"}},
-        {"contentBlockStart": {"contentBlockIndex": 0, "start": {}}},
-        {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "hel"}}},
-        {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "lo"}}},
-        {"contentBlockStop": {"contentBlockIndex": 0}},
-        {"messageStop": {"stopReason": "end_turn"}},
-        {
-            "metadata": {
-                "usage": {"inputTokens": 4, "outputTokens": 3, "totalTokens": 7},
-            }
-        },
-    ]
+@pytest.mark.asyncio
+async def test_vision_capable_model_still_receives_the_image(desktop_image):
+    ref, _ = desktop_image
+    recorder = Recorder(sse(COMPLETED))
+    await collect(build(recorder, model_id="perplexity/glm-5.3-flash"), desktop_messages(ref))
+    assert len(recorder.requests) == 1
+    assert recorder.request["input"][-1]["content"][-1]["type"] == "input_image"
 
 
 @pytest.mark.asyncio
-async def test_text_delta_is_emitted_before_provider_stream_completes() -> None:
-    released = False
+async def test_empty_vision_readout_fails_before_session_request(desktop_image):
+    ref, _ = desktop_image
+    recorder = Recorder(sse(COMPLETED))
+    with pytest.raises(ApplicationError, match="Vision proxy returned no description"):
+        await collect(build(recorder, model_id="perplexity/glm-5.3"), desktop_messages(ref))
+    assert [r["model"] for r in recorder.requests] == [VISION_PROXY_MODEL]
 
-    class LiveResponses:
-        async def create(self, **request):
-            async def stream():
-                nonlocal released
-                yield event("response.output_text.delta", delta="live", output_index=0, content_index=0)
-                released = True
-                yield event("response.output_text.done", text="live", output_index=0, content_index=0)
-                yield completed()
 
-            return stream()
+@pytest.mark.asyncio
+async def test_desktop_hydration_uses_keyword_messages(desktop_image):
+    ref, _ = desktop_image
+    recorder = Recorder(sse(COMPLETED))
+    _ = [frame async for frame in build(recorder).stream(messages=desktop_messages(ref))]
+    assert recorder.request["input"][-1]["content"][-1]["type"] == "input_image"
 
-    model = PerplexityModel(model_id="sonar/test", client=SimpleNamespace(responses=LiveResponses()))
-    events = model.stream([]).__aiter__()
 
-    assert await anext(events) == {"messageStart": {"role": "assistant"}}
-    assert await anext(events) == {"contentBlockStart": {"contentBlockIndex": 0, "start": {}}}
-    assert await anext(events) == {
-        "contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "live"}}
+# ---------------------------------------------------------------------------
+# Framework adherence
+# ---------------------------------------------------------------------------
+
+
+def test_perplexity_model_subclasses_the_concrete_strands_provider() -> None:
+    assert issubclass(PerplexityModel, OpenAIResponsesModel)
+
+
+def test_hand_rolled_parser_helpers_are_gone() -> None:
+    """The parent owns message formatting, sequencing, and error mapping."""
+    for removed in (
+        "_message_items",
+        "_message_item",
+        "_image_part",
+        "flush_ready",
+        "_raise_sdk_error",
+        "_raise_failed",
+        "_native_event",
+    ):
+        assert not hasattr(PerplexityModel, removed), removed
+    for removed in ("_value", "_application_error"):
+        assert not hasattr(perplexity_model, removed), removed
+
+
+def test_only_three_methods_are_overridden() -> None:
+    """Exactly ``_resolve_client_args``, ``_format_request``, ``stream``."""
+    inherited = set(dir(OpenAIResponsesModel))
+    overrides = {
+        name
+        for name, value in vars(PerplexityModel).items()
+        if name in inherited
+        and not name.startswith("__")
+        and name != "_abc_impl"  # ABCMeta machinery, not a method
+        and callable(getattr(value, "__func__", value))
     }
-    assert released is False
+    assert overrides == {"_resolve_client_args", "_format_request", "stream"}
+
+
+def test_module_does_not_use_the_perplexity_sdk_client() -> None:
+    source = (perplexity_model.__file__ or "").strip()
+    assert source
+    text = open(source, encoding="utf-8").read()
+    assert "AsyncPerplexity" not in text
+    assert '_format_chunk({' not in text
+
+
+# ---------------------------------------------------------------------------
+# (1) _resolve_client_args
+# ---------------------------------------------------------------------------
+
+
+def test_client_args_pin_the_agent_api_base_and_disable_retries() -> None:
+    model = build(Recorder(sse(COMPLETED)))
+    args = model._resolve_client_args()
+
+    assert args["base_url"] == f"{PERPLEXITY_API_BASE}/v1"
+    assert args["api_key"] == "pplx-test"
+    assert args["max_retries"] == 0
+    assert isinstance(args["http_client"], httpx.AsyncClient)
 
 
 @pytest.mark.asyncio
-async def test_text_done_supplies_text_when_delta_is_missing() -> None:
-    client = FakeClient(
-        [
-            event("response.output_text.done", text="complete", output_index=0, content_index=0),
-            completed(),
-        ]
-    )
+async def test_request_goes_to_the_pinned_v1_responses_endpoint() -> None:
+    recorder = Recorder(sse(COMPLETED))
+    await collect(build(recorder))
 
-    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
+    assert recorder.urls == [f"{PERPLEXITY_API_BASE}/v1/responses"]
+    assert recorder.headers[0]["authorization"] == "Bearer pplx-test"
 
-    assert {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "complete"}}} in events
 
+def test_api_key_never_enters_model_configuration() -> None:
+    model = build(Recorder(sse(COMPLETED)), params={"temperature": 0.2})
 
-@pytest.mark.asyncio
-async def test_stream_maps_separate_text_output_items_to_separate_blocks() -> None:
-    client = FakeClient(
-        [
-            event("response.output_text.delta", delta="first", output_index=0, content_index=0),
-            event("response.output_text.done", text="first", output_index=0, content_index=0),
-            event("response.output_text.delta", delta="second", output_index=1, content_index=0),
-            event("response.output_text.done", text="second", output_index=1, content_index=0),
-            completed(),
-        ]
-    )
+    assert "api_key" not in model.get_config()
+    assert model.get_config()["model_id"] == "sonar/test"
+    assert model.get_config()["params"] == {"temperature": 0.2}
 
-    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
 
-    assert events[:7] == [
-        {"messageStart": {"role": "assistant"}},
-        {"contentBlockStart": {"contentBlockIndex": 0, "start": {}}},
-        {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "first"}}},
-        {"contentBlockStop": {"contentBlockIndex": 0}},
-        {"contentBlockStart": {"contentBlockIndex": 1, "start": {}}},
-        {"contentBlockDelta": {"contentBlockIndex": 1, "delta": {"text": "second"}}},
-        {"contentBlockStop": {"contentBlockIndex": 1}},
-    ]
+# ---------------------------------------------------------------------------
+# (2) _format_request
+# ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_stream_maps_multiple_fragmented_calls_and_signatures() -> None:
-    calls = [
-        SimpleNamespace(
-            type="function_call",
-            call_id="a",
-            name="one",
-            arguments='{"x":',
-            thought_signature=None,
-            status="in_progress",
-        ),
-        SimpleNamespace(
-            type="function_call",
-            call_id="b",
-            name="two",
-            arguments="{",
-            thought_signature=None,
-            status="in_progress",
-        ),
-    ]
-    done_calls = [
-        SimpleNamespace(
-            type="function_call",
-            call_id="a",
-            name="one",
-            arguments='{"x": 1}',
-            thought_signature="s1",
-            status="completed",
-        ),
-        SimpleNamespace(
-            type="function_call",
-            call_id="b",
-            name="two",
-            arguments='{"y": 2}',
-            thought_signature=None,
-            status="completed",
-        ),
-    ]
-    client = FakeClient(
-        [
-            event("response.output_item.added", item=calls[0], output_index=0),
-            event("response.output_item.added", item=calls[1], output_index=1),
-            event("response.output_item.done", item=done_calls[0], output_index=0),
-            event("response.output_item.done", item=done_calls[1], output_index=1),
-            completed(output=done_calls),
-        ]
-    )
+def test_catalog_model_id_is_sent_as_model() -> None:
+    request = build(Recorder(sse(COMPLETED)))._format_request([], None, "be exact")
 
-    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
-
-    starts = [item for item in events if "contentBlockStart" in item]
-    deltas = [item for item in events if "contentBlockDelta" in item]
-    assert starts == [
-        {
-            "contentBlockStart": {
-                "contentBlockIndex": 0,
-                "start": {"toolUse": {"toolUseId": "a", "name": "one", "reasoningSignature": "s1"}},
-            }
-        },
-        {
-            "contentBlockStart": {
-                "contentBlockIndex": 1,
-                "start": {"toolUse": {"toolUseId": "b", "name": "two"}},
-            }
-        },
-    ]
-    assert [item["contentBlockDelta"]["delta"]["toolUse"]["input"] for item in deltas] == [
-        '{"x":',
-        " 1}",
-        "{",
-        '"y": 2}',
-    ]
-    assert {item["contentBlockStop"]["contentBlockIndex"] for item in events if "contentBlockStop" in item} == {0, 1}
-    assert {"messageStop": {"stopReason": "tool_use"}} in events
-
-
-@pytest.mark.asyncio
-async def test_stream_emits_completed_calls_in_output_index_order() -> None:
-    first = SimpleNamespace(
-        type="function_call", call_id="a", name="one", arguments="{}", status="completed"
-    )
-    second = SimpleNamespace(
-        type="function_call", call_id="b", name="two", arguments="{}", status="completed"
-    )
-    client = FakeClient(
-        [
-            event("response.output_item.done", item=second, output_index=1),
-            event("response.output_item.done", item=first, output_index=0),
-            completed(output=[first, second]),
-        ]
-    )
-
-    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
-    starts = [item["contentBlockStart"] for item in events if "contentBlockStart" in item]
-
-    assert [item["start"]["toolUse"]["name"] for item in starts] == ["one", "two"]
-
-
-@pytest.mark.asyncio
-async def test_stream_preserves_output_order_across_calls_and_text() -> None:
-    call = SimpleNamespace(
-        type="function_call", call_id="a", name="one", arguments="{}", status="completed"
-    )
-    client = FakeClient(
-        [
-            event("response.output_item.done", item=call, output_index=0),
-            event("response.output_text.delta", delta="after", output_index=1, content_index=0),
-            event("response.output_text.done", text="after", output_index=1, content_index=0),
-            completed(output=[call]),
-        ]
-    )
-
-    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
-    starts = [item["contentBlockStart"]["start"] for item in events if "contentBlockStart" in item]
-
-    assert starts == [{"toolUse": {"toolUseId": "a", "name": "one"}}, {}]
-
-
-@pytest.mark.asyncio
-async def test_native_output_item_does_not_block_later_text() -> None:
-    native_item = SimpleNamespace(type="search_results", status="completed")
-    client = FakeClient(
-        [
-            event("response.output_item.done", item=native_item, output_index=0),
-            event("response.output_text.delta", delta="answer", output_index=1, content_index=0),
-            event("response.output_text.done", text="answer", output_index=1, content_index=0),
-            completed(output=[native_item]),
-        ]
-    )
-
-    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
-
-    assert {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "answer"}}} in events
-
-
-@pytest.mark.asyncio
-async def test_stream_closes_unfinished_text_blocks_in_start_order() -> None:
-    client = FakeClient(
-        [
-            event("response.output_text.delta", delta="first", output_index=0, content_index=0),
-            event("response.output_text.delta", delta="second", output_index=1, content_index=0),
-            completed(),
-        ]
-    )
-
-    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
-    stops = [item["contentBlockStop"]["contentBlockIndex"] for item in events if "contentBlockStop" in item]
-
-    assert stops == [0, 1]
-
-
-@pytest.mark.asyncio
-async def test_malformed_function_arguments_are_nonretryable() -> None:
-    call = SimpleNamespace(
-        type="function_call",
-        call_id="a",
-        name="one",
-        arguments="not-json",
-        status="completed",
-    )
-    client = FakeClient(
-        [
-            event("response.output_item.added", item=call, output_index=0),
-            event("response.output_item.done", item=call, output_index=0),
-        ]
-    )
-    with pytest.raises(ApplicationError) as caught:
-        await collect(PerplexityModel(model_id="sonar/test", client=client))
-    assert caught.value.non_retryable is True
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("error_type", "status_code", "non_retryable"),
-    [
-        (AuthenticationError, 401, True),
-        (BadRequestError, 400, True),
-        (RateLimitError, 429, False),
-        (InternalServerError, 500, False),
-    ],
-)
-async def test_http_failure_classification(error_type, status_code, non_retryable) -> None:
-    request = httpx.Request("POST", "https://api.perplexity.ai/v1/agent")
-    response = httpx.Response(status_code, request=request)
-    error = error_type("failure", response=response, body=None)
-    with pytest.raises(ApplicationError) as caught:
-        await collect(PerplexityModel(model_id="sonar/test", client=FakeClient(error=error)))
-    assert caught.value.non_retryable is non_retryable
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("code,non_retryable", [("invalid_request_error", True), ("server_error", False)])
-async def test_response_failed_classification(code, non_retryable) -> None:
-    failure = event("response.failed", error=SimpleNamespace(message="failed", code=code, type=code))
-    with pytest.raises(ApplicationError) as caught:
-        await collect(PerplexityModel(model_id="sonar/test", client=FakeClient([failure])))
-    assert caught.value.non_retryable is non_retryable
-
-
-@pytest.mark.asyncio
-async def test_stream_without_authoritative_terminal_event_raises() -> None:
-    client = FakeClient([event("response.output_text.delta", delta="partial")])
-    with pytest.raises(ApplicationError, match="authoritative terminal"):
-        await collect(PerplexityModel(model_id="sonar/test", client=client))
-
-
-@pytest.mark.asyncio
-async def test_structured_output_collects_text_and_validates_json() -> None:
-    class Answer(BaseModel):
-        value: int
-
-    client = FakeClient(
-        [
-            event("response.output_text.delta", delta='{"value":'),
-            event("response.output_text.delta", delta=" 7}"),
-            completed(),
-        ]
-    )
-    events = [
-        item
-        async for item in PerplexityModel(model_id="sonar/test", client=client).structured_output(Answer, [])
-    ]
-    assert events[-1] == {"output": Answer(value=7)}
-
-
-def test_update_config_preserves_minimal_model_config() -> None:
-    model = PerplexityModel(model_id="one", client=FakeClient(), params={"temperature": 0.1})
-    model.update_config(model_id="two", params={"temperature": 0.3})
-    assert model.get_config() == {"model_id": "two", "params": {"temperature": 0.3}}
-    assert not {"api_key", "background", "store", "max_output_tokens", "previous_response_id"} & model.get_config().keys()
-
-
-@pytest.mark.parametrize(
-    "reserved",
-    [
-        "model",
-        "preset",
-        "input",
-        "stream",
-        "extra_headers",
-        "extra_query",
-        "extra_body",
-        "timeout",
-    ],
-)
-def test_reserved_request_parameters_are_rejected(reserved) -> None:
-    with pytest.raises(ApplicationError, match="Unsupported model parameters") as caught:
-        PerplexityModel(model_id="sonar/test", params={reserved: "override"}, client=FakeClient())
-
-    assert caught.value.non_retryable is True
-
-
-def test_default_client_keeps_credentials_out_of_config_and_disables_retries(monkeypatch) -> None:
-    created = {}
-
-    def fake_client(**kwargs):
-        created.update(kwargs)
-        return FakeClient()
-
-    monkeypatch.setattr(perplexity_model, "AsyncPerplexity", fake_client)
-
-    model = PerplexityModel(api_key="secret", model_id="sonar/test", params={"temperature": 0.2})
-
-    assert created == {"api_key": "secret", "max_retries": 0}
-    assert model.get_config() == {"model_id": "sonar/test", "params": {"temperature": 0.2}}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "unsupported",
-    [
-        {"tool_choice": {"any": {}}},
-        {"unknown_option": True},
-    ],
-)
-async def test_unsupported_strands_options_are_nonretryable(unsupported) -> None:
-    with pytest.raises(ApplicationError, match="Unsupported Strands options") as caught:
-        await collect(PerplexityModel(model_id="sonar/test", client=FakeClient()), **unsupported)
-    assert caught.value.non_retryable is True
-
-
-@pytest.mark.asyncio
-async def test_plain_system_prompt_accepts_equivalent_structured_content() -> None:
-    client = FakeClient([completed()])
-
-    await collect(
-        PerplexityModel(model_id="sonar/test", client=client),
-        system_prompt="plain",
-        system_prompt_content=[{"text": "plain"}],
-    )
-
-    assert client.responses.request["instructions"] == "plain"
-
-
-@pytest.mark.asyncio
-async def test_structured_system_prompt_text_is_authoritative() -> None:
-    client = FakeClient([completed()])
-
-    await collect(
-        PerplexityModel(model_id="sonar/test", client=client),
-        system_prompt="plain",
-        system_prompt_content=[{"text": "first"}, {"cachePoint": {"type": "default"}}, {"text": "second"}],
-        model_state={},
-    )
-
-    assert client.responses.request["instructions"] == "first\nsecond"
-
-
-@pytest.mark.asyncio
-async def test_incomplete_function_call_is_retryable() -> None:
-    call = SimpleNamespace(
-        type="function_call",
-        call_id="a",
-        name="one",
-        arguments='{"x":',
-        status="in_progress",
-    )
-    client = FakeClient(
-        [
-            event("response.output_item.added", item=call, output_index=0),
-            completed(output=[]),
-        ]
-    )
-
-    with pytest.raises(ApplicationError, match="Incomplete function call") as caught:
-        await collect(PerplexityModel(model_id="sonar/test", client=client))
-    assert caught.value.non_retryable is False
-
-
-@pytest.mark.asyncio
-async def test_terminal_output_is_authoritative_for_stop_reason() -> None:
-    call = SimpleNamespace(
-        type="function_call",
-        call_id="a",
-        name="one",
-        arguments="{}",
-        status="completed",
-    )
-    client = FakeClient(
-        [
-            event("response.output_item.done", item=call, output_index=0),
-            completed(output=[]),
-        ]
-    )
-
-    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
-
-    assert {"messageStop": {"stopReason": "end_turn"}} in events
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["failed", "cancelled", "in_progress", "queued", "requires_action"])
-async def test_noncompleted_function_call_is_retryable(status) -> None:
-    call = SimpleNamespace(
-        type="function_call",
-        call_id="a",
-        name="one",
-        arguments="{}",
-        status=status,
-    )
-    client = FakeClient([event("response.output_item.done", item=call, output_index=0)])
-
-    with pytest.raises(ApplicationError, match="Non-completed function call") as caught:
-        await collect(PerplexityModel(model_id="sonar/test", client=client))
-    assert caught.value.non_retryable is False
-
-
-@pytest.mark.asyncio
-async def test_function_call_without_status_is_retryable() -> None:
-    call = SimpleNamespace(type="function_call", call_id="a", name="one", arguments="{}")
-    client = FakeClient([event("response.output_item.done", item=call, output_index=0)])
-
-    with pytest.raises(ApplicationError, match="Non-completed function call: missing") as caught:
-        await collect(PerplexityModel(model_id="sonar/test", client=client))
-    assert caught.value.non_retryable is False
-
-
-@pytest.mark.asyncio
-async def test_missing_terminal_usage_does_not_emit_metadata() -> None:
-    events = await collect(PerplexityModel(model_id="sonar/test", client=FakeClient([completed()])))
-
-    assert not any("metadata" in item for item in events)
+    assert request["model"] == "sonar/test"
+    assert "preset" not in request
+    assert request["instructions"] == "be exact"
+    assert request["stream"] is True
 
 
 @pytest.mark.parametrize("name", ["fast", "low", "medium", "high", "xhigh", "wide-research"])
-def test_preset_request_sends_preset_and_no_model(name) -> None:
-    model = PerplexityModel(model_id=f"preset:{name}", client=FakeClient())
+def test_preset_request_sends_preset_and_no_model(name: str) -> None:
+    model = build(Recorder(sse(COMPLETED)), model_id=f"preset:{name}")
 
     request = model._format_request([], None, "be exact")
 
-    assert request["preset"] == name
+    # `preset` is not a named OpenAI SDK kwarg, so it rides in extra_body.
+    assert request["extra_body"]["preset"] == name
     assert "model" not in request
-    assert request == {
-        "preset": name,
-        "input": [],
-        "stream": True,
-        "tools": [],
-        "instructions": "be exact",
-    }
+    assert "preset" not in request
     assert model.get_config()["model_id"] == f"preset:{name}"
 
 
 @pytest.mark.asyncio
-async def test_preset_request_still_sends_tools_instructions_and_input() -> None:
-    client = FakeClient([completed()])
-    model = PerplexityModel(model_id="preset:high", client=client)
+@pytest.mark.parametrize("name", ["fast", "high", "wide-research"])
+async def test_preset_reaches_the_wire_and_model_does_not(name: str) -> None:
+    recorder = Recorder(sse(COMPLETED))
+
+    await collect(build(recorder, model_id=f"preset:{name}"))
+
+    assert recorder.request["preset"] == name
+    assert "model" not in recorder.request
+
+
+def test_store_survives_the_parents_stateful_override() -> None:
+    """The parent writes ``store`` AFTER **params, so stateful must be True."""
+    model = build(Recorder(sse(COMPLETED)), params={"store": True, "background": True})
+
+    request = model._format_request([], None, None)
+
+    assert model.stateful is True
+    assert request["store"] is True
+    assert request["background"] is True
+
+
+def test_object_schemas_without_properties_are_normalized() -> None:
+    model = build(Recorder(sse(COMPLETED)))
+    tools = [
+        {
+            "name": "lookup",
+            "description": "Lookup",
+            "inputSchema": {"json": {"type": "object", "properties": {"filter": {"type": "object"}}}},
+        }
+    ]
+
+    request = model._format_request([], tools, None)
+
+    assert request["tools"] == [
+        {
+            "type": "function",
+            "name": "lookup",
+            "description": "Lookup",
+            "parameters": {
+                "type": "object",
+                "properties": {"filter": {"type": "object", "properties": {}}},
+            },
+        }
+    ]
+
+
+def test_native_tools_from_params_precede_function_tools_unmodified() -> None:
+    native = [
+        {"type": "web_search", "filters": {"recency": "week"}},
+        {"type": "connector", "id": "connector_github", "server_label": "github"},
+    ]
+    params = {"tools": native, "temperature": 0.2}
+    original = copy.deepcopy(params)
+    model = build(Recorder(sse(COMPLETED)), params=params)
     tools = [
         {
             "name": "lookup",
@@ -733,189 +565,1308 @@ async def test_preset_request_still_sends_tools_instructions_and_input() -> None
         }
     ]
 
+    request = model._format_request([], tools, None)
+
+    assert request["tools"][:2] == native
+    assert request["tools"][2]["type"] == "function"
+    assert params == original, "params must not be mutated by request formatting"
+
+
+@pytest.mark.asyncio
+async def test_agent_api_params_pass_through_to_the_wire() -> None:
+    params = {
+        "skills": [{"type": "builtin", "name": "office"}],
+        "reasoning": {"effort": "high"},
+        "max_steps": 100,
+        "background": True,
+        "store": True,
+        "max_output_tokens": 4096,
+        "temperature": 0.2,
+    }
+    original = copy.deepcopy(params)
+    recorder = Recorder(sse(COMPLETED))
+
+    await collect(build(recorder, params=params))
+
+    for key, value in original.items():
+        assert recorder.request[key] == value, key
+    assert recorder.request["stream"] is True
+    assert params == original
+
+
+@pytest.fixture
+def think_spec():
+    from strands import tool
+
+    @tool
+    def think(thought: str, reasoning_effort: str, cycle_count: int) -> str:
+        """Think with model-selected effort and cycles."""
+        raise AssertionError("Request-shaping tests must not execute Think")
+
+    return think.tool_spec
+
+
+@pytest.mark.asyncio
+async def test_require_think_invocation_state_is_dead_and_choice_passes_through(think_spec) -> None:
+    """``require_think`` was the deleted ``_ThinkFirstHook``'s wiring; the model
+    now decides think cycles itself, so the flag must not force tool_choice."""
+    recorder = Recorder(sse(COMPLETED))
+    model = build(recorder)
+
     await collect(
-        model,
-        [{"role": "user", "content": [{"text": "hi"}]}],
-        tool_specs=tools,
-        system_prompt="be exact",
+        model, tool_specs=[think_spec], tool_choice={"auto": {}},
+        invocation_state={"require_think": True, "reasoning_effort": "high"},
     )
 
-    request = client.responses.request
-    assert request["preset"] == "high"
-    assert "model" not in request
-    assert request["instructions"] == "be exact"
-    assert request["input"] == [{"type": "message", "role": "user", "content": "hi"}]
-    assert request["tools"] == [
+    assert recorder.request["tool_choice"] == "auto"
+    assert recorder.request["reasoning"] == {"effort": "high"}
+    assert "invocation_state" not in recorder.request
+    assert "require_think" not in recorder.request
+    assert "call think first" not in (recorder.request.get("instructions") or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_invalid_reasoning_effort_fails_before_the_api_call() -> None:
+    """An effort outside the Agent API's enum is a permanent 400; raise
+    non-retryable before any request goes out."""
+    recorder = Recorder(sse(COMPLETED))
+
+    with pytest.raises(ApplicationError) as caught:
+        await collect(build(recorder), invocation_state={"reasoning_effort": "ludicrous"})
+
+    assert caught.value.non_retryable is True
+    assert "reasoning effort" in str(caught.value)
+    assert recorder.requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kwargs,expected_choice", [
+    pytest.param({}, None, id="sdk-default"),
+    pytest.param({"tool_choice": {"auto": {}}}, "auto", id="no-state"),
+    pytest.param(
+        {"tool_choice": {"auto": {}}, "invocation_state": {}}, "auto", id="empty-state",
+    ),
+])
+async def test_tool_choice_passes_through_unmodified(think_spec, kwargs, expected_choice) -> None:
+    recorder = Recorder(sse(COMPLETED))
+    await collect(build(recorder), tool_specs=[think_spec], **kwargs)
+
+    if expected_choice is None:
+        assert "tool_choice" not in recorder.request
+    else:
+        assert recorder.request["tool_choice"] == expected_choice
+    assert recorder.request["input"] == []
+    assert "invocation_state" not in recorder.request
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effort", ["minimal", "low", "medium", "high", "xhigh", "max"])
+async def test_astra_invocation_reasoning_effort_is_honored_without_leaking(think_spec, effort) -> None:
+    params = {"reasoning": {"effort": "medium"}}
+    recorder = Recorder(sse(COMPLETED))
+    model = build(recorder, model_id="openai/gpt-6-astra", params=params)
+    before = copy.deepcopy(model.get_config())
+    await collect(
+        model, tool_specs=[think_spec], tool_choice={"auto": {}},
+        invocation_state={"reasoning_effort": effort},
+    )
+
+    assert recorder.request["model"] == "openai/gpt-6-astra"
+    assert recorder.request["reasoning"] == {"effort": effort}
+    assert recorder.request["tool_choice"] == "auto"
+    assert "reasoning_effort" not in recorder.request
+    assert model.get_config() == before
+
+    await collect(model, tool_specs=[think_spec], tool_choice={"auto": {}})
+    assert recorder.request["reasoning"] == params["reasoning"] == {"effort": "medium"}
+    assert model.get_config() == before
+
+
+@pytest.mark.asyncio
+async def test_astra_factory_matches_live_model_native_requests(monkeypatch) -> None:
+    # Import the real worker factories without loading the protected .env.local.
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
+    from config import BUILTIN_SKILLS, CONNECTORS, MAX_STEPS_CEILING, THINK_MODEL_ID
+    import run_worker
+
+    monkeypatch.setenv("DATACOMMONS_MCP_URL", "https://dc.example/mcp")
+    monkeypatch.setenv("DC_API_KEY", "dc-test-key")
+    monkeypatch.setenv("POPHIVE_MCP_URL", "https://pophive.example/mcp")
+    connectors = [{"type": "connector", **connector} for connector in CONNECTORS]
+    expected_tools = [
+        {"type": name}
+        for name in ("web_search", "fetch_url", "image_search", "people_search", "finance_search", "sandbox")
+    ] + [
         {
-            "type": "function",
+            "type": "mcp", "server_label": "datacommons", "server_url": "https://dc.example/mcp",
+            "headers": {"X-API-Key": "dc-test-key"},
+            "allowed_tools": [
+                "search_indicators", "search_child_indicators", "get_variable_metadata",
+                "get_observations", "get_child_observations",
+            ],
+            "defer_loading": True,
+        },
+        {
+            "type": "mcp", "server_label": "pophive", "server_url": "https://pophive.example/mcp",
+            "defer_loading": True,
+        },
+        *connectors,
+    ]
+    assert THINK_MODEL_ID == "openai/gpt-6-astra"
+    regular_id = "google/gemini-3.8-flash"
+    factories, _ = run_worker.build_perplexity_factories("pplx-test", [THINK_MODEL_ID, regular_id])
+    astra, regular, fresh_astra = factories[THINK_MODEL_ID](), factories[regular_id](), factories[THINK_MODEL_ID]()
+    assert astra is not regular and astra is not fresh_astra and regular is not fresh_astra
+    recorder = Recorder(sse(COMPLETED))
+
+    for model in (astra, regular, fresh_astra):
+        assert isinstance(model, PerplexityModel)
+        monkeypatch.setattr(model, "_transport", httpx.MockTransport(recorder.handler))
+        await collect(model, system_prompt="Use the available tools and cite evidence.")
+        request = recorder.request
+        assert request["tools"] == expected_tools
+        assert request["instructions"] == "Use the available tools and cite evidence."
+        assert request["max_steps"] == MAX_STEPS_CEILING
+        assert request["skills"] == [dict(skill) for skill in BUILTIN_SKILLS]
+        assert request["stream"] is True and request["store"] is True and request["background"] is True
+        assert request["max_output_tokens"] == run_worker.max_output_tokens_for(request["model"])
+
+    assert [request["model"] for request in recorder.requests] == [THINK_MODEL_ID, regular_id, THINK_MODEL_ID]
+    # Output ceilings are provider-specific; all other request settings match.
+    comparable = [
+        {key: value for key, value in request.items() if key not in ("model", "max_output_tokens")}
+        for request in recorder.requests
+    ]
+    assert comparable[0] == comparable[1] == comparable[2]
+    astra.get_config()["params"]["tools"][-1]["id"] = "changed-test-connector"
+    assert regular.get_config()["params"]["tools"] == expected_tools
+    assert fresh_astra.get_config()["params"]["tools"] == expected_tools
+    assert factories[THINK_MODEL_ID]().get_config()["params"]["tools"] == expected_tools
+
+
+@pytest.mark.asyncio
+async def test_messages_and_tool_history_use_the_parent_formatter() -> None:
+    recorder = Recorder(sse(COMPLETED))
+    messages = [
+        {"role": "user", "content": [{"text": "inspect"}]},
+        {
+            "role": "assistant",
+            "content": [
+                {"toolUse": {"toolUseId": "call-1", "name": "lookup", "input": {"q": "x"}}}
+            ],
+        },
+        {
+            "role": "user",
+            "content": [{"toolResult": {"toolUseId": "call-1", "content": [{"json": {"answer": 3}}]}}],
+        },
+    ]
+
+    await collect(build(recorder), messages)
+
+    assert recorder.request["input"] == [
+        {"role": "user", "content": [{"type": "input_text", "text": "inspect"}]},
+        {
+            "type": "function_call",
+            "call_id": "call-1",
             "name": "lookup",
-            "description": "Lookup",
-            "parameters": {"type": "object", "properties": {}},
+            "arguments": '{"q": "x"}',
+        },
+        {"type": "function_call_output", "call_id": "call-1", "output": '{"answer": 3}'},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_images_are_encoded_by_the_parent_formatter() -> None:
+    recorder = Recorder(sse(COMPLETED))
+    messages = [
+        {
+            "role": "user",
+            "content": [{"image": {"format": "png", "source": {"bytes": b"png"}}}],
         }
     ]
+
+    await collect(build(recorder), messages)
+
+    assert recorder.request["input"] == [
+        {
+            "role": "user",
+            "content": [{"type": "input_image", "image_url": "data:image/png;base64,cG5n"}],
+        }
+    ]
+
+
+def _pdf_with_text(text: str) -> bytes:
+    """A minimal valid one-page PDF whose content stream draws ``text``."""
+    stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, obj in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{number} 0 obj\n".encode() + obj + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n".encode() + b"0000000000 65535 f \n"
+    for offset in offsets:
+        out += f"{offset:010d} 00000 n \n".encode()
+    out += (f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref}\n%%EOF").encode()
+    return bytes(out)
+
+
+def _blank_pdf() -> bytes:
+    """A one-page PDF with no content stream -- no text layer, like a scan."""
+    from io import BytesIO
+
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    buffer = BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_pdf_attachments_inline_their_extracted_text() -> None:
+    """PDFs ride as parsed text: the API's validator rejects ``input_file``."""
+    recorder = Recorder(sse(COMPLETED))
+    messages = [{"role": "user", "content": [
+        {"document": {"format": "pdf", "source": {"bytes": _pdf_with_text("hello pdf")}}},
+    ]}]
+
+    await collect(build(recorder), messages)
+
+    text = recorder.request["input"][0]["content"][0]["text"]
+    assert text.startswith("Attached document (format: pdf):\n\n")
+    assert "hello pdf" in text
+
+
+@pytest.mark.asyncio
+async def test_scanned_pdfs_fail_before_the_request() -> None:
+    """A PDF with no text layer names the reason instead of sending junk."""
+    recorder = Recorder(sse(COMPLETED))
+    messages = [{"role": "user", "content": [
+        {"document": {"format": "pdf", "source": {"bytes": _blank_pdf()}}},
+    ]}]
+
+    with pytest.raises(ApplicationError, match="no extractable text") as excinfo:
+        await collect(build(recorder), messages)
+
+    assert excinfo.value.non_retryable
+    assert recorder.requests == []
+
+
+@pytest.mark.asyncio
+async def test_malformed_pdfs_fail_before_the_request() -> None:
+    recorder = Recorder(sse(COMPLETED))
+    messages = [{"role": "user", "content": [
+        {"document": {"format": "pdf", "source": {"bytes": b"not a pdf"}}},
+    ]}]
+
+    with pytest.raises(ApplicationError, match="not readable") as excinfo:
+        await collect(build(recorder), messages)
+
+    assert excinfo.value.non_retryable
+    assert recorder.requests == []
+
+
+@pytest.mark.asyncio
+async def test_long_documents_truncate_with_a_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(perplexity_model, "DOCUMENT_INLINE_MAX_CHARS", 10)
+    recorder = Recorder(sse(COMPLETED))
+    messages = [{"role": "user", "content": [
+        {"document": {"format": "md", "source": {"bytes": b"a" * 25}}},
+    ]}]
+
+    await collect(build(recorder), messages)
+
+    text = recorder.request["input"][0]["content"][0]["text"]
+    assert text == ("Attached document (format: md):\n\n"
+                    "aaaaaaaaaa\n\n[truncated: kept the first 10 of 25 characters]")
+
+
+def test_source_bytes_accepts_bytes_base64_and_legacy_text() -> None:
+    assert perplexity_model.source_bytes(b"\x89PNG") == b"\x89PNG"
+    assert perplexity_model.source_bytes(base64.b64encode(b"\x89PNG").decode()) == b"\x89PNG"
+    assert perplexity_model.source_bytes("plain text!") == b"plain text!"
+
+
+# ---------------------------------------------------------------------------
+# (3) native-event tap + stream
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_happy_path_frame_sequence() -> None:
+    """Text, tool call, and exactly two native frames before messageStop."""
+    recorder = Recorder(
+        sse(
+            CREATED,
+            text_delta("Check", index=0),
+            text_delta("ing", index=0),
+            text_delta(" now", index=0),
+            function_call_added(),
+            function_call_done(),
+            SEARCH_RESULTS_EVENT,
+            output_item_done(SHARE_FILE_ITEM),
+            COMPLETED,
+        )
+    )
+
+    events = await collect(build(recorder))
+
+    assert events[0] == {"messageStart": {"role": "assistant"}}
+    assert {"contentBlockStart": {"start": {}}} in events
+    assert [
+        event["contentBlockDelta"]["delta"]["text"]
+        for event in events
+        if "contentBlockDelta" in event and "text" in event["contentBlockDelta"]["delta"]
+    ] == ["Check", "ing", " now"]
+    assert {
+        "contentBlockStart": {"start": {"toolUse": {"name": "lookup", "toolUseId": "call_1"}}}
+    } in events
+    assert {
+        "contentBlockDelta": {"delta": {"toolUse": {"input": '{"q": "x"}'}}}
+    } in events
+
+    native = [event for event in events if "perplexity" in event]
+    assert native == [
+        {"perplexity": SEARCH_RESULTS_EVENT},
+        {"perplexity": SHARE_FILE_ITEM},
+    ]
+    stop_index = next(i for i, event in enumerate(events) if "messageStop" in event)
+    assert all(events.index(frame) < stop_index for frame in native)
+    assert events[stop_index] == {"messageStop": {"stopReason": "tool_use"}}
+    assert events[-1]["metadata"]["usage"] == {
+        "inputTokens": 4,
+        "outputTokens": 3,
+        "totalTokens": 7,
+    }
+
+
+def tool_use_inputs(events: list[dict[str, Any]]) -> dict[str, str]:
+    """``toolUseId`` -> the ``input`` string the agent will ``json.loads``."""
+    inputs: dict[str, str] = {}
+    current: str | None = None
+    for event in events:
+        if (start := event.get("contentBlockStart")) is not None:
+            current = ((start.get("start") or {}).get("toolUse") or {}).get("toolUseId")
+        elif "contentBlockStop" in event:
+            current = None
+        elif current and (delta := event.get("contentBlockDelta", {}).get("delta", {}).get("toolUse")):
+            inputs[current] = inputs.get(current, "") + delta["input"]
+    return inputs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "wire",
+    [
+        # The parent registers a call only on ``.added`` (openai_responses.py:388);
+        # the live API sends ``.added`` AND ``.done`` for every call.
+        pytest.param([function_call_added()], id="added-only"),
+        pytest.param([function_call_added(), function_call_done()], id="added-then-done"),
+        pytest.param([function_call_added(arguments=""), function_call_done()], id="empty-added-then-done"),
+    ],
+)
+async def test_function_call_arguments_come_from_the_output_item(wire: list[dict]) -> None:
+    """Regression: the Agent API has no ``function_call_arguments.*`` events.
+
+    Before this, every tool call reached the agent with ``input: ""`` -> ``{}``
+    -> ``missing a required argument: 'path'`` on ``load_tool``, in a loop
+    until the workflow history cap terminated the run (chat-c8ad6bf3a395998e).
+    """
+    recorder = Recorder(sse(CREATED, *wire, COMPLETED))
+
+    events = await collect(build(recorder))
+
+    assert tool_use_inputs(events) == {"call_1": '{"q": "x"}'}
+    assert {"messageStop": {"stopReason": "tool_use"}} in events
+
+
+@pytest.mark.asyncio
+async def test_done_item_arguments_win_over_added_item_arguments() -> None:
+    recorder = Recorder(
+        sse(CREATED, function_call_added(arguments='{"q": "par'), function_call_done('{"q": "final"}'), COMPLETED)
+    )
+
+    events = await collect(build(recorder))
+
+    assert tool_use_inputs(events) == {"call_1": '{"q": "final"}'}
+
+
+@pytest.mark.asyncio
+async def test_parallel_function_calls_keep_their_own_arguments() -> None:
+    """Two calls in one turn (ConcurrentToolExecutor fan-out) must not swap inputs."""
+    recorder = Recorder(
+        sse(
+            CREATED,
+            function_call_added(call_id="call_a", name="load_tool", item_id="fc_a",
+                                arguments='{"path": "calculator", "name": "calculator"}'),
+            function_call_added(call_id="call_b", name="think", item_id="fc_b",
+                                arguments='{"thought": "plan", "cycle_count": 2}'),
+            function_call_done(call_id="call_a", name="load_tool", item_id="fc_a",
+                               arguments='{"path": "calculator", "name": "calculator"}'),
+            function_call_done(call_id="call_b", name="think", item_id="fc_b",
+                               arguments='{"thought": "plan", "cycle_count": 2}'),
+            COMPLETED,
+        )
+    )
+
+    events = await collect(build(recorder))
+
+    inputs = tool_use_inputs(events)
+    assert json.loads(inputs["call_a"]) == {"path": "calculator", "name": "calculator"}
+    assert json.loads(inputs["call_b"]) == {"thought": "plan", "cycle_count": 2}
+    names = [
+        e["contentBlockStart"]["start"]["toolUse"]["name"]
+        for e in events
+        if "toolUse" in (e.get("contentBlockStart", {}).get("start") or {})
+    ]
+    assert names == ["load_tool", "think"]
+
+
+@pytest.mark.asyncio
+async def test_openai_style_argument_delta_events_still_win_when_present() -> None:
+    """If a provider does emit ``function_call_arguments.done``, the parent's
+    value is kept: the fill only replaces an EMPTY delta."""
+    openai_done = {
+        "type": "response.function_call_arguments.done",
+        "item_id": "fc_1",
+        "output_index": 1,
+        "sequence_number": 11,
+        "arguments": '{"q": "from-delta"}',
+    }
+    recorder = Recorder(sse(CREATED, function_call_added(arguments='{"q": "from-item"}'), openai_done, COMPLETED))
+
+    events = await collect(build(recorder))
+
+    assert tool_use_inputs(events) == {"call_1": '{"q": "from-delta"}'}
+
+
+@pytest.mark.asyncio
+async def test_function_call_arguments_do_not_leak_into_the_next_turn() -> None:
+    recorder = Recorder(sse(CREATED, function_call_added(), function_call_done(), COMPLETED))
+    model = build(recorder)
+    await collect(model)
+    assert model._invocation.get() is None
+
+    recorder.body = sse(CREATED, text_delta("plain"), COMPLETED)
+    second = await collect(model)
+
+    assert model._invocation.get() is None
+    assert tool_use_inputs(second) == {}
+
+
+def test_function_call_item_filter_is_total() -> None:
+    """No payload shape can make the argument record raise or mis-key."""
+    fc = perplexity_model._function_call_item
+    assert fc(None) is None
+    assert fc({"type": "response.output_item.done"}) is None
+    assert fc({"type": "response.output_item.done", "item": "not-a-dict"}) is None
+    assert fc({"type": "response.output_item.done", "item": {"type": "message"}}) is None
+    assert fc({"type": "response.output_item.done", "item": {"type": "function_call"}}) is None
+    assert fc({"type": "response.output_text.delta", "item": function_call_item()}) is None
+    assert fc(function_call_added()) == function_call_item()
+    assert fc(function_call_done()) == function_call_item()
+
+    arguments: dict[str, str] = {}
+    queue: asyncio.Queue = asyncio.Queue()
+    perplexity_model._enqueue_native(queue, b"data: " + json.dumps(function_call_added(arguments="")).encode(), arguments)
+    assert arguments == {}
+    perplexity_model._enqueue_native(queue, b"data: " + json.dumps(function_call_done()).encode(), arguments)
+    assert arguments == {"call_1": '{"q": "x"}'}
+    assert queue.qsize() == 0  # function_call items are not native frames
+
+
+@pytest.mark.asyncio
+async def test_text_only_turn_stops_with_end_turn() -> None:
+    recorder = Recorder(sse(CREATED, text_delta("hello"), COMPLETED))
+
+    events = await collect(build(recorder))
+
+    assert {"messageStop": {"stopReason": "end_turn"}} in events
+    assert not any("perplexity" in event for event in events)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("item_type", NATIVE_OUTPUT_ITEM_TYPES)
+async def test_every_native_output_item_type_is_forwarded_as_the_bare_item(item_type: str) -> None:
+    """A completed output item is forwarded unwrapped: the UI keys its cards
+    on the item's own ``type``/``call_id``/``id``, and the
+    ``response.output_item.done`` envelope adds only stream bookkeeping."""
+    item = {"type": item_type, "status": "completed", "id": f"{item_type}-1"}
+    recorder = Recorder(sse(CREATED, output_item_done(item), COMPLETED))
+
+    events = await collect(build(recorder))
+
+    assert {"perplexity": item} in events
+    assert not any(
+        event.get("perplexity", {}).get("type") == "response.output_item.done" for event in events
+    )
+
+
+def test_documented_output_items_are_all_forwarded() -> None:
+    """Every tool-result member of the Agent API ``OutputItem`` discriminator
+    (agent-post OpenAPI) plus the sandbox file-operation and skill items seen
+    on live streams. ``message`` and ``function_call`` belong to the parent."""
+    documented = {
+        "search_results", "image_search_results", "fetch_url_results", "finance_results",
+        "people_search_results", "sandbox_results", "mcp_list_tools", "mcp_call",
+        "tool_search_output", "share_file", "skill_loaded", "sandbox_read_file",
+        "sandbox_write_file",
+    }
+    assert documented <= set(NATIVE_OUTPUT_ITEM_TYPES)
+    assert {"message", "function_call"}.isdisjoint(NATIVE_OUTPUT_ITEM_TYPES)
+
+
+@pytest.mark.asyncio
+async def test_output_item_added_is_not_forwarded() -> None:
+    """Items render once, on completion; ``.added`` would duplicate them."""
+    item = {"type": "image_search_results", "call_id": "c1", "results": []}
+    added = {"type": "response.output_item.added", "output_index": 2, "sequence_number": 3, "item": item}
+    recorder = Recorder(sse(CREATED, added, output_item_done(item), COMPLETED))
+
+    events = await collect(build(recorder))
+
+    assert [event["perplexity"] for event in events if "perplexity" in event] == [item]
+
+
+@pytest.mark.asyncio
+async def test_image_search_reasoning_events_keep_their_call_id() -> None:
+    """Image search streams two typed reasoning events matched by ``call_id``
+    (docs.perplexity.ai/docs/agent-api/tools/image-search); both pass through
+    verbatim, then the ``image_search_results`` item lands bare."""
+    queries = {"type": "response.reasoning.image_search_queries", "call_id": "img_1",
+               "queries": ["saturn rings"], "sequence_number": 4}
+    results = {"type": "response.reasoning.image_search_results", "call_id": "img_1",
+               "results": [{"image_url": "https://i.example/s.jpg", "origin_url": "https://example",
+                            "width": 800, "height": 600, "title": "Saturn"}],
+               "sequence_number": 5}
+    item = {"type": "image_search_results", "call_id": "img_1", "queries": ["saturn rings"],
+            "results": results["results"]}
+    recorder = Recorder(sse(CREATED, queries, results, output_item_done(item), COMPLETED))
+
+    events = await collect(build(recorder))
+
+    assert [event["perplexity"] for event in events if "perplexity" in event] == [queries, results, item]
+
+
+@pytest.mark.asyncio
+async def test_message_output_items_are_not_forwarded() -> None:
+    """A message item's text already streamed as output_text deltas."""
+    item = {"type": "message", "id": "msg_1", "role": "assistant", "status": "completed", "content": []}
+    recorder = Recorder(sse(CREATED, text_delta("hi"), output_item_done(item), COMPLETED))
+
+    events = await collect(build(recorder))
+
+    assert not any("perplexity" in event for event in events)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "event_type",
+    [
+        "response.reasoning.search_queries",
+        "response.reasoning.search_results",
+        "response.reasoning.fetch_url_queries",
+        "response.reasoning.fetch_url_results",
+        "response.skill.loaded",
+    ],
+)
+async def test_reasoning_and_skill_events_are_forwarded_verbatim(event_type: str) -> None:
+    native = {"type": event_type, "thought": "Considering", "sequence_number": 5}
+    recorder = Recorder(sse(CREATED, native, COMPLETED))
+
+    events = await collect(build(recorder))
+
+    assert {"perplexity": native} in events
+
+
+@pytest.mark.asyncio
+async def test_unknown_perplexity_only_event_types_are_not_forwarded() -> None:
+    recorder = Recorder(
+        sse(CREATED, {"type": "response.in_progress", "response": response_obj()}, COMPLETED)
+    )
+
+    events = await collect(build(recorder))
+
+    assert not any("perplexity" in event for event in events)
+
+
+@pytest.mark.asyncio
+async def test_native_frames_are_ordered_before_the_next_parent_chunk() -> None:
+    recorder = Recorder(
+        sse(
+            CREATED,
+            SEARCH_RESULTS_EVENT,
+            text_delta("answer"),
+            output_item_done(SHARE_FILE_ITEM),
+            COMPLETED,
+        )
+    )
+
+    events = await collect(build(recorder))
+    kinds = [next(iter(event)) for event in events]
+
+    assert kinds.index("perplexity") < kinds.index("contentBlockDelta")
+    assert kinds.count("perplexity") == 2
+
+
+@pytest.mark.asyncio
+async def test_tap_survives_arbitrary_chunk_boundaries() -> None:
+    """Byte-level chunking must not split a data line out of existence."""
+    body = sse(CREATED, text_delta("hello"), SEARCH_RESULTS_EVENT, output_item_done(SHARE_FILE_ITEM), COMPLETED)
+    recorder = Recorder(body, chunk_size=7)
+
+    events = await collect(build(recorder))
+
+    assert len([event for event in events if "perplexity" in event]) == 2
+    assert {"contentBlockDelta": {"delta": {"text": "hello"}}} in events
+
+
+@pytest.mark.asyncio
+async def test_truncated_trailing_line_and_comments_do_not_break_the_stream() -> None:
+    """A dropped connection leaves a partial line; the tap must not react."""
+    body = sse(
+        CREATED,
+        ": keep-alive comment\n\n",
+        text_delta("still here"),
+        SEARCH_RESULTS_EVENT,
+        COMPLETED,
+    ) + b'event: response.reasoning.search_queries\ndata: {"type": "response.rea'
+    recorder = Recorder(body, chunk_size=11)
+
+    events = await collect(build(recorder))
+
+    assert {"contentBlockDelta": {"delta": {"text": "still here"}}} in events
+    assert [event for event in events if "perplexity" in event] == [
+        {"perplexity": SEARCH_RESULTS_EVENT}
+    ]
+    assert {"messageStop": {"stopReason": "end_turn"}} in events
+
+
+def test_non_json_and_partial_data_lines_are_never_enqueued() -> None:
+    """The tap's line filter is total: no input shape can make it raise."""
+    queue: asyncio.Queue = asyncio.Queue()
+    for raw in (
+        b"data: not-json",
+        b'data: {"type": "response.reasoning.trunc"',
+        b"data: ",
+        b"data: null",
+        b"data: [1, 2]",
+        b"data: [DONE]",
+        b": comment",
+        b"event: response.reasoning.search_results",
+        b"",
+        b"\xff\xfe binary noise",
+        b'data: {"type": 7}',
+        b'data: {"type": "response.output_item.done", "item": "not-a-dict"}',
+        b'data: {"type": "response.output_item.done", "item": {"type": "message"}}',
+    ):
+        perplexity_model._enqueue_native(queue, raw)
+
+    assert queue.qsize() == 0
+
+
+def test_forwarded_bytes_are_identical_to_the_server_body() -> None:
+    """The tap is read-only: the SDK sees exactly what the server sent."""
+    body = sse(CREATED, text_delta("hi"), SEARCH_RESULTS_EVENT, COMPLETED)
+    forwarded = bytearray()
+
+    async def run() -> None:
+        recorder = Recorder(body, chunk_size=5)
+        model = build(recorder)
+        original_tap = model._tap_sse
+
+        async def tap(response: httpx.Response) -> None:
+            await original_tap(response)
+            wrapped = response.aiter_bytes
+
+            def counting(chunk_size: int | None = None):
+                async def gen():
+                    source = wrapped() if chunk_size is None else wrapped(chunk_size)
+                    async for chunk in source:
+                        forwarded.extend(chunk)
+                        yield chunk
+
+                return gen()
+
+            response.aiter_bytes = counting  # type: ignore[method-assign]
+
+        model._tap_sse = tap  # type: ignore[method-assign]
+        await collect(model)
+
+    asyncio.run(run())
+
+    assert bytes(forwarded) == body
+
+
+@pytest.mark.asyncio
+async def test_non_sse_responses_are_not_tapped() -> None:
+    """A JSON error body must reach the SDK's own error path untouched."""
+    recorder = Recorder(b"", status=400)
+
+    with pytest.raises(Exception) as caught:
+        await collect(build(recorder))
+
+    assert isinstance(caught.value, ApplicationError)
+    assert caught.value.non_retryable
+    assert "boom" in str(caught.value)
+    assert len(recorder.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_re_running_the_same_model_does_not_leak_native_frames() -> None:
+    """Stale queue state from turn one must not surface in turn two."""
+    recorder = Recorder(sse(CREATED, SEARCH_RESULTS_EVENT, text_delta("one"), COMPLETED))
+    model = build(recorder)
+
+    first = await collect(model)
+    assert len([event for event in first if "perplexity" in event]) == 1
+
+    recorder.body = sse(CREATED, text_delta("two"), COMPLETED)
+    second = await collect(model)
+
+    assert not any("perplexity" in event for event in second)
+
+
+# ---------------------------------------------------------------------------
+# Failure mapping (parent's classify_openai_error)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_mode", ["http400", "http424", "stream_error", "stream_failed"])
+async def test_disconnected_connector_is_omitted_before_inference_without_failing_turn(failure_mode, caplog):
+    tools = [{"type": "web_search"},
+             {"type": "connector", "id": "connector_linear", "server_label": "linear"},
+             {"type": "connector", "id": "connector_github", "server_label": "github"}]
+    params = {"tools": tools, "temperature": 0.2}
+    requests = []
+    message = 'Managed connector "connector_linear" is not connected.'
+    error = {"code": "external_connector_error", "type": "external_connector_error", "message": message}
+
+    def handler(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        if any(tool.get("id") == "connector_linear" for tool in body["tools"]):
+            if failure_mode.startswith("http"):
+                return httpx.Response(int(failure_mode[4:]), json={"error": error})
+            failure = {"error": error} if failure_mode == "stream_error" else {
+                "type": "response.failed", "response": response_obj(status="failed", error=error)}
+            return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=sse(CREATED, failure))
+        return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                              content=sse(CREATED, text_delta("Agent remains available"), COMPLETED))
+
+    model = PerplexityModel(model_id="preset:high", api_key="private-test-key", params=params,
+                            transport=httpx.MockTransport(handler))
+    chunks = await collect(model)
+    assert any(chunk.get("contentBlockDelta", {}).get("delta", {}).get("text") == "Agent remains available" for chunk in chunks)
+    assert len(requests) == 2
+    assert requests[0]["tools"] == tools
+    assert requests[1]["tools"] == [tools[0], tools[2]]
+    assert requests[1]["input"] == requests[0]["input"]
+    assert requests[1]["preset"] == "high"
+    assert requests[1]["temperature"] == 0.2
+    assert sum("messageStart" in chunk for chunk in chunks) == 1
+    assert model.get_config()["params"] == params  # no mutation of cached/shared config
+    assert "connector_linear" in caplog.text and "private-test-key" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", [[text_delta("partial")], [SEARCH_RESULTS_EVENT], [function_call_added()],
+                                  [{"type": "response.future_tool.running"}]])
+async def test_disconnected_connector_after_progress_does_not_replay(prefix):
+    requests = []
+    error = {"type": "external_connector_error", "code": "external_connector_error",
+             "message": 'Managed connector "connector_linear" is not connected.'}
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                              content=sse(CREATED, *prefix, {"error": error}))
+
+    model = PerplexityModel(model_id="preset:high", api_key="test", params={"tools": [
+        {"type": "connector", "id": "connector_linear", "server_label": "linear"}]},
+        transport=httpx.MockTransport(handler))
+    with pytest.raises(ApplicationError) as caught:
+        await collect(model)
+    assert caught.value.non_retryable
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_connector_fallback_is_bounded_and_restores_stateful_response_id():
+    requests = []
+    tools = [{"type": "connector", "id": name, "server_label": name} for name in ("first", "second")]
+
+    def handler(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        remaining = body["tools"]
+        if remaining:
+            error = {"code": "external_connector_error", "message":
+                     f'Managed connector "{remaining[0]["id"]}" is not connected.'}
+            return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=sse(
+                {"type": "response.created", "response": response_obj(id="rejected-response", status="in_progress")},
+                {"type": "response.failed", "response": response_obj(status="failed", error=error)}))
+        return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                              content=sse(CREATED, text_delta("success"), COMPLETED))
+
+    model = PerplexityModel(model_id="preset:high", api_key="test", params={"tools": tools, "store": True},
+                            transport=httpx.MockTransport(handler))
+    state = {"response_id": "previous-success"}
+    await collect(model, model_state=state)
+    assert len(requests) == 3
+    assert all(request["previous_response_id"] == "previous-success" for request in requests)
+    assert state["response_id"] == "resp_1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [400, 401, 403, 424, 500])
+async def test_connector_fallback_never_loops_or_hides_authentication_errors(status):
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(status, json={"error": {"type": "external_connector_error",
+            "message": 'Managed connector "connector_linear" is not connected.'}})
+
+    model = PerplexityModel(model_id="preset:high", api_key="test", params={"tools": [
+        {"type": "connector", "id": "connector_linear", "server_label": "linear"}]},
+        transport=httpx.MockTransport(handler))
+    with pytest.raises(ApplicationError):
+        await collect(model)
+    assert len(requests) == (2 if status in {400, 424} else 1)
+
+
+@pytest.mark.asyncio
+async def test_connector_fallback_does_not_change_concurrent_or_later_requests():
+    requests = []
+    original_tools = [{"type": "connector", "id": "connector_linear", "server_label": "linear"}]
+
+    async def handler(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        failing = "disconnected" in json.dumps(body["input"])
+        if failing and body["tools"]:
+            await asyncio.sleep(0)
+            return httpx.Response(424, json={"error": {"type": "external_connector_error",
+                "message": 'Managed connector "connector_linear" is not connected.'}})
+        return httpx.Response(200, headers={"content-type": "text/event-stream"},
+                              content=sse(CREATED, text_delta("success"), COMPLETED))
+
+    model = PerplexityModel(model_id="preset:high", api_key="test", params={"tools": original_tools},
+                            transport=httpx.MockTransport(handler))
+    await asyncio.gather(collect(model, [{"role": "user", "content": [{"text": "disconnected"}]}]),
+                         collect(model, [{"role": "user", "content": [{"text": "connected"}]}]))
+    await collect(model, [{"role": "user", "content": [{"text": "connected later"}]}])
+    assert len(requests) == 4
+    assert requests[-1]["tools"] == original_tools
+    assert sum(not request["tools"] for request in requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", [
+    [],
+    [text_delta("partial answer")],
+    [SEARCH_RESULTS_EVENT],
+    [function_call_added()],
+    [output_item_done(SHARE_FILE_ITEM)],
+    [{"type": "response.future_tool.running"}],
+    ["data: not-json\n\n"],
+])
+@pytest.mark.parametrize("chunk_size", [None, 7])
+async def test_overload_is_retryable_only_before_stream_progress(prefix, chunk_size):
+    """09:01:21 UTC failure: HTTP 200, then an SDK APIError in the SSE body.
+
+    The parent buffers function calls and can skip native events entirely, so
+    checking only its yielded text would incorrectly retry tool executions.
+    """
+    message = "upstream model is overloaded, please try again later"
+    recorder = Recorder(sse(CREATED, *prefix, {"error": {"message": message}}), chunk_size=chunk_size)
+    model = build(recorder)
+    with pytest.raises(ApplicationError) as caught:
+        await collect(model)
+    assert caught.value.type == "PerplexityModelError"
+    assert caught.value.non_retryable is bool(prefix)
+    if not prefix or not isinstance(prefix[0], str):
+        assert message in str(caught.value)
+    assert isinstance(caught.value.__cause__, (APIError, json.JSONDecodeError))
+    assert len(recorder.requests) == 1  # Temporal, not the provider, owns retries.
+
+    # A cached model's next invocation must not inherit the progress fence.
+    recorder.body = sse(CREATED, {"error": {"message": message}})
+    with pytest.raises(ApplicationError) as clean:
+        await collect(model)
+    assert clean.value.non_retryable is False
+
+
+@pytest.mark.asyncio
+async def test_unknown_stream_failure_does_not_enable_automatic_replay():
+    recorder = Recorder(sse(CREATED, {"error": {"message": "connection lost"}}))
+    with pytest.raises(ApplicationError) as caught:
+        await collect(build(recorder))
+    assert caught.value.non_retryable is True
+    assert "connection lost" in str(caught.value)
+    assert len(recorder.requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_mode", ["http", "stream"])
+async def test_unconfigured_connector_failure_propagates_without_replay(monkeypatch, failure_mode):
+    """Do not strip other tools when the error names a connector we did not send."""
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
+    import run_worker
+
+    factories, _ = run_worker.build_perplexity_factories("pplx-test", [])
+    model = factories["preset:high"]()
+    tools = copy.deepcopy(model.get_config()["params"]["tools"])
+    message = 'Managed connector "connector_googledrive" is not connected.'
+    error = {"code": "external_connector_error", "type": "invalid_request_error", "message": message}
+    requests = []
+
+    def fail_request(request):
+        requests.append(json.loads(request.content))
+        if failure_mode == "http":
+            return httpx.Response(400, json={"error": error})
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=sse(
+            CREATED, {"type": "response.failed", "response": response_obj(status="failed", error=error)},
+        ))
+
+    monkeypatch.setattr(model, "_transport", httpx.MockTransport(fail_request))
+    with pytest.raises((ApplicationError, RuntimeError)) as caught:
+        await collect(model)
+    assert message in str(caught.value)
+    if failure_mode == "http":
+        assert isinstance(caught.value, ApplicationError) and caught.value.non_retryable is True
+    assert len(requests) == 1
+    assert requests[0]["tools"] == tools
+    assert any(tool.get("type") == "connector" for tool in tools)
+    assert model.get_config()["params"]["tools"] == tools
+
+
+@pytest.mark.asyncio
+async def test_http_424_external_connector_error_is_non_retryable(monkeypatch) -> None:
+    """Live 2026-09-13: POST with a managed connector the Project has not
+    authorized returns HTTP 424 ``external_connector_error`` before inference.
+    The openai SDK has no 424 subclass (bare ``APIStatusError``), and the same
+    tools array cannot succeed on retry, so Temporal must not retry it."""
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
+    import run_worker
+
+    factories, _ = run_worker.build_perplexity_factories("pplx-test", [])
+    model = factories["preset:high"]()
+    message = 'Managed connector "connector_googledrive" is not connected.'
+    error = {"message": message, "type": "external_connector_error", "code": 424}
+    requests = []
+
+    def fail_request(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(424, json={"error": error})
+
+    monkeypatch.setattr(model, "_transport", httpx.MockTransport(fail_request))
+    with pytest.raises(ApplicationError) as caught:
+        await collect(model)
+    assert caught.value.non_retryable is True
+    assert message in str(caught.value)
+    assert len(requests) == 1
+
+
+def test_is_permanent_matches_status_or_numeric_body_code() -> None:
+    request = httpx.Request("POST", f"{PERPLEXITY_API_BASE}/v1/responses")
+    body = {"type": "external_connector_error", "code": 424, "message": "x"}
+    assert perplexity_model._is_permanent(APIError("x", request, body=body)) is True
+    assert perplexity_model._is_permanent(APIError("x", request, body={"code": "424"})) is True
+    assert perplexity_model._is_permanent(APIError("x", request, body={"code": "server_error"})) is False
+    assert perplexity_model._is_permanent(APIError("x", request, body={"code": 500})) is False
+    assert perplexity_model._is_permanent(APIError("x", request, body=None)) is False
+
+
+def test_connector_items_are_enqueued_verbatim_without_extra_logging(caplog) -> None:
+    """Connector output items are native items like any other: the tap queues
+    them for the UI and adds no diagnostic of its own."""
+    queue: asyncio.Queue = asyncio.Queue()
+    items = (
+        {"type": "mcp_call", "connector_id": "connector_googledrive", "server_label": "google_drive",
+         "name": "search_files", "arguments": "{}", "error": "AUTH_REQUIRED"},
+        {"type": "mcp_list_tools", "connector_id": "connector_linear", "server_label": "linear", "tools": []},
+        {"type": "mcp_call", "connector_id": "connector_github", "server_label": "github",
+         "name": "get_file_contents", "arguments": "{}", "error": "TOOL_ERROR"},
+    )
+    with caplog.at_level("WARNING", logger="perplexity_model"):
+        for item in items:
+            payload = {"type": "response.output_item.done", "item": item}
+            perplexity_model._enqueue_native(queue, b"data: " + json.dumps(payload).encode())
+    assert queue.qsize() == 3
+    assert not caplog.records
+
+
+@pytest.mark.asyncio
+async def test_response_failed_with_rate_limit_raises_model_throttled() -> None:
+    failed = {
+        "type": "response.failed",
+        "response": response_obj(
+            status="failed",
+            error={"code": "rate_limit_exceeded", "message": "rate limit reached"},
+        ),
+    }
+    recorder = Recorder(sse(CREATED, failed))
+
+    with pytest.raises(ModelThrottledException):
+        await collect(build(recorder))
+
+
+@pytest.mark.asyncio
+async def test_response_failed_with_context_overflow_raises_context_window() -> None:
+    failed = {
+        "type": "response.failed",
+        "response": response_obj(
+            status="failed",
+            error={"code": "context_length_exceeded", "message": "maximum context length"},
+        ),
+    }
+    recorder = Recorder(sse(CREATED, failed))
+
+    with pytest.raises(ContextWindowOverflowException):
+        await collect(build(recorder))
+
+
+@pytest.mark.asyncio
+async def test_response_failed_otherwise_is_nonretryable() -> None:
+    failed = {
+        "type": "response.failed",
+        "response": response_obj(
+            status="failed", error={"code": "invalid_request_error", "message": "bad tools"}
+        ),
+    }
+    recorder = Recorder(sse(CREATED, failed))
+
+    with pytest.raises(ApplicationError) as caught:
+        await collect(build(recorder))
+
+    assert caught.value.non_retryable is True
+    assert "bad tools" in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_http_429_raises_model_throttled_through_the_parent() -> None:
+    recorder = Recorder(b"", status=429)
+
+    with pytest.raises(ModelThrottledException):
+        await collect(build(recorder))
+
+
+@pytest.mark.asyncio
+async def test_http_401_preserves_sdk_cause_without_temporal_retries() -> None:
+    import openai
+
+    recorder = Recorder(b"", status=401)
+
+    with pytest.raises(ApplicationError) as caught:
+        await collect(build(recorder))
+    assert caught.value.non_retryable
+    assert isinstance(caught.value.__cause__, openai.AuthenticationError)
+    assert len(recorder.requests) == 1
+
+
+# ---------------------------------------------------------------------------
+# Config validation (kept helpers)
+# ---------------------------------------------------------------------------
 
 
 def test_invalid_preset_is_nonretryable() -> None:
     with pytest.raises(ApplicationError, match="Unknown Perplexity preset") as caught:
-        PerplexityModel(model_id="preset:turbo", client=FakeClient())
+        build(Recorder(sse(COMPLETED)), model_id="preset:turbo")
     assert caught.value.non_retryable is True
 
 
-def test_update_config_rejects_invalid_preset() -> None:
-    model = PerplexityModel(model_id="sonar/test", client=FakeClient())
-    with pytest.raises(ApplicationError, match="Unknown Perplexity preset"):
-        model.update_config(model_id="preset:nope")
+def test_invalid_preset_from_update_config_is_rejected_on_the_next_request() -> None:
+    """``update_config`` is the parent's; validation runs when the id is used."""
+    model = build(Recorder(sse(COMPLETED)))
+    model.update_config(model_id="preset:nope")
+
+    with pytest.raises(ApplicationError, match="Unknown Perplexity preset") as caught:
+        model._format_request([], None, None)
+    assert caught.value.non_retryable is True
 
 
-@pytest.mark.asyncio
-async def test_agent_api_params_pass_through_unmodified() -> None:
-    params = {
-        "skills": [
-            {"type": "builtin", "name": "web_search"},
-            {"type": "custom", "id": "skill-1"},
-        ],
-        "reasoning": {"effort": "high"},
-        "models": ["anthropic/claude-fable-5", "google/gemini-3.8-flash"],
-        "response_format": {"type": "json_schema", "json_schema": {"name": "out"}},
-        "language_preference": "en",
-        "max_steps": 12,
-        "background": True,
-        "store": True,
-        "max_output_tokens": 4096,
+def test_update_config_preserves_minimal_model_config() -> None:
+    model = build(Recorder(sse(COMPLETED)), params={"temperature": 0.1})
+    model.update_config(model_id="two", params={"temperature": 0.3})
+
+    config = model.get_config()
+    assert config["model_id"] == "two"
+    assert config["params"] == {"temperature": 0.3}
+    assert "api_key" not in config
+
+
+@pytest.mark.parametrize(
+    "reserved",
+    ["model", "preset", "input", "stream", "extra_headers", "extra_query", "extra_body", "timeout"],
+)
+def test_reserved_request_parameters_are_rejected(reserved: str) -> None:
+    with pytest.raises(ApplicationError, match="Unsupported model parameters") as caught:
+        build(Recorder(sse(COMPLETED)), params={reserved: "override"})
+    assert caught.value.non_retryable is True
+
+
+def test_ensure_object_properties_normalizes_nested_schemas() -> None:
+    normalized = perplexity_model._ensure_object_properties(
+        {"type": "object", "items": {"type": "object"}, "keep": [1, "two"]}
+    )
+
+    assert normalized == {
+        "type": "object",
+        "properties": {},
+        "items": {"type": "object", "properties": {}},
+        "keep": [1, "two"],
     }
-    original = copy.deepcopy(params)
-    client = FakeClient([completed()])
-
-    await collect(PerplexityModel(model_id="sonar/test", params=params, client=client))
-
-    request = client.responses.request
-    for key, value in original.items():
-        assert request[key] == value
-    assert request["stream"] is True
-    assert params == original
 
 
-@pytest.mark.asyncio
-async def test_models_fallback_chain_replaces_model_key() -> None:
-    client = FakeClient([completed()])
-    model = PerplexityModel(
-        model_id="sonar/test",
-        params={"models": ["anthropic/claude-fable-5", "google/gemini-3.8-flash"]},
-        client=client,
-    )
+def test_function_parameters_strip_pattern_at_every_depth() -> None:
+    """The Agent API 400s the whole request on regex features outside its
+    dialect (lookahead, lookbehind, ``(?<name>``, ``\\p{..}``); MCP servers
+    emit them freely. ``pattern`` is dropped wherever it is a keyword."""
+    schema = {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+            "endpoint_name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[\\x20-\\x7e]+(?![\\s\\S])",
+                "description": "Method and path",
+            },
+            "tags": {
+                "type": "array",
+                "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9 _.:-]{0,63}(?![\\s\\S])"},
+            },
+            "nested": {
+                "type": "object",
+                "properties": {"id": {"type": "string", "pattern": "(?<=a)b"}},
+            },
+            "choice": {"anyOf": [{"type": "string", "pattern": "\\p{L}+"}, {"type": "null"}]},
+        },
+        "required": ["endpoint_name"],
+        "additionalProperties": False,
+    }
 
-    await collect(model)
+    parameters = perplexity_model.function_parameters(schema)
 
-    request = client.responses.request
-    assert request["models"] == ["anthropic/claude-fable-5", "google/gemini-3.8-flash"]
-    assert "model" not in request
-    assert "preset" not in request
+    assert parameters == {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+            "endpoint_name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "Method and path",
+            },
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "nested": {"type": "object", "properties": {"id": {"type": "string"}}},
+            "choice": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        },
+        "required": ["endpoint_name"],
+        "additionalProperties": False,
+    }
+    assert "pattern" in json.dumps(schema), "input schema must not be mutated"
 
 
-class ModelDumpEvent(SimpleNamespace):
-    def model_dump(self, mode="json"):
-        return {key: value for key, value in vars(self).items()}
+def test_function_parameters_keep_a_property_named_pattern() -> None:
+    """Inside ``properties`` a key is a property name, not a schema keyword."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "pattern": {"type": "string", "description": "glob to match"},
+            "flags": {"type": "object"},
+        },
+        "$defs": {"pattern": {"type": "string", "pattern": "^x(?=y)"}},
+    }
+
+    parameters = perplexity_model.function_parameters(schema)
+
+    assert parameters == {
+        "type": "object",
+        "properties": {
+            "pattern": {"type": "string", "description": "glob to match"},
+            "flags": {"type": "object", "properties": {}},
+        },
+        "$defs": {"pattern": {"type": "string"}},
+    }
 
 
-@pytest.mark.asyncio
-async def test_reasoning_thought_emits_reasoning_content_and_raw_envelope() -> None:
-    reasoning = ModelDumpEvent(
-        type="response.reasoning.started", thought="Considering the question"
-    )
-    client = FakeClient([reasoning, completed()])
-
-    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
-
-    assert {"perplexity": {"type": "response.reasoning.started", "thought": "Considering the question"}} in events
-    reasoning_deltas = [
-        item
-        for item in events
-        if "contentBlockDelta" in item
-        and "reasoningContent" in item["contentBlockDelta"]["delta"]
-    ]
-    assert reasoning_deltas == [
+def test_format_request_strips_pattern_from_function_tools_only() -> None:
+    native = [{"type": "web_search"}, {"type": "mcp", "server_label": "x", "server_url": "https://x", "pattern": "kept"}]
+    model = build(Recorder(sse(COMPLETED)), params={"tools": native})
+    tools = [
         {
-            "contentBlockDelta": {
-                "contentBlockIndex": 0,
-                "delta": {"reasoningContent": {"text": "Considering the question\n"}},
+            "name": "get_api_endpoint_schema",
+            "description": "Doc lookup",
+            "inputSchema": {"json": {
+                "type": "object",
+                "properties": {"endpoint_name": {"type": "string", "pattern": "^[\\x20-\\x7e]+(?![\\s\\S])"}},
+                "required": ["endpoint_name"],
+            }},
+        }
+    ]
+
+    request = model._format_request([], tools, None)
+
+    assert request["tools"][:2] == native, "native tool objects pass through verbatim"
+    assert request["tools"][2] == {
+        "type": "function",
+        "name": "get_api_endpoint_schema",
+        "description": "Doc lookup",
+        "parameters": {
+            "type": "object",
+            "properties": {"endpoint_name": {"type": "string"}},
+            "required": ["endpoint_name"],
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# structured_output (inherited)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_structured_output_uses_the_parent_parse_path() -> None:
+    class Answer(BaseModel):
+        value: int
+
+    parsed_response = response_obj(
+        output=[
+            {
+                "type": "message",
+                "id": "msg_1",
+                "role": "assistant",
+                "status": "completed",
+                "content": [
+                    {"type": "output_text", "text": '{"value": 7}', "annotations": []}
+                ],
             }
-        }
-    ]
-    assert {"contentBlockStart": {"contentBlockIndex": 0, "start": {}}} in events
-    assert {"contentBlockStop": {"contentBlockIndex": 0}} in events
-
-
-@pytest.mark.asyncio
-async def test_reasoning_event_without_thought_emits_only_raw_envelope() -> None:
-    reasoning = ModelDumpEvent(type="response.reasoning.stopped", thought=None)
-    client = FakeClient([reasoning, completed()])
-
-    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
-
-    assert {"perplexity": {"type": "response.reasoning.stopped", "thought": None}} in events
-    assert not any(
-        "contentBlockDelta" in item
-        and "reasoningContent" in item["contentBlockDelta"]["delta"]
-        for item in events
-    )
-
-
-@pytest.mark.asyncio
-async def test_reasoning_block_does_not_collide_with_text_block_indices() -> None:
-    reasoning = ModelDumpEvent(type="response.reasoning.started", thought="thinking")
-    client = FakeClient(
-        [
-            reasoning,
-            event("response.output_text.delta", delta="answer", output_index=0, content_index=0),
-            event("response.output_text.done", text="answer", output_index=0, content_index=0),
-            completed(),
         ]
     )
+    recorder = Recorder(b"")
+    recorder.handler = lambda request: httpx.Response(  # type: ignore[method-assign]
+        200, json=parsed_response, headers={"content-type": "application/json"}
+    )
 
-    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
-
-    indices = [
-        item["contentBlockDelta"]["contentBlockIndex"]
-        for item in events
-        if "contentBlockDelta" in item
+    events = [
+        event
+        async for event in build(recorder).structured_output(Answer, [])
     ]
-    assert len(set(indices)) == len(indices) or indices == sorted(indices)
-    reasoning_index = next(
-        item["contentBlockDelta"]["contentBlockIndex"]
-        for item in events
-        if "contentBlockDelta" in item
-        and "reasoningContent" in item["contentBlockDelta"]["delta"]
-    )
-    text_index = next(
-        item["contentBlockDelta"]["contentBlockIndex"]
-        for item in events
-        if "contentBlockDelta" in item and "text" in item["contentBlockDelta"]["delta"]
-    )
-    assert reasoning_index != text_index
 
-
-@pytest.mark.asyncio
-async def test_share_file_output_item_is_forwarded_verbatim() -> None:
-    share_file = ModelDumpEvent(
-        type="share_file",
-        file_id="file-1",
-        path="/v1/responses/resp-1/files/file-1/content",
-        status="completed",
-    )
-    client = FakeClient(
-        [
-            event("response.output_item.done", item=share_file, output_index=0),
-            completed(),
-        ]
-    )
-
-    events = await collect(PerplexityModel(model_id="sonar/test", client=client))
-
-    assert {
-        "perplexity": {
-            "type": "share_file",
-            "file_id": "file-1",
-            "path": "/v1/responses/resp-1/files/file-1/content",
-            "status": "completed",
-        }
-    } in events
+    assert events[-1] == {"output": Answer(value=7)}

@@ -1,0 +1,75 @@
+Already up to date
+Done in 355ms using pnpm v11.18.0
+
+ RUN  v4.1.10 /Users/tims-stuff/Desktop/v0-clone-blurple
+
+ ❯ app/framework-adherence.test.ts (4 tests | 2 failed) 186ms
+     × check 1: no new ReadableStream / new TextEncoder / .getReader / new EventSource 87ms
+     × check 2: no hardcoded model ids except lib/perplexity.ts DEFAULT_MODEL 66ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  app/framework-adherence.test.ts > framework adherence > check 1: no new ReadableStream / new TextEncoder / .getReader / new EventSource
+AssertionError: found 2 streaming primitives violation(s):
+  - app/api/compare/route.ts: const stream = new ReadableStream({
+  - app/api/compare/route.ts: const encoder = new TextEncoder(): expected [ { …(3) }, { …(3) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "file": "app/api/compare/route.ts",
++     "line": "const stream = new ReadableStream({",
++     "token": "new ReadableStream(",
++   },
++   {
++     "file": "app/api/compare/route.ts",
++     "line": "const encoder = new TextEncoder()",
++     "token": "new TextEncoder(",
++   },
++ ]
+
+ ❯ app/framework-adherence.test.ts:162:113
+    160|     const violations = streamViolations(files)
+    161|     // Known mid-plan violation: app/api/compare/route.ts (todo 17 del…
+    162|     expect(violations, formatViolations("streaming primitives", violat…
+       |                                                                                                                 ^
+    163|   })
+    164|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  app/framework-adherence.test.ts > framework adherence > check 2: no hardcoded model ids except lib/perplexity.ts DEFAULT_MODEL
+AssertionError: found 1 model ids violation(s):
+  - lib/perplexity.ts:2: // by the orchestrator worker as model id "preset:high". The /api/models route: expected [ { file: 'lib/perplexity.ts', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "file": "lib/perplexity.ts",
++     "line": "// by the orchestrator worker as model id \"preset:high\". The /api/models route",
++     "lineNo": 2,
++   },
++ ]
+
+ ❯ app/framework-adherence.test.ts:178:114
+    176|     // Known mid-plan violation: lib/perplexity.ts static preset/gemin…
+    177|     // (todo 15 rewrites it). The DEFAULT_MODEL line itself is permitt…
+    178|     expect(violations, formatViolations("model ids", violations.map((v…
+       |                                                                                                                  ^
+    179|   })
+    180|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 24 passed (25)
+      Tests  2 failed | 532 passed (534)
+   Start at  00:53:20
+   Duration  12.72s (transform 18.67s, setup 0ms, import 64.55s, tests 17.79s, environment 3ms)
+

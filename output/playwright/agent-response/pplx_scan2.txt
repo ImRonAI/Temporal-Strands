@@ -1,0 +1,162 @@
+bytes 219604
+frames 38 Counter({'events': 36, 'tool_results': 1, None: 1})
+native items Counter({'sandbox_results': 15})
+---- sandbox bash completed
+CODE: pplx search web "temporal durable execution"
+STDOUT: {"total":10,"hits":[{"url":"https://temporal.io/","title":"Durable Execution Solutions | Temporal","domain":"temporal.io","snippet":"Temporal Workflows automatically capture state at every step, and in the event of failure, can pick up exactly where they left off.\nNo lost progress, no orphaned processes, and no manual recovery required.\n...\nWrite your business logic as code as a Temporal Workflow.\nWorkflows might involve moving money between bank accounts, processing orders, deploying cloud infrastructure, training an AI model, or something else entirely.\nBecause the full running state of a Workflow is durable and fault tolerant by default, your business logic can be recovered, replayed, or paused at any point.\n...\nAPIs fail, networks time out, and users abandon sessions.\nTemporal treats these interactions as Activities: functions that retry automatically and recover seamlessly.\
+STDERR:  EXIT 0
+---- sandbox bash completed
+CODE: pplx content snippets "durable execution" https://temporal.io
+STDOUT: {"results":[{"url":"https://temporal.io","text":"# The world’s best AI runs on Temporal\n\nBuild applications the way OpenAI, Lovable, Replit, Cursor, and Retool do with our open-source platform. Add agentic capabilities to any application with your framework of choice.\n\nGet Started for Free Run Locally\n\n### Write code as if failure doesn’t exist\n\nDistributed systems break, APIs fail, networks flake, and services crash. That’s not your problem anymore. Managing reliability shouldn’t mean constant firefighting.\n\nTemporal Workflows automatically capture state at every step, and in the event of failure, can pick up exactly where they left off.\n\nNo lost progress, no orphaned processes, and no manual recovery required.\n\n### You have to see it to believe it\n\nTemporal doesn’t work like anything you’ve used before. Watch how we guarantee the Durable Execution of your code in the fa
+STDERR:  EXIT 0
+---- sandbox python completed
+CODE: from perplexity import Perplexity
+
+client = Perplexity()
+result = client.search.create(
+    query="head of engineering Temporal Technologies",
+    search_type="people",
+    max_results=3,
+)
+print(result.model_dump_json())
+STDOUT: 
+STDERR: Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+ModuleNotFoundError: No module named 'perplexity'
+ EXIT 1
+---- sandbox python completed
+CODE: import pkgutil, json
+print(json.dumps(sorted(m.name for m in pkgutil.iter_modules() if "ppl" in m.name.lower() or "perplex" in m.name.lower())))
+STDOUT: ["_apple_support", "asi_apply_patch", "pplx_citations", "pplx_sdk", "pplx_tool_bridge_daemon"]
+
+STDERR:  EXIT 0
+---- sandbox python completed
+CODE: import pplx_sdk, json
+print(json.dumps(sorted(name for name in dir(pplx_sdk) if not name.startswith("_"))))
+STDOUT: ["APIError", "AcademicHit", "AsyncContentResource", "AsyncLlmApiClient", "AsyncPplxClient", "AsyncSearchResource", "AuthenticationError", "BadRequestError", "Checkpoint", "CompanyHit", "ConnectError", "DomainTrust", "EmbeddingData", "ExtractError", "ExtractItemErrorCode", "ExtractResult", "FanoutResult", "ForbiddenError", "ImageHit", "InternalServerError", "LocalCoordinates", "LocalPlaceHit", "NotAcceptableError", "NotFoundError", "PageResult", "PatentHit", "PeopleEmail", "PeopleFacebook", "PeopleFetchResult", "PeopleGithub", "PeopleHit", "PeopleTwitter", "PplxSdkError", "PriceInfo", "ProductConditions", "ProductImage", "ProductOffer", "ProductOption", "ProductReview", "ProductVendorInfo", "RateLimitError", "SecgovHit", "ShoppingHit", "SnippetResult", "StoreInfo", "TimeoutError", "ValidationError", "VideoHit", "WebHit", "atexit", "content", "dedup_by_field", "dedup_by_url", "fanout", "fl
+STDERR:  EXIT 0
+---- sandbox python completed
+CODE: import pplx_sdk, inspect, json
+print(json.dumps({"PplxClient_signature": str(inspect.signature(pplx_sdk.PplxClient)), "public_methods": [n for n in dir(pplx_sdk.PplxClient) if not n.startswith("_")]}))
+STDOUT: 
+STDERR: Traceback (most recent call last):
+  File "<stdin>", line 2, in <module>
+AttributeError: module 'pplx_sdk' has no attribute 'PplxClient'
+ EXIT 1
+---- sandbox python completed
+CODE: import pplx_sdk, json
+mod = pplx_sdk.pplx_sdk
+print(json.dumps(sorted(name for name in dir(mod) if not name.startswith("_"))))
+STDOUT: ["APIError", "AcademicHit", "AsyncContentResource", "AsyncLlmApiClient", "AsyncPplxClient", "AsyncSearchResource", "AuthenticationError", "BadRequestError", "CompanyHit", "CompanyRangeBound", "ConnectError", "DomainTrust", "EmbeddingData", "ExtractError", "ExtractItemErrorCode", "ExtractResult", "ForbiddenError", "ImageHit", "InternalServerError", "LocalCoordinates", "LocalPlaceHit", "NotAcceptableError", "NotFoundError", "PageResult", "PatentHit", "PeopleEmail", "PeopleFacebook", "PeopleFetchResult", "PeopleGithub", "PeopleHit", "PeopleTwitter", "PplxSdkError", "PriceInfo", "ProductConditions", "ProductImage", "ProductOffer", "ProductOption", "ProductReview", "ProductVendorInfo", "RateLimitError", "SecgovHit", "ShoppingHit", "SnippetResult", "StoreInfo", "TimeoutError", "ValidationError", "VideoHit", "WebHit", "init_observability", "shutdown_observability"]
+
+STDERR:  EXIT 0
+---- sandbox python completed
+CODE: import pplx_sdk, inspect, json
+cls = pplx_sdk.AsyncPplxClient
+print(json.dumps({"signature": str(inspect.signature(cls)), "methods": [n for n in dir(cls) if not n.startswith("_")]}))
+STDOUT: {"signature": "()", "methods": ["close", "content", "is_closed", "search"]}
+
+STDERR:  EXIT 0
+---- sandbox python completed
+CODE: import pplx_sdk, asyncio, json
+async def main():
+    client = pplx_sdk.AsyncPplxClient()
+    print(json.dumps({"search_type": type(client.search).__name__, "methods": [n for n in dir(client.search) if not n.startswith("_")]}))
+    await client.close()
+asyncio.run(main())
+STDOUT: {"search_type": "AsyncSearchResource", "methods": ["academic", "companies", "images", "local", "patents", "people", "secgov", "shopping", "videos", "web"]}
+
+STDERR:  EXIT 0
+---- sandbox python completed
+CODE: import importlib.metadata as m, json
+print(json.dumps(sorted((d.metadata.get('Name'), d.version) for d in m.distributions() if 'perplex' in (d.metadata.get('Name') or '').lower() or 'pplx' in (d.metadata.get('Name') or '').lower())))
+STDOUT: [["pplx-python-sdks-llm-api", "2026.8.25.1787686804+fc62e0f"], ["pplx_sdk", "0.0.0+local"], ["protobuf-perplexity-pb-llm-api-common-llm-api-common-pyproto", "2026.8.25.1787686804+fc62e0f"], ["protobuf-perplexity-pb-llm-api-llm-api-py", "2026.3.27.1774569839+5395d6e"], ["protobuf-perplexity-pb-llm-api-llm-api-pygrpc", "2026.8.25.1787686804+fc62e0f"], ["protobuf-perplexity-pb-llm-api-llm-api-pyproto", "2026.8.25.1787686804+fc62e0f"]]
+
+STDERR:  EXIT 0
+---- sandbox python completed
+CODE: import importlib.metadata as m, json
+D=m.distribution('pplx-python-sdks-llm-api')
+print(json.dumps({"top_level": D.read_text('top_level.txt'), "files": [str(f) for f in D.files if len(f.parts) == 1][:20]}))
+STDOUT: {"top_level": null, "files": []}
+
+STDERR:  EXIT 0
+---- sandbox bash completed
+CODE: python -m pip install -q perplexityai
+STDOUT: 
+STDERR:   WARNING: The script distro is installed in '/home/user/.local/bin' which is not on PATH.
+  Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+  WARNING: The script httpx is installed in '/home/user/.local/bin' which is not on PATH.
+  C EXIT 0
+---- sandbox python completed
+CODE: from perplexity import Perplexity
+
+client = Perplexity()
+result = client.search.create(
+    query="head of engineering Temporal Technologies",
+    search_type="people",
+    max_results=3,
+)
+print(result.model_dump_json())
+STDOUT: 
+STDERR: Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+  File "/home/user/.local/lib/python3.14/site-packages/perplexity/_client.py", line 92, in __init__
+    raise PerplexityError(
+        "The api_key client option must be set either by passing api_key to the client or by setting EXIT 1
+---- sandbox python completed
+CODE: import os
+from perplexity import Perplexity
+
+client = Perplexity(api_key=os.environ.get("PPLX_SDK_API_KEY"))
+result = client.search.create(
+    query="head of engineering Temporal Technologies",
+    search_type="people",
+    max_results=3,
+)
+print(result.model_dump_json())
+STDOUT: 
+STDERR: Traceback (most recent call last):
+  File "<stdin>", line 5, in <module>
+  File "/home/user/.local/lib/python3.14/site-packages/perplexity/generated/api.py", line 3911, in create
+    self._post(
+    ~~~~~~~~~~^
+        "/search",
+        ^^^^^^^^^^
+    ...<7 lines>...
+        ),
+        ^^
+    ),
+   EXIT 1
+---- sandbox python completed
+CODE: import pplx_sdk
+from pydantic import RootModel
+
+class SearchResponse(RootModel[list[dict]]):
+    pass
+
+class SearchResource:
+    def create(self, *, query, search_type, max_results):
+        if search_type != "people":
+            raise ValueError("This adapter only supports people search")
+        hits = pplx_sdk.search.people(query, limit=max_results)
+        return SearchResponse([dict(hit) for hit in hits])
+
+class Client:
+    search = SearchResource()
+
+client = Client()
+result = client.search.create(
+    query="head of engineering Temporal Technologies",
+    search_type="people",
+    max_r
+STDOUT: [{"url":"https://temporal.io/careers/8a65908d-4f38-4b19-a0ed-453904180469","title":"Head of Engineering, Compute - Temporal","summary":"# Head of Engineering, Compute\n...\nThe Compute team owns the layer all of that runs on.\nWe are looking for a Head of Engineering to lead the effort to make any aspects of Temporal's compute invisible to our customers, allowing them to focus on application layer innovation, while we handle the compute muck.\nThis is a rare, build-the-foundation mandate: the compute substrate that the world's most demanding AI workloads will run on.\nWe want a leader who has operated compute at planet scale, thinks in fleets, goodput, and cost-per-unit-of-compute, and pairs that with the operational rigor to run a service that frontier-AI companies bet production on.\n## What You'll Do\n- **Strategic direction for Compute:** Own the strategy and standards of excellence 
+STDERR:  EXIT 0
+True vents"}
+
+data: {"messageStop": {"stopReason": "end_turn"}, "topic": "events"}
+
+data: {"metadata": {"usage": {"inputTokens": 716938, "outputTokens": 2452, "totalTokens": 719390, "cacheReadInputTokens": 700902}, "metrics": {"latencyMs": 0}}, "topic": "events"}
+
+data: {"done": true, "reply": "done."}
+
+

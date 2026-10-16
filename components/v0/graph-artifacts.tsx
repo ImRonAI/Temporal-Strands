@@ -1,7 +1,7 @@
 "use client"
 
 import { CheckIcon, CopyIcon, NetworkIcon } from "lucide-react"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import type { BundledLanguage } from "shiki"
 
 import {
@@ -17,12 +17,12 @@ import { CodeBlock } from "@/components/ai-elements/code-block"
 import { MessageResponse } from "@/components/ai-elements/message"
 import type { GraphNodeState, GraphRunState } from "@/components/v0/graph-run"
 
-// Fenced code blocks inside a node's final output render through the
-// vendored CodeBlock; everything else stays markdown via MessageResponse.
-// Fence tags map onto shiki BundledLanguage ids (same convention as
-// CODE_EXTENSIONS in agent-activity.tsx) — unknown tags fall back to json,
-// which shiki always bundles.
-const FENCE = /```(\w*)\n([\s\S]*?)```/
+// Every fenced code block inside a node's final output renders through the
+// vendored CodeBlock; the prose around each fence stays markdown via
+// MessageResponse so mixed output is never truncated. Fence tags map onto
+// shiki BundledLanguage ids (same convention as CODE_EXTENSIONS in
+// agent-activity.tsx) — unknown tags fall back to json, which shiki bundles.
+const FENCE = /```(\w*)\n([\s\S]*?)```/g
 
 const FENCE_LANGUAGES: Record<string, BundledLanguage> = {
   bash: "bash",
@@ -43,16 +43,30 @@ const FENCE_LANGUAGES: Record<string, BundledLanguage> = {
 }
 
 function NodeOutput({ node }: { node: GraphNodeState }) {
-  const match = node.text.match(FENCE)
-  if (match) {
-    return (
+  const blocks: ReactNode[] = []
+  let lastIndex = 0
+  let fenceIndex = 0
+  for (const match of node.text.matchAll(FENCE)) {
+    const matchIndex = match.index ?? 0
+    const prose = node.text.slice(lastIndex, matchIndex)
+    if (prose.trim()) {
+      blocks.push(<MessageResponse key={`prose-${fenceIndex}`}>{prose}</MessageResponse>)
+    }
+    blocks.push(
       <CodeBlock
+        key={`code-${fenceIndex}`}
         code={match[2]}
         language={FENCE_LANGUAGES[match[1]] ?? "json"}
       />
     )
+    lastIndex = matchIndex + match[0].length
+    fenceIndex++
   }
-  return <MessageResponse>{node.text}</MessageResponse>
+  const remaining = node.text.slice(lastIndex)
+  if (remaining.trim()) {
+    blocks.push(<MessageResponse key={`prose-${fenceIndex}`}>{remaining}</MessageResponse>)
+  }
+  return blocks.length > 0 ? <>{blocks}</> : <MessageResponse>{node.text}</MessageResponse>
 }
 
 /**
@@ -82,10 +96,10 @@ export function GraphArtifacts({ run }: { run: GraphRunState }) {
   return (
     <div className="space-y-2">
       {run.resultText && (
-        <Artifact className="border-white/10 bg-white/[0.02] backdrop-blur-sm">
-          <ArtifactHeader>
+        <Artifact className="app-glass app-glass-edge border">
+          <ArtifactHeader className="app-glass-edge bg-secondary/70">
             <div className="flex items-center gap-2">
-              <NetworkIcon className="size-4 text-muted-foreground" />
+              <NetworkIcon className="size-4 text-blurple-bright/80" />
               <ArtifactTitle>Formation result · {run.runId}</ArtifactTitle>
             </div>
             <ArtifactActions>
@@ -105,11 +119,11 @@ export function GraphArtifacts({ run }: { run: GraphRunState }) {
       {producing.map((node) => (
         <Artifact
           key={node.id}
-          className="border-white/10 bg-white/[0.02] backdrop-blur-sm"
+          className="app-glass app-glass-edge border"
         >
-          <ArtifactHeader>
+          <ArtifactHeader className="app-glass-edge bg-secondary/70">
             <div className="flex items-center gap-2">
-              <NetworkIcon className="size-4 text-muted-foreground" />
+              <NetworkIcon className="size-4 text-blurple-bright/80" />
               <ArtifactTitle>{node.id}</ArtifactTitle>
             </div>
             <ArtifactActions>

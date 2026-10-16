@@ -1,0 +1,50 @@
+# Task 18 — framework-adherence.test.ts
+
+Suite: `app/framework-adherence.test.ts`
+Date: 2026-09-09
+Scope scanned: `app/`, `components/v0/`, `lib/` — `*.ts`/`*.tsx`, excluding `*.test.*`, `.worktrees`, `.kilo`, `node_modules`.
+Command: `pnpm exec vitest run --exclude '**/.worktrees/**' --exclude '**/.kilo/**' app/framework-adherence.test.ts`
+
+## Per-check status (TARGET = clean state)
+
+| # | Check | Current | Notes |
+|---|-------|---------|-------|
+| 1 | No `new ReadableStream(` / `new TextEncoder(` / `.getReader(` / `new EventSource(` | **FAIL** (expected) | 1 violation: `app/api/compare/route.ts:52` `new TextEncoder()`, `:54` `new ReadableStream(`. Todo 17 deletes that file — not yet landed. |
+| 2 | No hardcoded model ids except `lib/perplexity.ts` DEFAULT_MODEL | **FAIL** (expected) | 3 violations: `lib/perplexity.ts:2` comment `"preset:high"`, `:33` `"gemini-3.8-flash"`, `:34` `"gemini-3.7-flash"`. Todo 15 rewrites the file — not yet landed. `DEFAULT_MODEL = "preset:high"` (line 4) is correctly permitted. |
+| 3 | No `asChild=` in `components/**` | **PASS** | 0 violations. |
+| 4 | No local `reasoning.tsx` file exists | **PASS** | 0 matches under app/, components/, lib/. |
+
+## Baseline run (before mutation)
+
+```
+Test Files  1 failed (1)
+     Tests  2 failed | 2 passed (4)
+```
+Checks 1 & 2 fail (pending todos 17 & 15), checks 3 & 4 pass — matches the known-current-violations brief.
+
+## Mutation test (TDD proof)
+
+Procedure: appended `const _mut = new TextEncoder()` to `app/api/orchestrator/route.ts`, ran the suite, confirmed check 1 failed with the mutated path, then reverted byte-identical (restored pre-mutation bytes via backup copy).
+
+Result after mutation:
+```
+FAIL  app/framework-adherence.test.ts > framework adherence > check 1
+  - app/api/orchestrator/route.ts: const _mut = new TextEncoder()
+      "file": "app/api/orchestrator/route.ts",
+```
+The suite correctly fails on the injected primitive and reports the offending file path.
+
+Revert verification:
+```
+grep "__MUTATION_PROOF__|new TextEncoder()" app/api/orchestrator/route.ts  ->  CLEAN: no mutation remnants
+git diff app/api/orchestrator/route.ts | grep -c "MUTATION\|TextEncoder"    ->  0
+```
+The mutation is fully reverted (0 mutation lines remain in the working-tree diff). `app/api/orchestrator/route.ts` has a pre-existing working-tree diff (uncommitted handoff speaker-labeling work present before this task began, per the tracked `git diff HEAD --name-only` listing) that is unrelated to and untouched by this mutation.
+
+## Final suite state
+
+```
+Test Files  1 failed (1)
+     Tests  2 failed | 2 passed (4)
+```
+Checks 1 & 2 remain failing only because their cleanup todos (17, 15) have not landed. Checks 3 & 4 pass.

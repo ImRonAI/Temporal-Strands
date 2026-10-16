@@ -1,0 +1,76 @@
+# Todo 9 — Provider-declaring model catalog
+Date: 2026-09-09
+Repo: /Users/tims-stuff/Desktop/v0-clone-blurple (orchestrator/)
+
+## TDD failing-first proof
+Added tests/test_run_worker.py::test_catalog_declares_provider BEFORE implementation.
+First run:
+  .venv/bin/python -m pytest tests/test_run_worker.py::test_catalog_declares_provider -q
+  FAILED tests/test_run_worker.py::test_catalog_declares_provider - ImportError:
+    cannot import name 'PROVIDER_GOOGLE_AI_STUDIO' from 'config'
+  1 failed in 13.89s
+
+## Implementation
+- config.py: @dataclass(frozen=True) RegisteredModel(id, provider, label);
+  PROVIDER_PERPLEXITY_AGENT_API = "perplexity-agent-api";
+  PROVIDER_GOOGLE_AI_STUDIO = "google-ai-studio";
+  PROVIDER_DISPLAY_NAMES = {"perplexity-agent-api": "Perplexity Agent API",
+                            "google-ai-studio": "Google AI Studio"}.
+- run_worker.py: build_perplexity_factories -> (factories, catalog) tagging
+  every preset + live catalog id as perplexity-agent-api (preset label
+  "<Name> (preset)", catalog label = id verbatim; NO id renames);
+  build_model_factory -> (factories, catalog) tagging the three Gemini ids
+  google-ai-studio; assemble_model_factories -> (factories, catalog,
+  default_model); boot call site (main) unpacks the 3-tuple and logs
+  "Provider-declaring model catalog: %d entries".
+- tests/test_run_worker.py: existing assemble unpacks updated to 3-tuple.
+- tests/test_gemini_multimodal.py: build_model_factory consumer updated to
+  the new tuple return.
+
+## Gate results
+cd orchestrator && .venv/bin/python -m pytest tests/test_run_worker.py tests/test_config.py -q
+  29 passed in 1.28s
++ tests/test_gemini_multimodal.py added: 49 passed in 1.23s
+
+Full suite: .venv/bin/python -m pytest tests -q
+  6 failed, 720 passed, 18 warnings in 24.39s
+  Failures are all PRE-EXISTING adherence-suite items owned by other lanes
+  (none touch this todo's files):
+    test_framework_adherence.py::test_a_no_bare_strands_model_subclass  (perplexity_model.py:69)
+    test_framework_adherence.py::test_b_perplexity_model_subclasses_openai_responses_model (perplexity_model.py)
+    test_framework_adherence.py::test_f_no_timedelta_outside_config     (compare_workflow.py:81)
+    test_framework_adherence.py::test_g_no_private_tool_func_access     (workflow.py:117)
+    test_framework_adherence.py::test_h_no_empty_except_handler         (graph_activity.py:579)
+    test_workflow.py::test_workflow_builds_agent_with_config_model_stream_batch_interval
+      — flaky under full-suite parallel import; passes in isolation:
+        .venv/bin/python -m pytest tests/test_workflow.py::test_workflow_builds_agent_with_config_model_stream_batch_interval -q
+        1 passed in 0.61s
+
+## Manual QA
+Happy path (both keys stubbed, catalog fetch stubbed to 3 ids):
+  default_model: preset:high
+  catalog size: 12 (asserted EXACT: 6 presets + 3 catalog + 3 Gemini)
+  'preset:fast'              provider='perplexity-agent-api'  label='Fast (preset)'
+  'preset:low'               provider='perplexity-agent-api'  label='Low (preset)'
+  'preset:medium'            provider='perplexity-agent-api'  label='Medium (preset)'
+  'preset:high'              provider='perplexity-agent-api'  label='High (preset)'
+  'preset:xhigh'             provider='perplexity-agent-api'  label='Xhigh (preset)'
+  'preset:wide-research'     provider='perplexity-agent-api'  label='Wide Research (preset)'
+  'anthropic/claude-opus-5'  provider='perplexity-agent-api'  label='anthropic/claude-opus-5'
+  'google/gemini-3.6-flash'  provider='perplexity-agent-api'  label='google/gemini-3.6-flash'
+  'openai/gpt-5'             provider='perplexity-agent-api'  label='openai/gpt-5'
+  'gemini-3.8-flash'         provider='google-ai-studio'      label='gemini-3.8-flash'
+  'gemini-3.7-flash'         provider='google-ai-studio'      label='gemini-3.7-flash'
+  'gemini-flash-latest'      provider='google-ai-studio'      label='gemini-flash-latest'
+Failure path (no keys): SystemExit unchanged — covered by
+  test_no_keys_at_all_raises_system_exit (green).
+
+## Adversarial checks
+- Stale state: scoped gate re-run after all edits — green (see re-run below).
+- Misleading success: catalog length asserted EXACT (==12 in QA; len(presets)+
+  len(catalog)+len(gemini) in the test) and ids asserted identical, in order,
+  to the factory mapping keys.
+
+## Constraints honored
+- No commit. No model id renames. No edits to load_tool registration lines,
+  _SKIP_COMMUNITY_FILES, ensure_strands_tools_dir, server.py, or workflow.py.

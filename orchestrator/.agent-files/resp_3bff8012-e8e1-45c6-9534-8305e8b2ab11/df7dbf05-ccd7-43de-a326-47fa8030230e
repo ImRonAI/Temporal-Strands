@@ -1,0 +1,428 @@
+# DME DocLock Product Discovery Document
+
+**Product:** DME DocLock — “Proof before ship.”  
+**Decision date:** September 22, 2026  
+**Discovery team:** Product discovery lead; user researcher; DME/Medicare domain expert; approval gate  
+**Decision:** **GO to a tightly bounded, paid-design-partner v1, subject to the conditions in §8.**
+
+> **Discovery status.** This is a decision-quality discovery plan and evidence synthesis, not a claim that primary research has already occurred. Public evidence is cited inline. Persona economics, journey times, and supplier-level rates are explicit hypotheses to validate with observed workflow data. “Improper payment” is not synonymous with fraud, denial, or recoverable supplier revenue.
+
+## Executive summary
+
+DME DocLock should be built as a **pre-fulfillment Medicare documentation control plane**, not another order-entry, billing, or clinical-decision system. Its job is to select the right approved rule version for HCPCS, date of service (DOS), beneficiary jurisdiction, and workflow; map source evidence to those criteria; identify administrative gaps; coordinate a cure; and require an attributable human release, hold, or override. The durable artifact is a sealed provenance packet.
+
+The wedge is compelling. CMS reported FY2024 DMEPOS payments of about $9.0B, projected improper payments of $1.9B, and a 21.4% improper-payment rate ([CMS FY2024 supplemental data](https://www.cms.gov/files/document/2024-medicare-fee-service-supplemental-improper-payment-data.pdf)). For glucose monitors, CMS reports $278.5M projected improper payments at 25.2%; 67.6% was attributed to no documentation and 26.6% to insufficient documentation ([CMS glucose-monitor compliance tips](https://www.cms.gov/training-education/medicare-learning-networkr-mln/compliance/medicare-provider-compliance-tips/glucose-monitoring-supplies)). For lumbar-sacral orthoses, the rate was 54.4%, with 64.4% attributed to insufficient documentation ([CMS spinal-orthoses compliance tips](https://www.cms.gov/training-education/medicare-learning-networkr-mln/compliance/medicare-provider-compliance-tips/spinal-orthoses)). These are program-level estimates, not a supplier’s avoidable loss; they establish exposure and documentation salience, not DocLock’s ROI.
+
+Operational urgency increased in 2026. Seven HCPCS codes joined the Required Prior Authorization List effective April 13, taking the operational list from 67 to 74; eight more become effective October 28, taking it to 82. CMS also begins probationary prior authorization on October 15, 2026 for certain items furnished by newly enrolled DMEPOS suppliers and suppliers undergoing certain changes of ownership ([CMS required PA initiative](https://www.cms.gov/data-research/monitoring-programs/medicare-fee-service-compliance-programs/prior-authorization-and-pre-claim-review-initiatives/prior-authorization-process-certain-durable-medical-equipment-prosthetics-orthotics-and-supplies); [CMS probationary PA](https://www.cms.gov/data-research/monitoring-programs/medicare-fee-service-compliance-programs/prior-authorization-pre-claim-review-initiatives/probationary-prior-authorization-process-newly-enrolled-suppliers-certain-durable-medical-equipment)). The product must therefore treat policy effective dating as a safety-critical function.
+
+The recommendation is conditional because three uncertainties dominate: whether enough defects are curable before shipment, whether “release-ready” precision can safely reach 95% with zero silent policy-version errors, and whether clinic guests will complete requests without adopting software. The v1 gate is therefore the approved brief’s three validation highlights: **8/12 qualified suppliers evidence the problem; 1,000-order retrospective benchmark clears quality and review-time thresholds; and three partners pay at least $24K ACV and produce measurable 90-day workflow impact.**
+
+---
+
+## 1. Problem framing and opportunity solution tree
+
+### 1.1 Problem statement
+
+For Medicare-heavy, multi-location DME suppliers, the final moment of leverage is **before equipment is released**. Yet evidence arrives fragmented across fax, PDFs, EHR messages, portals, e-prescribing networks, calls, and the supplier’s ERP. Intake staff must translate changing public rules—regulations, NCDs, LCDs, policy articles, Standard Documentation Requirements, PA lists, and DME MAC guidance—into order-level checks. A document can exist but be unusable: wrong beneficiary, stale encounter, missing signature/date, wrong item detail, conflicting quantity, or an order created after delivery when WOPD applied.
+
+The current process is memory-driven and lossy. Staff repeatedly open documents, use local checklists, chase clinics, re-key status, and release under shipment pressure. The defect then becomes expensive: delayed cash, denial rework, an ADR response, TPE scrutiny, RAC recoupment, or an unrecoverable shipment. CMS’s Targeted Probe and Educate (TPE) generally reviews 20–40 claims per round; problems not improved after three rounds may lead to 100% prepayment review, extrapolation, Recovery Auditor referral, or other action ([CMS TPE](https://www.cms.gov/data-research/monitoring-programs/medicare-fee-service-compliance-programs/medical-review-and-education/targeted-probe-and-educate-tpe)).
+
+### 1.2 Target segment and desired outcome
+
+**Beachhead ICP:** US DME suppliers with ≥1,000 Medicare orders/month, centralized intake, multiple active locations, material volume in CGM/supplies, PAP/resupply, oxygen, selected orthoses, or pneumatic compression, and operations spanning two DME MAC footprints.
+
+**Desired outcome:** Increase the percentage of Medicare orders that are **human-released with complete, source-linked, rule-version-correct administrative evidence before fulfillment**, while reducing cycle time and touches.
+
+**Outcome boundary:** “Documentation ready” means evidence satisfies an approved administrative checklist. It is **not** a medical-necessity, coverage, coding, or device recommendation.
+
+### 1.3 Opportunity solution tree
+
+| Desired outcome | Opportunity / unmet need | Candidate solution | Riskiest experiment |
+|---|---|---|---|
+| Human-released, evidence-complete order before ship | Staff cannot reliably know which version of which rule applied on DOS | Human-approved Criteria Skills; deterministic HCPCS/DOS/jurisdiction selector; effective-date regression suite | Blind replay across 1,000 orders and policy-change boundary cases; zero silent version errors |
+| Same | Evidence is buried in mixed faxes and PDFs | Fax splitting, OCR, classification, entity reconciliation, signature/date detection, page-level evidence graph | Compare against dual-abstracted gold set; ≥90% critical-gap recall and ≥95% release-ready precision |
+| Same | “Document received” is confused with “criterion satisfied” | Five-state criterion status: Present, Missing, Conflicting, Uncertain, N/A; source citation beside every status | Moderated review with 12 intake users; ≥10/12 reach correct action without assistance |
+| Same | Chasing a clinic is slow, interruptive, and unauditable | Owner-specific cure plan; no-login guest link; reminders; secure upload/acknowledgment; handshake history | 100 real guest tasks; ≥60% completed within two business days, no PHI leakage |
+| Same | Shipment pressure overrides incomplete evidence | Ranked hold queue by ship date and allowed dollars; human release; reason-coded override; supervisor escalation | Shadow mode then controlled release; no autonomous release and ≥95% override attribution |
+| Same | Audit response reconstructs history months later | Sealed packet: manifest, evidence index, criteria version/citations, actions, reviewer, timestamps, hashes | Compliance blind test: build 30 packets manually vs DocLock; ≥50% faster, 100% source traceability |
+| Same | Existing systems already own order/billing workflow | Overlay via fax/PDF first, then Brightree/NikoHealth/WellSky/Parachute and EHR interfaces | Technical spike in two partner environments; ≥95% order matching, no ERP write corruption |
+
+### 1.4 Why this solution—not a generic AI copilot
+
+Probabilistic models are suitable for **assistive evidence processing** but not the controlling conclusion. Only approved deterministic Criteria Skills may set gap status. Every machine extraction retains page coordinates, confidence, source hash, and model/version metadata; low confidence becomes **Uncertain**, never silently Present. A human sees the evidence and makes the release decision. This separation is the core product thesis and the primary regulatory/ethical control.
+
+---
+
+## 2. Stakeholders and personas
+
+### 2.1 Stakeholder map
+
+| Stakeholder | Interest | Power | Product posture |
+|---|---:|---:|---|
+| COO / VP Revenue Cycle / VP Operations | Margin, cash, throughput, audit exposure | Very high—economic buyer | Prove site-level ROI and implementation safety |
+| Intake/documentation team | Fewer touches and clearer queues | High—daily adoption/veto | Design primary workspace around evidence and cure |
+| Compliance/audit lead | Defensible policy lineage and packets | High—approval/veto | Co-owner of Criteria Skills and override policy |
+| Referring clinic staff/prescriber | Low-friction correction, no new portal | Medium—network adoption | No-login, minimal-field, mobile-capable guest flow |
+| IT/security/privacy | Integration, HIPAA, vendor risk | High—deployment veto | BAA, least privilege, SSO, audit logs, retention controls |
+| Branch/fulfillment manager | Ship SLA and local backlog | Medium | Visible holds, exceptions, escalation—not rule bypass |
+| Biller/AR | Clean claim and denial recovery | Medium | Consume packet/status; not primary v1 editor |
+| DME MAC medical reviewer | Reviewable, authentic records | External high consequence | Never market “audit-proof”; preserve original evidence |
+
+### 2.2 Primary personas
+
+Quantification below is a **testable baseline** for a supplier processing 3,000 Medicare orders/month at a fully loaded frontline labor cost of $30/hour. Public salary data places a general US intake specialist around $20.64/hour base ([Indeed](https://www.indeed.com/career/intake-specialist/salaries)); $30/hour is a planning assumption after payroll taxes, benefits, supervision, software, and occupancy.
+
+#### Persona 1 — Maria Chen, VP Revenue Cycle (economic buyer)
+
+| Dimension | Detail |
+|---|---|
+| Role / org | VP Revenue Cycle at a 14-location regional DME supplier; 4,000 Medicare orders/month; centralized intake and billing |
+| Goals | Lower preventable documentation denials/recoupments; shorten referral-to-release; scale without proportional headcount; survive TPE/RAC/ADR; standardize branches |
+| Daily workflow | 8 a.m. KPI review → intake/AR huddle → escalation of aged orders → payer and DME MAC issue review → branch performance → vendor/finance decisions |
+| Tools | Brightree ERP, Parachute referrals, Power BI/Excel, DME MAC portals, clearinghouse, Teams/email, fax dashboards |
+| Quantified pain | Hypothesis: 18% of 4,000 orders require 2.5 extra touches × 7 minutes = **210 hours/month** or **$6,300/month** frontline cost. If 3% of orders produce documentation denials at $250 allowed, exposed allowed dollars are **$360K/year**, before appeal labor and cash delay. A vendor-reported DME estimate places denial rework at $25+ per claim; validate independently ([NikoHealth denial guide](https://nikohealth.com/why-dme-claims-get-denied-and-how-to-fix-them/)). |
+| Triggers | TPE letter; acquisition/new branch; rising denial code; new PA list; centralization; staffing freeze; ERP migration |
+| Objections | “Brightree/Parachute already does this”; AI hallucination; six-month implementation; unproven savings; staff creating duplicate work |
+| Buying influence | Budget owner and executive sponsor; needs compliance, IT/security, operations, and CFO concurrence |
+| Quote | “Show me what we prevented before shipment, by location and HCPCS, without replacing the systems that run the business.” |
+
+#### Persona 2 — Jamal Ortiz, Intake Documentation Supervisor
+
+| Dimension | Detail |
+|---|---|
+| Role / org | Supervises 18 intake/documentation specialists at a national respiratory and diabetes supplier |
+| Goals | Work highest-risk orders first; reduce callbacks and re-opening; coach consistently; hit ship SLA; prevent silent releases |
+| Daily workflow | Assign fax queue → de-duplicate/split packets → verify demographics/insurance → identify item → inspect order and notes → chase clinic → PA if applicable → set hold/release → answer branch escalations |
+| Tools | NikoHealth or Brightree, RightFax, Parachute, payer/DME MAC portals, Excel checklists, Teams, phone, email |
+| Quantified pain | Hypothesis: specialist spends **2.0 hours/day** searching/re-opening documents and **1.0 hour/day** on failed calls/faxes. Across 18 FTE, 20 days/month, that is **1,080 hours/$32,400 per month**. A 20-order aged queue with $250 average allowed amount places **$5,000/day** at risk of delay or bad release. |
+| Triggers | Backlog >2 days; >10% abandoned referrals; supervisor sees divergent checklist decisions; a high-dollar order released without WOPD |
+| Objections | False holds will hurt patients and referrals; another inbox; OCR cannot read fax artifacts; automation will be used as surveillance |
+| Buying influence | Operational champion and adoption veto; defines queue, SOP, and training; advises buyer |
+| Quote | “Do not tell me the fax arrived—show me the exact page that closes the exact requirement, and let me fix exceptions fast.” |
+
+#### Persona 3 — Denise Walker, Clinic Office Manager / Medical Assistant
+
+| Dimension | Detail |
+|---|---|
+| Role / org | Office manager and MA for a six-prescriber endocrinology clinic referring to several DME suppliers |
+| Goals | Get patients supplies quickly; minimize duplicate requests; protect prescriber time; know exactly what to correct |
+| Daily workflow | Triage inbox/faxes → prepare forms → route orders for signature → locate visit note/labs → answer suppliers → schedule follow-up → document status in EHR |
+| Tools | Epic or Oracle Health, In Basket/message pools, e-fax, Parachute, phone, scanner; sometimes supplier-specific portals |
+| Quantified pain | Hypothesis: 12 DME corrections/week × 12 minutes = **2.4 hours/week**. At $32 fully loaded, that is **$4,000/year** for one clinic; unclear requests add 5–10 prescriber interruptions/week worth another **0.5–1.0 hour**. |
+| Triggers | Patient complaint; “third fax” from supplier; expiring/stale note; missing signature; a structured guest request that names one fix |
+| Objections | No new account/password; suspicious links; duplicate work already completed in Epic/Parachute; supplier asking clinic to attest or backdate; uncertainty about authorization to upload PHI |
+| Buying influence | Not buyer, but decisive network participant; completion behavior determines cure-loop value; can steer referrals away from burdensome suppliers |
+| Quote | “Ask once, say exactly what is missing, and take me to that task—do not make me learn another DME portal.” |
+
+#### Persona 4 — Priya Shah, Director of Compliance and Audit
+
+| Dimension | Detail |
+|---|---|
+| Role / org | Billing-compliance and audit lead at a multi-state supplier; owns TPE/RAC/ADR response and policy governance |
+| Goals | Correct rule/version; immutable source lineage; reproducible decision; controlled overrides; complete response packet; no fabricated record |
+| Daily workflow | Monitor CMS/MAC changes → approve SOP/checklist updates → sample claims → investigate incidents → gather records → prepare ADR/TPE/RAC responses → educate staff and executives |
+| Tools | CMS Medicare Coverage Database, Noridian and CGS sites/portals, Brightree/WellSky, SharePoint, Excel, secure file transfer, audit trackers |
+| Quantified pain | Hypothesis: routine ADR packet takes **2.5 hours**; 40/month = **100 hours/$5,000 per month** at $50/hour loaded. A 30-claim TPE round at 2.5 hours each consumes **75 hours/$3,750**, excluding leadership and counsel. CMS notes traditional TPE rounds generally contain 20–40 claims ([CMS TPE](https://www.cms.gov/data-research/monitoring-programs/medicare-fee-service-compliance-programs/medical-review-and-education/targeted-probe-and-educate-tpe)). |
+| Triggers | New LCD/article version; PA expansion; audit notice; inconsistent branch behavior; suspected post-delivery order; acquisition |
+| Objections | “Deterministic” rules may still encode policy incorrectly; mutable logs; black-box signature detection; product drifting into medical necessity; vendor’s packet presented as legal guarantee |
+| Buying influence | Formal approval gate and likely co-signer; can veto deployment or narrow categories; owns override taxonomy and sampling |
+| Quote | “I need to reproduce what the operator knew, under the policy effective that day, from the unchanged source—not an AI summary.” |
+
+### 2.3 Secondary personas
+
+| Persona | Workflow, pain, influence, representative quote |
+|---|---|
+| Leo Grant, branch manager | Balances local ship SLA, inventory, patient calls, and central-intake holds in Brightree/WellSky and Teams. Hypothesis: **45 minutes/day** on status escalation = **$5,850/year** at $30/hour. Operational influencer; may pressure overrides. “Give me an ETA and owner for the hold, not a compliance code.” |
+| Aisha Bell, senior biller | Scrubs modifiers, transmits claims, posts remits, and works denials using ERP, clearinghouse, DME MAC portal, fax, and Excel. Hypothesis: 60 documentation denials/month × 20 minutes = **20 hours/$700 monthly** at $35/hour. Downstream validator. “If intake says ready, I need the evidence and reason to survive claim review.” |
+| Dr. Evan Reed, DME MAC medical reviewer (external stakeholder) | Reviews sampled claims and submitted medical records against Medicare requirements. The beneficiary’s permanent address determines the DME MAC jurisdiction; Noridian administers JA/JD and CGS administers JB/JC ([CGS/Noridian jurisdiction guide](https://cgsmedicare.com/pdf/dme/cgs_and_noridian_tools_and_resources.pdf)). Not a buyer or design partner; consequences shape provenance. “Show the contemporaneous order and record, clearly indexed; do not infer what the note never said.” |
+
+### 2.4 Ecosystem and competitive context
+
+DocLock must overlay, not disparage, systems already delivering value. Brightree positions its HME/DME platform around billing, patient engagement, analytics, ePrescribe, referral, and intake workflows ([Brightree](https://www.brightree.com/hme-dme-software/)). NikoHealth markets fax-to-classified-record and prefilled-order intake automation ([NikoHealth](https://nikohealth.com/)). WellSky’s Bonafide platform spans order processing, compliance, inventory, and billing ([WellSky](https://wellsky.com/dme-hme-software/)). Parachute supports structured digital ordering, status, documentation capture, AI intake, and clinician requests ([Parachute](https://explore.parachutehealth.com/digital-order-management-platform-and-ai-intake)). DocLock’s defendable layer is effective-dated criteria governance, evidence-level deterministic status, human release control, cross-channel cure, and sealed memory—not generic intake or e-prescribing.
+
+---
+
+## 3. Jobs-to-be-done and current-state journey
+
+### 3.1 Core jobs-to-be-done
+
+1. **When a referral arrives fragmented, help intake determine which administrative evidence applies and what is usable, so the order can move without relying on memory.**
+2. **When evidence is missing or conflicting, help the right supplier or clinic person complete one precise cure, so callbacks and duplicate faxes stop.**
+3. **When shipment is imminent, help an authorized employee understand residual risk and record release/hold/override, so no machine makes the consequential decision.**
+4. **When a policy changes, help compliance approve, test, publish, and later reproduce the applicable version, so date boundaries do not create silent errors.**
+5. **When an ADR/TPE/RAC arrives, help compliance assemble unchanged evidence and decision history, so response time and omission risk fall.**
+
+### 3.2 Current-state journey map
+
+Baseline: 3,000 Medicare orders/month, $250 average allowed amount, $30/hour intake labor. Ranges are discovery hypotheses and overlap; do not sum dollars as if independent. Emotional score ranges from +2 confident to −2 distressed.
+
+| Stage | Current activity / systems | Typical elapsed & active time | Pain severity (1–5) | Emotional curve | Quantified pain hypothesis | DocLock opportunity |
+|---|---|---:|---:|---:|---|---|
+| 1. Referral | Fax, PDF, Epic/Oracle message, Parachute, phone; create ERP order | 0–8 h elapsed; 8–15 min active | 3 | 0 → −1 | 5% duplicates/mismatch; 150 orders × 10 min = **25 h/$750 mo** | Ingest, hash, split, classify, match patient/order; preserve originals |
+| 2. Intake & benefits | Identify payer/item, demographics, jurisdiction, order elements | 15–30 min | 4 | −1 | 3,000 × 8 avoidable search min = **400 h/$12K mo** | Evidence graph; DME MAC selector; criterion checklist |
+| 3. Documentation chase | Read notes/orders; call/fax; wait; re-open | 1–5 business days; 15–45 min active | 5 | −2 | If 18% need 2.5 extra 7-min touches: **158 h/$4,725 mo**; $135K allowed waits in chase (540 × $250) | Owner-specific cure, no-login link, reminders, continuous reevaluation |
+| 4. PA where applicable | Determine list/date; compile/submit; monitor decision | 1–10 business days; 20–45 min | 5 | −2 | 200 PA orders × 25 min = **83 h/$2,500 mo**; wrong effective date can make entire item unreleasable | Flag applicability/evidence; packet export and status; no autonomous submission in v1 |
+| 5. Release / ship | Supervisor resolves holds; warehouse fulfills; delivery proof | Same day–2 days; 5–10 min | 5 | −1 or +1 | A 2% bad-release assumption = 60 orders/**$15K allowed mo** exposed; false hold delays needed equipment | Ranked queue; evidence viewer; authorized release/hold/override |
+| 6. Claim | Code/modifier review, submit, remit | 1–30 days; 5–12 min | 3 | +1 → 0 | Documentation status rechecked; 3 min duplication × 3,000 = **150 h/$4,500 mo** | Export readiness and packet reference; ERP remains claim system |
+| 7. Denial / ADR | Locate records, appeal/correct, wait for cash | 30–120+ days; 20–150 min | 5 | −2 | If 3% documentation denial: 90 × $25 rework = **$2,250/mo**, plus **$22,500 allowed** delayed/exposed; $25 is vendor-reported, validate locally | Searchable provenance packet; original-source index; reason analytics |
+| 8. Audit / TPE / RAC | Sample, reconstruct, submit, educate, remediate | Weeks–months; 2–4 h/claim | 5 | −2 | 30 claims × 2.5 h × $50 = **$3,750/round**, plus recoupment/extrapolation risk | Batch packet creation, criteria lineage, override history, cohort analysis |
+
+### 3.3 Regulatory moments that shape the journey
+
+The Standard Documentation Requirements article A55426 states that an SWO must be communicated before claim submission and that, for items on the required list, a WOPD must be received before delivery; supplier documentation must be maintained for seven years from DOS ([CMS A55426](https://www.cms.gov/medicare-coverage-database/view/article.aspx?articleid=55426)). DocLock therefore stores the received timestamp, source, signature/date evidence, delivery timestamp, and policy version separately. It must never “repair” timing through backdating.
+
+Jurisdiction is not simply the supplier branch: the beneficiary’s permanent address determines DME MAC jurisdiction. The initial two-footprint implementation must cover Noridian JA/JD and CGS JB/JC while testing state mapping and beneficiary-address change cases. Policy hierarchy and conflicts must route to compliance as **Uncertain**, never resolve by model preference.
+
+---
+
+## 4. Assumption map and riskiest-assumption tests
+
+### 4.1 Prioritization map
+
+| Type | High-risk assumption | Importance | Evidence now | Priority |
+|---|---|---:|---:|---:|
+| Desirability | ≥15% of orders need a chase/hold and defects are curable before ship | Critical | Public documentation-error data, no supplier denominator | 1 |
+| Feasibility/safety | System meets precision/recall, review-time, and policy-version thresholds | Critical | Architecture hypothesis only | 1 |
+| Viability | Three suppliers pay ≥$24K ACV and realize impact in 90 days | Critical | Price in approved brief, no commitments evidenced | 1 |
+| Usability | Clinic guests complete clear tasks without accounts | Critical | Parachute demonstrates digital collaboration demand; exact flow untested | 1 |
+| Regulatory/ethics | Product can remain administrative and human-controlled | Critical | Guardrails defined; use in practice untested | 1 |
+| Integration | Fax/PDF and ERP identifiers match reliably | High | Mature component capabilities; partner variance unknown | 2 |
+| Scalability | Criteria authoring and change monitoring are maintainable | High | Process design only | 2 |
+| Market size | 8,005 viable locations support ~$192M SAM | Medium | OAMES estimated 8,005 traditional Medicare DMEPOS locations in Jan. 2024 ([OAMES](https://oames.org/aws/OAMES/pt/sd/news_article/556819/_PARENT/layout_details/true)) | 2 |
+
+The SAM arithmetic is **8,005 × $24,000 = $192.12M**, but it is a top-down ceiling, not serviceable revenue: locations may be inactive, too small, commonly owned, or not Medicare-heavy. Revalidate with NPPES/PECOS-compatible supplier data, ownership rollups, category mix, and location-level pricing willingness.
+
+### 4.2 Experiment portfolio with pass/fail gates
+
+| ID / assumption | Method and sample | Measures | Pass threshold | Fail / decision |
+|---|---|---|---|---|
+| D1 — problem prevalence and exposure **(Validation Highlight 1)** | Recruit **12 qualified suppliers**, deliberately varied by size, category, ERP, and JA/JD vs JB/JC. Interview COO, intake, compliance; observe 4 hours/site; sample 100 consecutive Medicare orders/site where permitted. Normalize annual allowed dollars. | % needing documentation chase/hold; touches; active/elapsed time; allowed dollars with a specific curable defect | **≥8/12** show **≥15%** needing chase/hold **and ≥$250K annual allowed dollars** exposed to curable defects | Stop or narrow segment/category if <8 pass; do not average one high-volume outlier across failures |
+| F1 — retrospective quality **(Validation Highlight 2)** | Dual human abstraction plus compliance adjudication for **≥1,000 orders** across ≥3 suppliers, ≥4 product families, both footprints, clean and defective cases. Freeze test set; blind model/rules. Oversample effective-date boundaries, faint faxes, amendments, duplicate patients. | Release-ready precision; critical-gap recall; silent policy-version errors; median/p95 review time; category confusion matrix | **≥95% precision**, **≥90% critical-gap recall**, **zero silent policy-version errors**, **median human review <3 min**; additionally p95 <8 min | Any silent version error = no release workflow; <95% precision = shadow-only; missed critical class triggers category rollback |
+| V1 — paid demand and impact **(Validation Highlight 3)** | Three 90-day paid pilots, each **≥$24K ACV-equivalent**; implementation fee may be discounted but not software to zero. Baseline prior 30 days; shadow 30; controlled 60. | Contract value; guest completion; touches/order; documentation-denial rate; cycle time; overrides; adverse events | **3 paid partners; ≥60% guest tasks in 2 business days; ≥30% reduction in intake touches or documentation denials within 90 days** | Fewer than 3 paid = pricing/urgency failure; impact only through unsafe holds = fail |
+| U1 — intake comprehension | 12 specialists and 4 supervisors complete 8 realistic tasks in clickable prototype; counterbalanced current checklist vs DocLock | Correct action, time, source-opening, SUS, false confidence | ≥90% task accuracy; ≥80 SUS; ≥10/12 correctly handle Conflicting/Uncertain; no one mistakes status for coverage decision | Redesign hierarchy/labels; prohibit pilot release if false-confidence event occurs |
+| U2 — guest handshake | 20 clinic staff/prescribers prototype test, then **100 real tasks** across ≥20 clinics and 3 suppliers | Open, identity verification, completion, abandonment, time, support calls, duplicate uploads | ≥60% complete ≤2 business days; median active time ≤4 min; <10% support; zero wrong-patient disclosure | Add alternate secure channel or narrow task types; any PHI disclosure = incident response and pause |
+| R1 — policy governance | Compliance experts independently compile 25 criteria sets; adversarial review of 100 rule assertions and 30 change events | Citation accuracy, inter-rater agreement, effective dates, rollback, approval identity | 100% public-source citation/effective date; 100% two-person approval; ≥0.90 agreement before adjudication; rollback <30 min | No publication until corrected; recurring ambiguity becomes explicit Uncertain/manual policy |
+| T1 — integration | Two sandboxes (one Brightree/NikoHealth, one WellSky/other) plus fax corpus of 5,000 pages; FHIR spike for Epic and Oracle Health | Ingestion success, order match, duplicates, latency, idempotency, source integrity | ≥99% file capture; ≥95% auto-match with remainder queued; 100% idempotent retry; hash equality; no production write in v1 | Manual association permitted; platform write-back deferred |
+| E1 — ethics/red-team | 50 adversarial scenarios: backdate request, fabricated language, unsupported attestation, staff coercion, unauthorized guest, wrong patient, device request | Refusal/routing, audit logging, human attribution, privacy incidents | 100% block prohibited actions; 100% consequential events attributable/reversible; zero PHI leakage | Pilot pause; safety review and retraining/configuration |
+| O1 — audit packet utility | 30 historic ADR/TPE-style cases; compliance crossover comparison | Preparation time, omitted evidence, provenance, reviewer acceptance | ≥50% time reduction; 100% source-linked manifest; zero altered source; compliance rating ≥4/5 | Packet remains internal aid; redesign export/index |
+
+### 4.3 Measurement definitions
+
+- **Release-ready precision:** among orders DocLock presents as having no detected administrative gaps, fraction that compliance-adjudicated gold standard also deems administratively complete. Because a false-ready can cause release, optimize precision before recall.
+- **Critical-gap recall:** fraction of gold-standard gaps capable of invalidating order timing, documentation, or PA readiness that DocLock flags Missing/Conflicting/Uncertain.
+- **Silent policy-version error:** wrong criteria version selected without a blocking alert. One is a release-gate failure.
+- **Curable defect:** a specific administrative omission/conflict that can legitimately be corrected prospectively by an authorized source; it excludes fabrication, backdating, and clinical insufficiency that requires a new encounter or clinician judgment.
+- **Documentation denial:** locally mapped denial/ADR outcome adjudicated to absent, insufficient, invalid, or mistimed documentation—not all denials.
+
+---
+
+## 5. Solution ideation and concept definition
+
+### 5.1 Selected concept
+
+**DME DocLock v1 is an operator-facing gate and collaboration overlay.** It receives an order packet; creates a source-preserving evidence graph; selects an approved Criteria Skill deterministically; evaluates evidence into five explicit states; builds a cure plan; supports a secure guest exchange; continuously reevaluates; and presents an authorized human with release, hold, or reason-coded override. It seals the state and provenance packet at each consequential decision.
+
+**Concept flow**
+
+1. **Ingest:** fax/PDF plus CSV/API order metadata; malware scan, immutable original, SHA-256 hash, source timestamp.
+2. **Understand assistively:** classify/split, OCR, extract entities, detect signatures/dates, reconcile patient/prescriber/order. Model output is proposed evidence, not policy.
+3. **Select rules deterministically:** HCPCS/product family + DOS + beneficiary jurisdiction + PA/workflow flags resolve to an approved effective-dated Criteria Skill.
+4. **Evaluate:** each criterion is Present, Missing, Conflicting, Uncertain, or N/A with page-level source and explanation.
+5. **Cure:** assign an authorized owner, create a concise request, use a no-account expiring guest link, record every action, and ingest returned originals.
+6. **Decide:** ranked work queue; human opens critical evidence and chooses release, hold, or override under role and reason controls.
+7. **Remember:** seal manifest, criteria/version/citations, source index, extraction lineage, guest history, reviewer identity, timestamps, reason, and hashes.
+
+### 5.2 v1 scope
+
+| In v1 | Boundary / acceptance |
+|---|---|
+| Segments | ≥1,000 Medicare orders/month; centralized intake; multi-location; two partner-confirmed footprints among Noridian JA/JD and CGS JB/JC |
+| Product families | CGM and supplies; PAP and resupply; oxygen; selected orthoses and pneumatic compression only after criteria validation |
+| Channels | Fax and PDF day one; secure upload; batch/API metadata. Epic and Oracle Health FHIR R4/DocumentReference read spike behind feature flag—Oracle documents R4 4.0.1 and DocumentReference read support ([Oracle Health](https://docs.oracle.com/en/industries/health/millennium-platform-apis/mfrap/api-documentreference.html)); Epic publishes R4 resources ([Epic on FHIR](https://fhir.epic.com/)) |
+| Rules | Public CMS, NCD/LCD, related policy articles, A55426, PA lists, and Noridian/CGS guidance; human-authored and two-person approved; effective dated |
+| Checks | SWO/WOPD timing and elements, signature/date presence, encounter/document freshness, PA applicability/status evidence, continued-use/continued-need administrative evidence, modifier-supporting administrative facts, internal conflicts |
+| Workflow | Queue, evidence viewer, cure plan, guest task, reminders, continuous reevaluation, human release/hold/override, supervisor escalation |
+| Governance | SSO/RBAC, BAA, encryption, tenant isolation, least privilege, immutable audit trail, retention/export/delete policy, policy publish/rollback |
+| Packet | Original manifest, evidence index, criteria version and public citations, statuses, handshake, reviewer/decision, hashes; clearly labeled operational record, not “audit-proof” certification |
+
+### 5.3 Explicitly out of scope
+
+- Medical-necessity or coverage determinations; clinical appropriateness; diagnosis inference; device/product recommendations.
+- Autonomous release, fulfillment, claim submission, PA submission, appeals, attestation, signature, or alteration of a note/order.
+- Generated clinical language, suggested charting intended to satisfy coverage, backdating, cloned signatures, or filling absent facts.
+- Coding optimization, fee-schedule optimization, ABN determination, beneficiary inducement, or contingency-fee recovery.
+- Redistribution of MCG, InterQual, payer-proprietary policies, or copyrighted material without license.
+- Replacing Brightree, NikoHealth, WellSky, Parachute, EHR, clearinghouse, inventory, billing, CRM, or fax.
+- Medicaid, Medicare Advantage payer-specific policy, commercial payers, all HCPCS, all four footprints at launch, or international use.
+- Two-sided payer adoption dependency; prescriber analytics/ranking; model training on tenant PHI without explicit contractual basis.
+
+### 5.4 Regulatory, privacy, and clinical constraints
+
+DocLock is a HIPAA business associate when it handles PHI for suppliers; deployment requires a BAA, minimum-necessary access, security risk analysis, incident response, subcontractor controls, and customer-configured retention consistent with law and contract. A55426’s seven-year supplier documentation obligation informs default preservation but does not authorize indefinite storage. Legal counsel must assess state retention, electronic-signature, recording, and patient-access requirements.
+
+The product UI must say **“administrative evidence status”**, not “covered,” “medically necessary,” or “approved.” A status never edits source evidence. Policy citations link to the exact public version and effective period. Any policy ambiguity, model uncertainty, mismatched patient, or unavailable source blocks “ready” and routes to an authorized human.
+
+---
+
+## 6. Value proposition and pricing hypotheses
+
+### 6.1 Value proposition
+
+**For Medicare-heavy DME operators who lose time and leverage chasing fragmented evidence, DME DocLock creates a source-linked, effective-dated proof gate before shipment. Unlike an ERP, e-prescribing network, or generic document AI, it overlays existing systems, lets clinics cure a precise task without buying software, and preserves a human-attributable packet—without making medical-necessity decisions.**
+
+Value pillars: (1) prevent curable defects while leverage remains; (2) reduce intake touches and elapsed chase time; (3) make release decisions consistent and visible; (4) accelerate audit response; (5) prove which policy and source supported the action.
+
+### 6.2 ROI model—not a promise
+
+For a 3,000-order/month location, use conservative, locally measurable inputs:
+
+- Orders/year: 36,000.
+- Chase incidence: 18% (discovery hypothesis).
+- Current extra touches: 2.5 × 7 minutes.
+- Reduction target: 30%.
+- Loaded intake labor: $30/hour.
+- Documentation-denial incidence: 3% of orders; average allowed $250; avoid 30%.
+- Denial rework: $25/claim (vendor benchmark, validate locally).
+- Audit packets: 240/year; save 1.25 hours at $50/hour.
+
+**Annual benefit hypothesis**
+
+1. Intake labor: 36,000 × 18% × 2.5 × 7/60 × $30 × 30% = **$17,010**.
+2. Avoided denial rework: 36,000 × 3% × 30% × $25 = **$8,100**.
+3. Allowed dollars no longer exposed/delayed: 36,000 × 3% × 30% × $250 = **$81,000**. This is **not booked as benefit** until the supplier proves incremental collection or cash-timing value.
+4. Audit preparation: 240 × 1.25 × $50 = **$15,000**.
+
+Hard labor benefit is **$40,110/year** ($17,010 + $8,100 + $15,000). At $24,000 annual subscription, gross hard-benefit ROI is **1.67×** and simple payback **7.2 months**, excluding implementation and any verified collections. With a $20,000 first-year implementation fee, first-year hard benefit does not fully clear total fees; enterprise/multi-location economics require shared implementation and measured denial benefit. This honest result makes the paid pilots essential.
+
+CMS’s $1.9B/21.4%, CGM $278.5M/25.2%, and orthosis rates should size risk and prioritize categories—not be multiplied by one supplier’s revenue as “savings.” Improper payments can be overpayments or underpayments and include non-documentation causes.
+
+### 6.3 Pricing experiments
+
+| Model | Hypothesis | Advantages | Risks | Experiment / pass |
+|---|---|---|---|---|
+| Per active location | **$24K/location/year** + **$15K–$25K** implementation; volume/family bands | Budgetable, aligned to approved brief, supports control-plane value | Penalizes distributed footprints; “active location” ambiguity; weak volume alignment | Present to 12 buyers; ≥3 paid at ≥$24K ACV-equivalent; ≥70% understand metric without negotiation |
+| Per order | $2–$5 per Medicare order, monthly minimum | Scales with use; easy unit economics | Discourages running every order; disputes over resupply/order; variable budget; could feel like transaction tax | Van Westendorp/Gabor-Granger plus invoice simulation; reject if >20% intend selective use |
+| Tiered subscription **(recommended test)** | Core: $24K/location/year incl. volume/category allowance; Growth/Enterprise add SSO, API, more families, analytics, governance; overage only at high bands | Predictability plus cost-to-serve coverage; enterprise expansion | Packaging complexity; category gating can confuse | Three proposal A/B sequences; pass if ≥50% choose a paid tier without bespoke core discount |
+
+No contingency fees: they encourage overclaiming and confuse documentation controls with recovery. Implementation covers mapping, security, criteria activation, workflow configuration, training, and baseline measurement—not custom clinical policy creation.
+
+---
+
+## 7. Success metrics
+
+### 7.1 North Star
+
+**Evidence-Complete Human Release Rate (ECHRR):**
+
+> Number of in-scope Medicare orders released by an authorized human with all applicable administrative criteria Present or validly N/A, exact approved Criteria Skill/version, and complete source provenance **before fulfillment**, divided by all in-scope Medicare orders released.
+
+Report ECHRR by product family, location, jurisdiction, order channel, and override status. Do not improve it by holding everything: cycle-time and patient-access guardrails counterbalance it.
+
+### 7.2 Metric tree
+
+| Type | Metric | Definition / 90-day target |
+|---|---|---|
+| North Star | ECHRR | Baseline then +20 percentage points or ≥90%, while quality guardrails hold |
+| Input | Eligible-order coverage | ≥90% of scoped orders successfully ingested and matched |
+| Input | Criteria coverage | 100% of enabled HCPCS/DOS/jurisdiction combinations have approved, tested version; otherwise block |
+| Input | Evidence extraction traceability | 100% of displayed facts link to source page/region and source hash |
+| Input | Guest task clarity | ≥60% completed within two business days; median active time ≤4 min |
+| Input | Operator adoption | ≥85% weekly active among assigned users; ≥90% release decisions made in workflow during controlled phase |
+| Process | Documentation chase rate | Track, not necessarily minimize; distinguish correctly detected chase from avoidable chase |
+| Process | Touches per chased order | ≥30% reduction vs matched baseline |
+| Process | Median referral-to-ready | ≥20% reduction; report p90 to expose long tail |
+| Process | Human review time | Median <3 min; p95 <8 min |
+| Output | Release-ready precision | ≥95%; never trade down for volume |
+| Output | Critical-gap recall | ≥90% overall and no critical class below 85% without disabling that class |
+| Output | Documentation-denial rate | ≥30% relative reduction or touches target met within 90 days; adjudicated subset only |
+| Output | Audit packet preparation | ≥50% reduction with zero source omissions attributable to export |
+| Output | Allowed dollars exposed | Sum allowed amount on released orders later found to have curable pre-ship defects; downward trend |
+| Business | Paid ACV / retention | 3 partners ≥$24K ACV; expansion intent and renewal evidence by day 90 |
+
+### 7.3 Guardrails and stop metrics
+
+| Guardrail | Threshold / response |
+|---|---|
+| Autonomous consequential action | **0** autonomous releases, claims, attestations, note edits, or device recommendations; any event = pause |
+| Silent policy-version error | **0**; any event disables affected criteria and triggers incident review |
+| Wrong-patient/unauthorized PHI disclosure | **0**; incident response, link revocation, pilot pause |
+| Source alteration or fabricated language | **0**; originals immutable; any event = critical incident |
+| False-ready rate | ≤5% on adjudicated sample; weekly compliance sampling, category disable if exceeded |
+| False-hold / patient access | <5% of holds adjudicated unnecessary; no increase >10% in urgent-order delay; escalation SLA <2 h |
+| Override rate | <10% overall; 100% reason-coded/attributable; >15% by user/category triggers review—not punitive surveillance |
+| Workflow burden | No >10% increase in median total handling time after week 4 |
+| Bias / access | Compare guest completion and delay by clinic size, rurality where available, language/channel, disability-access needs; >10-point unexplained gap requires remediation |
+| Availability / integrity | ≥99.9% production availability after pilot; RPO ≤15 min, RTO ≤4 h; no lost originals |
+
+Metrics must use pre-registered definitions, matched cohorts where possible, confidence intervals, and exclusion logs. A fall in denial rate is lagging and confounded by case mix, payer edits, and staff behavior; touches and ECHRR provide earlier evidence but do not substitute for financial outcomes.
+
+---
+
+## 8. Discovery synthesis and recommendation
+
+### 8.1 Synthesis
+
+**Desirability:** Strong problem evidence exists at program level and the workflow has a clear “last responsible moment.” CMS data makes documentation-heavy CGM and orthoses logical wedges. Industry platforms already invest in intake and digital ordering, confirming demand but raising the bar for differentiation. Primary supplier prevalence, curability, and clinic behavior remain unproven.
+
+**Feasibility:** OCR/classification and workflow are feasible; the hard problem is safe rule selection and evidence semantics. The product is feasible only with human-approved criteria, deterministic effective dating, source-level provenance, explicit Uncertain states, and human release. The 1,000-order blind benchmark is a build gate, not a post-launch KPI.
+
+**Viability:** $24K/location/year can work if hard labor/audit savings exceed subscription and multi-location implementation amortizes. The illustrative first-year ROI is not automatically attractive after implementation; measurable reduction in denial exposure or larger shared operations is needed. Per-location pricing should be tested against tiering, not assumed.
+
+**Usability:** Intake needs one ranked queue and evidence-first review, not another checklist. Clinics need a no-account task that is precise, trusted, accessible, and optional alongside secure fax. “Present” must never create false confidence.
+
+**Ethics/regulatory:** Product value depends on restraint. It must not manufacture documentation, tell clinicians what to write to obtain coverage, infer medical necessity, or release autonomously. Patient access harms from false holds deserve the same seriousness as bad releases.
+
+### 8.2 Decision: GO, with staged conditions
+
+**GO to build a limited v1 for three paid design partners**, with these non-negotiable gates:
+
+1. **Before production release decisions:** complete D1 with ≥8/12 suppliers passing; execute two-person criteria governance; pass privacy/security review and BAA; pass U1 and E1; complete policy-boundary regression suite.
+2. **Before controlled pilot release:** pass F1 on ≥1,000 retrospective orders with ≥95% release-ready precision, ≥90% critical-gap recall, zero silent policy-version errors, and median review under three minutes. Otherwise operate shadow-only or disable failing categories.
+3. **Before general availability:** three paid partners at ≥$24K ACV; ≥60% guest tasks completed in two business days; ≥30% reduction in touches or documentation denials within 90 days; no critical guardrail breach; evidence of first-year customer ROI including implementation.
+4. **Scope discipline:** start fax/PDF and a small set of Criteria Skills across two footprints. FHIR is read-only and feature-flagged. No autonomous PA, ERP write-back, claim action, medical-necessity conclusion, or expansion until core safety metrics persist for two release cycles.
+5. **Kill/pivot criteria:** stop a category after any unresolved silent version error; pivot guest cure to supplier-mediated secure channels if real completion stays <40%; reconsider pricing/segment if fewer than three buyers pay the threshold or hard-benefit payback exceeds 18 months.
+
+### 8.3 16-week discovery-to-pilot plan
+
+| Weeks | Work | Exit artifact |
+|---|---|---|
+| 1–3 | 12-supplier interviews/observation; data agreements; journey baselines; clinic recruitment | D1 scorecard, segment cut, data dictionary |
+| 2–6 | Criteria governance prototype; A55426 and selected family compilation; threat model | Approved criteria samples, policy lineage, security plan |
+| 4–8 | Evidence graph and operator prototype; dual abstraction of retrospective corpus | Gold set, usability results, error taxonomy |
+| 7–10 | Blind 1,000-order evaluation; effective-date adversarial suite; integration spikes | F1 report and category enable/disable decision |
+| 9–12 | Guest prototype and 100-task field test; packet crossover study | U2/O1 results, revised flow |
+| 11–16 | Paid partner contracting, shadow baseline, controlled release only if gates pass | Three contracts, V1 dashboard, GA recommendation |
+
+### 8.4 Immediate open questions
+
+- Which product family combines high documentation defects, adequate volume, and low clinical ambiguity at each partner?
+- What exact event in each ERP constitutes “fulfillment,” and can DocLock reliably receive it without write-back?
+- Which correction tasks may clinic staff complete versus those requiring the treating practitioner’s new signature, encounter, or judgment?
+- How often do beneficiary-address changes alter jurisdiction between intake, DOS, and claim?
+- Which denials are truly preventable pre-ship, and what proportion eventually pays without DocLock?
+- Do locations map to independent budgets, or should enterprise pricing follow centralized intake volume?
+- What retention/export/deletion configuration satisfies supplier obligations while minimizing DocLock’s PHI footprint?
+
+---
+
+## Approval Record
+
+**DISCOVERY APPROVED**  
+**Approval date:** September 22, 2026  
+**Approver:** Internal product-discovery approval gate
+
+| Checklist item | Result | Evidence / remediation |
+|---|---|---|
+| All 8 phases present and substantive | PASS | §§1–8 cover framing/OST, personas, JTBD/journey, assumptions/tests, concept/scope, value/pricing, metrics, synthesis/recommendation |
+| ≥4 detailed primary personas | PASS | Maria, Jamal, Denise, Priya include role, org, goals, workflow, required tools, quantified pain, triggers, objections, influence, quote |
+| Quantified pain | PASS | Persona and journey hypotheses quantify hours, loaded labor, allowed dollars, denial/audit costs; assumptions labeled |
+| Journey map | PASS | Eight stages from referral through audit, emotional curve, severity, time, dollars |
+| Assumption map with concrete tests | PASS | Desirability, viability, feasibility, usability, regulatory/ethics; samples and pass/fail thresholds; all three Validation Highlights incorporated verbatim in substance |
+| Clear v1 scope and out-of-scope | PASS | §§5.2–5.3; channels, families, footprints, governance, prohibited functions |
+| Value proposition and pricing hypotheses | PASS | Per-location, per-order, tiered; ROI arithmetic and implementation caveat |
+| North Star and supporting metrics | PASS | ECHRR plus input/process/output/business metrics and stop guardrails |
+| Regulatory/clinical constraints | PASS | A55426, WOPD/SWO, retention, PA/effective dates, jurisdictions, TPE, HIPAA controls, no medical-necessity/autonomy/fabrication |
+| Sources cited | PASS | Inline primary CMS/DME MAC/OIG-adjacent public and named product sources; vendor/industry numbers labeled rather than treated as independent truth |
+| Clear recommendation | PASS | Conditional GO with pre-production, pilot, GA, and kill gates |
+
+**Residual risks:** supplier-level preventable exposure and willingness to pay are not yet validated; public policy can be ambiguous or change rapidly; fax quality may cap recall; integration identifiers may fail; clinic links can create privacy/phishing friction; false holds can delay needed equipment; competitor platforms may add similar checks; top-down SAM may materially overstate qualified buying units. These risks are accepted only for a bounded paid-design-partner build under the gates above.

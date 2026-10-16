@@ -1,0 +1,71 @@
+{
+  "integration": "google-tools",
+  "package": {
+    "name": "strands-google",
+    "version": "0.2.0",
+    "source": "PyPI (sdist verified byte-identical to supplied flattened source)",
+    "repository": "https://github.com/cagataycali/strands-google",
+    "repository_head_verified": "0bbe730fa1224c3973f77a06337466b2c05056c0",
+    "module_version_attr_quirk": "strands_google.__version__ reports '0.1.0' in the 0.2.0 release (stale upstream literal)"
+  },
+  "exports": [
+    {
+      "name": "use_google",
+      "module": "strands_google.use_google",
+      "kind": "strands @tool (AgentTool)",
+      "required_params": ["service", "version", "resource", "method"],
+      "optional_params": ["parameters", "headers", "scopes", "credential_type", "label"],
+      "hot_load": "standalone module file loads via strands.tools.loader.load_tools_from_file_path (google libs are lazy imports)"
+    },
+    {
+      "name": "google_auth",
+      "module": "strands_google.google_auth",
+      "kind": "strands @tool (AgentTool)",
+      "required_params": [],
+      "optional_params": ["credentials_file", "token_file", "scopes"],
+      "hot_load": "module file loads via load_tools_from_file_path"
+    },
+    {
+      "name": "gmail_send",
+      "module": "strands_google.gmail_helpers",
+      "kind": "strands @tool (AgentTool)",
+      "required_params": ["to", "subject", "body"],
+      "optional_params": ["sender", "cc", "bcc", "html", "credential_type"],
+      "hot_load": "module file loads via load_tools_from_file_path; requires strands_google package importable (intra-package import of use_google)"
+    },
+    {
+      "name": "gmail_reply",
+      "module": "strands_google.gmail_helpers",
+      "kind": "strands @tool (AgentTool)",
+      "required_params": ["message_id", "body"],
+      "optional_params": ["thread_id", "html", "credential_type"],
+      "hot_load": "same file as gmail_send"
+    }
+  ],
+  "shared_dependencies_for_parent": {
+    "note": "Add to orchestrator/requirements.txt for the shared orchestrator/.venv. strands-agents==1.50.2 already satisfied; strands-mcp-server is a hard metadata dep of strands-google (pulls mcp server + boto3 stack).",
+    "pins": [
+      "strands-google==0.2.0",
+      "google-api-python-client==2.200.0",
+      "google-auth-httplib2==0.4.2",
+      "google-auth-oauthlib==1.4.1",
+      "strands-mcp-server==0.1.4"
+    ]
+  },
+  "environment_variables": {
+    "GOOGLE_APPLICATION_CREDENTIALS": "Path to a service-account JSON key (server-to-server)",
+    "GOOGLE_OAUTH_CREDENTIALS": "Path to an authorized-user OAuth token JSON produced by google_auth",
+    "GOOGLE_API_KEY": "API key for public/no-user-data APIs (e.g. YouTube search, Places)",
+    "GOOGLE_API_SCOPES": "Optional comma-separated OAuth scope override; default is a read-only set",
+    "BYPASS_TOOL_CONSENT": "Set 'true' to skip the interactive y/N prompt on mutative methods (required for non-TTY worker execution)"
+  },
+  "safety": {
+    "mutative_guard": "use_google prompts for confirmation on create/insert/update/patch/delete/trash/remove/send/stop/cancel/modify unless BYPASS_TOOL_CONSENT=true",
+    "default_scopes": "read-only (gmail.readonly, drive.readonly, calendar.readonly, youtube.readonly, userinfo, cloud-platform)"
+  },
+  "verification": {
+    "lane_venv": "orchestrator/integrations/google-tools/.venv (isolated; NOT the shared orchestrator/.venv)",
+    "suite": "orchestrator/integrations/google-tools/tests/test_strands_google.py",
+    "status": "23 passed (Python 3.13.13, strands-agents 1.50.2)"
+  }
+}

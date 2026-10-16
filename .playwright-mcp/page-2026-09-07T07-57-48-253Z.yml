@@ -1,0 +1,87 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: v0 / studio
+      - navigation [ref=e9]:
+        - button "Community" [ref=e10]
+        - button "Pricing" [ref=e11]
+        - button "Enterprise" [ref=e12]
+        - button "Docs" [ref=e13]
+      - generic [ref=e14]:
+        - button "Compare models" [ref=e15] [cursor=pointer]
+        - button "Sign in" [ref=e16]
+        - button "Start building" [ref=e17]
+    - generic [ref=e77]:
+      - generic [ref=e79]:
+        - log [ref=e80]:
+          - generic [ref=e82]:
+            - paragraph [ref=e87]: Write a file called index.html with a hello world heading, then stop.
+            - generic [ref=e91]:
+              - button "Thinking…" [expanded] [ref=e93]
+              - generic [ref=e106]:
+                - generic [ref=e130]:
+                  - button [expanded] [ref=e131]:
+                    - paragraph [ref=e136] [cursor=pointer]: Wrote /home/user/workspace/index.html
+                  - generic [ref=e139]: /home/user/workspace/index.html
+                - generic [ref=e147]:
+                  - button [expanded] [ref=e148]:
+                    - paragraph [ref=e153] [cursor=pointer]: index.html
+                  - generic [ref=e158]:
+                    - paragraph [ref=e164]: index.html
+                    - generic [ref=e165]:
+                      - tree [ref=e166]:
+                        - treeitem "index.html" [selected] [ref=e168] [cursor=pointer]
+                      - code [ref=e178]:
+                        - generic [ref=e179]: <!doctype html>
+                        - generic [ref=e180]: <html lang="en">
+                        - generic [ref=e181]: <head>
+                        - generic [ref=e182]: <meta charset="utf-8">
+                        - generic [ref=e183]: <meta name="viewport" content="width=device-width, initial-scale=1">
+                        - generic [ref=e184]: <title>Hello World</title>
+                        - generic [ref=e185]: </head>
+                        - generic [ref=e186]: <body>
+                        - generic [ref=e187]: <h1>Hello World</h1>
+                        - generic [ref=e188]: </body>
+                        - generic [ref=e189]: </html>
+                      - generic [ref=e191]:
+                        - textbox "Enter URL..." [ref=e193]: /api/orchestrator/file?path=%2Fv1%2Fresponses%2Fresp_2b493da0-3f77-4e17-9167-988aa0b6bc1d%2Ffiles%2F19737d78-9d1b-4c6b-9971-d506ffc34935%2Fcontent
+                        - iframe [ref=e195]:
+                          - heading "Hello World" [level=1] [ref=f1e2]
+                      - paragraph [ref=e196]:
+                        - link "Download" [ref=e197] [cursor=pointer]:
+                          - /url: /api/orchestrator/file?path=%2Fv1%2Fresponses%2Fresp_2b493da0-3f77-4e17-9167-988aa0b6bc1d%2Ffiles%2F19737d78-9d1b-4c6b-9971-d506ffc34935%2Fcontent
+        - group [ref=e116]:
+          - group [ref=e117]
+          - textbox "Ask for a change, or start something new…" [ref=e119]
+          - group [ref=e120]:
+            - generic [ref=e121]:
+              - button [ref=e122]
+              - button "High (preset)" [ref=e123]
+              - button "Web preview" [pressed] [ref=e127]
+            - button "Stop" [ref=e129]
+      - generic [ref=e200]:
+        - generic [ref=e201]:
+          - generic [ref=e202]:
+            - paragraph [ref=e206]: Project
+            - generic [ref=e207]: 2 files
+          - generic [ref=e208]:
+            - generic [ref=e209]:
+              - button "Code" [ref=e210] [cursor=pointer]
+              - button "Preview" [pressed] [ref=e215] [cursor=pointer]
+              - button "Terminal" [ref=e219] [cursor=pointer]
+            - button "Idle"
+            - button "Fullscreen" [ref=e224]
+            - button "Close project IDE" [ref=e226]:
+              - generic [aria-hidden] [ref=e227]: Close
+              - generic [ref=e228]: Close
+        - generic [ref=e230]:
+          - generic [ref=e231]:
+            - button "Code" [ref=e232] [cursor=pointer]
+            - button "Preview" [pressed] [ref=e237] [cursor=pointer]
+            - button "Terminal" [ref=e241] [cursor=pointer]
+          - generic [ref=e250]:
+            - textbox "Enter URL..." [ref=e252]: /api/orchestrator/file?path=%2Fv1%2Fresponses%2Fresp_2b493da0-3f77-4e17-9167-988aa0b6bc1d%2Ffiles%2F19737d78-9d1b-4c6b-9971-d506ffc34935%2Fcontent
+            - iframe [ref=e254]:
+              - heading "Hello World" [level=1] [ref=f2e2]
+  - button "Open Next.js Dev Tools" [ref=e69] [cursor=pointer]
+  - alert [ref=e76]

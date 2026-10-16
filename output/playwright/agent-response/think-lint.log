@@ -1,0 +1,143 @@
+Already up to date
+Done in 1.7s using pnpm v11.18.0
+$ eslint .
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/actually-soup/components/v0/agent-activity.tsx
+  134:3  warning  'parseJson' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/actually-soup/components/v0/computer-use-preview.tsx
+  56:3  warning  'isStreaming' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+  57:3  warning  'status' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+  74:5  error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/actually-soup/components/v0/computer-use-preview.tsx:74:5
+  72 |
+  73 |   useEffect(() => {
+> 74 |     setControlMode("agent")
+     |     ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  75 |     setHandoffText("")
+  76 |   }, [preview.sessionId])
+  77 |  react-hooks/set-state-in-effect
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/actually-soup/components/v0/computer-use.ts
+  177:23  warning  '_screenshot' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/ethereal-asterisk/components/v0/agent-activity.tsx
+  134:3  warning  'parseJson' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/ethereal-asterisk/components/v0/computer-use-preview.tsx
+  56:3  warning  'isStreaming' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              @typescript-eslint/no-unused-vars
+  57:3  warning  'status' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   @typescript-eslint/no-unused-vars
+  74:5  error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/ethereal-asterisk/components/v0/computer-use-preview.tsx:74:5
+  72 |
+  73 |   useEffect(() => {
+> 74 |     setControlMode("agent")
+     |     ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  75 |     setHandoffText("")
+  76 |   }, [preview.sessionId])
+  77 |  react-hooks/set-state-in-effect
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/ethereal-asterisk/components/v0/computer-use.ts
+  177:23  warning  '_screenshot' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/successful-jam/components/v0/agent-activity.tsx
+  134:3  warning  'parseJson' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/successful-jam/components/v0/computer-use-preview.tsx
+  56:3  warning  'isStreaming' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           @typescript-eslint/no-unused-vars
+  57:3  warning  'status' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+  74:5  error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/successful-jam/components/v0/computer-use-preview.tsx:74:5
+  72 |
+  73 |   useEffect(() => {
+> 74 |     setControlMode("agent")
+     |     ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  75 |     setHandoffText("")
+  76 |   }, [preview.sessionId])
+  77 |  react-hooks/set-state-in-effect
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/successful-jam/components/v0/computer-use.ts
+  177:23  warning  '_screenshot' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/victorious-shrimp/components/v0/agent-activity.tsx
+  134:3  warning  'parseJson' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/victorious-shrimp/components/v0/computer-use-preview.tsx
+  56:3  warning  'isStreaming' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              @typescript-eslint/no-unused-vars
+  57:3  warning  'status' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   @typescript-eslint/no-unused-vars
+  74:5  error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/victorious-shrimp/components/v0/computer-use-preview.tsx:74:5
+  72 |
+  73 |   useEffect(() => {
+> 74 |     setControlMode("agent")
+     |     ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  75 |     setHandoffText("")
+  76 |   }, [preview.sessionId])
+  77 |  react-hooks/set-state-in-effect
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/victorious-shrimp/components/v0/computer-use.ts
+  177:23  warning  '_screenshot' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/wax-tern/components/v0/agent-activity.tsx
+  134:3  warning  'parseJson' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/wax-tern/components/v0/computer-use-preview.tsx
+  56:3  warning  'isStreaming' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     @typescript-eslint/no-unused-vars
+  57:3  warning  'status' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+  74:5  error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/wax-tern/components/v0/computer-use-preview.tsx:74:5
+  72 |
+  73 |   useEffect(() => {
+> 74 |     setControlMode("agent")
+     |     ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  75 |     setHandoffText("")
+  76 |   }, [preview.sessionId])
+  77 |  react-hooks/set-state-in-effect
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/.kilo/worktrees/wax-tern/components/v0/computer-use.ts
+  177:23  warning  '_screenshot' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/app/framework-adherence.test.ts
+  2:10  warning  'extname' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/tims-stuff/Desktop/v0-clone-blurple/components/v0/computer-use.ts
+  172:3  warning  '_isStreaming' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 27 problems (5 errors, 22 warnings)
+
+[ELIFECYCLE] Command failed with exit code 1.

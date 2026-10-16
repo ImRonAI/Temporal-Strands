@@ -33,9 +33,13 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    ".next-desktop-acceptance/types/**/*.ts",
+    ".next-desktop-acceptance/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "orchestrator/strands-tools",
+    "orchestrator/.venv"
   ]
 }

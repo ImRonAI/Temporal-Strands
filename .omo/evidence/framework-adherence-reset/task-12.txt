@@ -1,0 +1,103 @@
+# Task 12 — framework-adherence test gate (`orchestrator/tests/test_framework_adherence.py`)
+
+Date: 2026-09-09
+Lane: todo-12 (fully independent — creates exactly one new test file + this evidence).
+
+## Scope
+New pytest module `orchestrator/tests/test_framework_adherence.py` — a static
+adherence gate. It scans every top-level `orchestrator/*.py` (excluding
+`tests/` and `.venv/`) with `ast`, and adds one runtime-import check for the
+PerplexityModel MRO. Eight checks, each failing with `file:line` in the message.
+
+Checks implemented:
+- (a) no `ClassDef` whose bases include bare `Model` imported from
+      `strands.models` / `strands.models.model`
+- (b) `PerplexityModel` MRO includes `OpenAIResponsesModel`
+      (`from strands.models.openai_responses import OpenAIResponsesModel`)
+- (c) `gemini_model.py` source has no `_format_chunk({"chunk_type"` literal
+- (d) `think_activity.py` imports `strands_tools.think`
+- (e) no `Call` to `execute_activity` inside any class whose bases include
+      `HookProvider`
+- (f) no `timedelta(` call outside `config.py`
+- (g) no attribute access `._tool_func`
+- (h) no `ExceptHandler` with body `[Pass]`
+
+Checks (b),(e),(f),(g) are written to their TARGET state because the matching
+concurrent lanes (PerplexityModel rebase, hook activity_as_hook, timedelta
+constants into config, load_tool public access) are in flight and expected to
+land later in this wave. Checks (a) and (b) share the same in-flight rebase
+lane. The gate is correct regardless of lane landing order.
+
+## Baseline run (after the test was authored, before mutation test)
+Command: `cd orchestrator && .venv/bin/python -m pytest tests/test_framework_adherence.py -v`
+
+Result: `5 failed, 3 passed in 1.05s`
+
+Per-check status on the CURRENT tree (post-mutation-revert, same as baseline):
+
+| Check | Status | Detail |
+| --- | --- | --- |
+| (a) no bare strands Model subclass | FAIL | `orchestrator/perplexity_model.py:69 class PerplexityModel subclasses bare 'Model'` — rebase lane (todo 5) not landed yet. Expected to pass once lane lands. |
+| (b) PerplexityModel MRO includes OpenAIResponsesModel | FAIL | MRO is `['PerplexityModel', 'Model', 'ABC', 'object']` — rebase lane (todo 5) not landed yet. Expected to pass once lane lands. |
+| (c) no `_format_chunk({"chunk_type"` in GeminiModel | PASS | `gemini_model.py` is clean. |
+| (d) think_activity imports strands_tools.think | PASS | `from strands_tools.think import ThoughtProcessor` present. |
+| (e) no execute_activity call in HookProvider | PASS | no `Call` to `execute_activity` inside any `HookProvider` subclass. |
+| (f) no timedelta outside config.py | FAIL | `orchestrator/compare_workflow.py:81` and `orchestrator/workflow.py:172,173,987` inline literals — concurrent lane moving them into config not landed yet. Expected to pass once lane lands. |
+| (g) no `._tool_func` attribute access | FAIL | `orchestrator/workflow.py:117 return load_tool._tool_func(...)` — private-access removal lane (todo 7) not landed yet. Expected to pass once lane lands. |
+| (h) no empty except handler | FAIL | first hit `orchestrator/graph_activity.py:579`; 8 total across graph_activity, perplexity_operations, run_worker, subagent_support (x2), think_activity, workflow, workspace_files. NOT attributed to a pending lane — this is a genuine violation still present on the tree that must be cleaned up before the gate can pass. |
+
+3 of the 5 failing checks (a,b,f,g) are the documented in-flight lanes; check
+(h) is a real, un-landed cleanup and is reported as a genuine failure.
+
+## Mutation test (check f) — transcript
+Goal: prove the gate fails when a `timedelta(` literal is (re)introduced
+outside `config.py`, with a `file:line` in the message.
+
+1. Backed up `orchestrator/workflow.py` to `/tmp/workflow.py.task12.bak`.
+2. Inserted a scratch literal immediately after `_THINK_ACTIVITY_OPTIONS`:
+   `MUTATION_MARKER = timedelta(minutes=1)` (~line 179 in the mutated file).
+3. Ran the gate:
+   ```
+   $ .venv/bin/python -m pytest tests/test_framework_adherence.py::test_f_no_timedelta_outside_config -v
+   tests/test_framework_adherence.py::test_f_no_timedelta_outside_config FAILED [100%]
+   E   Failed: (f) orchestrator/compare_workflow.py:81 timedelta literal outside
+        config.py; move the constant to config.py and reference it
+   FAILED tests/test_framework_adherence.py::test_f_no_timedelta_outside_config
+   ```
+   The gate fails fast on the first violation (compare_workflow.py:81), so to
+   prove the MUTATION itself is detected I listed all violations with a direct
+   AST probe while the mutation was present:
+   ```
+   $ .venv/bin/python -c "<ast scan of timedelta calls across orchestrator/*.py>"
+   compare_workflow.py:81: timedelta(...)
+   workflow.py:181: timedelta(...)   <-- the inserted mutation
+   workflow.py:173: timedelta(...)
+   workflow.py:174: timedelta(...)
+   ```
+   The inserted `timedelta(minutes=1)` (workflow.py:181 in the mutated file)
+   is caught by the same check that flags the pre-existing literals.
+4. Reverted by restoring the backup; verified byte-identical:
+   `diff -q workflow.py /tmp/workflow.py.task12.bak` -> identical, backup deleted.
+
+Verdict: mutation test PASSES — re-adding `timedelta(minutes=1)` to
+`workflow.py` fails check (f) with `file:line`.
+
+## Final run (after mutation fully reverted)
+Command: `cd orchestrator && .venv/bin/python -m pytest tests/test_framework_adherence.py -v`
+
+Result: `5 failed, 3 passed in 1.05s` — identical per-check status to the
+baseline. The mutation did not leave any residue in `workflow.py`.
+
+## Files changed
+- created: `orchestrator/tests/test_framework_adherence.py` (the only change
+  this lane made; confirmed via `git status`: `?? orchestrator/tests/test_framework_adherence.py`)
+- evidence: `.omo/evidence/framework-adherence-reset/task-12.txt`
+
+## Honest caveats / risks
+- The gate cannot be fully green on the current tree because (a),(b),(f),(g)
+  depend on concurrent lanes still in flight, and (h) is a genuine empty-except
+  cleanup not yet landed. This is expected mid-wave; the gate is written to the
+  TARGET state and will pass once those land.
+- check (b) does a runtime `importlib` load of `perplexity_model.py`; if a
+  future rebase introduces an import-time failure (e.g. missing `openai`/
+  `httpx`), the test errors rather than asserts — acceptable and visible.

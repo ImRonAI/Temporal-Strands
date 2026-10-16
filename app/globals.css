@@ -10,11 +10,18 @@
 
 @theme inline {
   --font-heading: var(--font-serif);
-  --font-serif: var(--font-instrument-serif), 'Georgia', serif;
-  --font-sans: var(--font-geist-sans), 'Geist Fallback';
-  --font-mono: var(--font-geist-mono), 'Geist Mono Fallback';
+  --font-serif: var(--font-fraunces), 'Georgia', serif;
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), 'Geist Mono Fallback', ui-monospace, monospace;
   --color-blurple: var(--blurple);
   --color-blurple-bright: var(--blurple-bright);
+  --color-coral: var(--coral);
+  --color-peach: var(--peach);
+  --color-sky: var(--sky);
+  --color-sunshine: var(--sunshine);
+  --color-lilac: var(--lilac);
+  --color-mint: var(--mint);
+  --color-ink: var(--foreground);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -53,131 +60,109 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* Gwen elevation: warm, diffuse light instead of black drops. Every shadow
+     is tinted toward the coral family so cards feel sun-lit, not stamped. */
+  --shadow-soft:
+    0 1px 2px 0 oklch(0.45 0.06 40 / 0.05),
+    0 8px 24px -12px oklch(0.55 0.1 40 / 0.14);
+  --shadow-lift:
+    0 1px 2px 0 oklch(0.45 0.06 40 / 0.05),
+    0 18px 48px -18px oklch(0.55 0.12 38 / 0.22),
+    0 4px 12px -6px oklch(0.55 0.08 40 / 0.08);
+  --shadow-glow:
+    0 10px 30px -10px oklch(0.65 0.2 33 / 0.45),
+    0 2px 6px -2px oklch(0.65 0.2 33 / 0.25);
 }
 
+/* Gwen — warm daylight. A pure white canvas, warm-ink text (#2B211E-ish), and
+   Gwen Coral (#F25C3D-ish) as the bold, happy primary. Coral is reserved for
+   fills, marks and large type; small coral text uses the deeper
+   `--blurple-bright` (≥4.5:1 on white). Sky, sunshine, lilac and mint are
+   companion pastels for the ambient light and charts only.
+
+   Token names `--blurple` / `--blurple-bright` are kept so every existing
+   `text-blurple-bright` / `bg-blurple/15` call site re-themes in one place:
+   `--blurple` is the coral fill, `--blurple-bright` the text-safe coral. */
 :root {
-  color-scheme: dark;
-  --background: oklch(0.16 0.018 280);
-  --foreground: oklch(0.96 0.006 280);
-  --card: oklch(0.2 0.022 280);
-  --card-foreground: oklch(0.96 0.006 280);
-  --popover: oklch(0.19 0.022 280);
-  --popover-foreground: oklch(0.96 0.006 280);
-  --primary: oklch(0.62 0.205 277);
-  --primary-foreground: oklch(0.99 0.005 280);
-  --secondary: oklch(0.26 0.03 280);
-  --secondary-foreground: oklch(0.96 0.006 280);
-  --muted: oklch(0.24 0.025 280);
-  --muted-foreground: oklch(0.72 0.03 280);
-  --accent: oklch(0.3 0.06 280);
-  --accent-foreground: oklch(0.97 0.006 280);
-  --destructive: oklch(0.62 0.21 22);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.62 0.205 277);
-  --chart-1: oklch(0.62 0.205 277);
-  --chart-2: oklch(0.7 0.16 300);
-  --chart-3: oklch(0.55 0.18 264);
-  --chart-4: oklch(0.78 0.13 250);
-  --chart-5: oklch(0.5 0.2 290);
-  --radius: 0.875rem;
-  --blurple: oklch(0.58 0.22 277);
-  --blurple-bright: oklch(0.7 0.2 285);
-  --sidebar: oklch(0.18 0.02 280);
-  --sidebar-foreground: oklch(0.96 0.006 280);
-  --sidebar-primary: oklch(0.62 0.205 277);
-  --sidebar-primary-foreground: oklch(0.99 0.005 280);
-  --sidebar-accent: oklch(0.3 0.06 280);
-  --sidebar-accent-foreground: oklch(0.97 0.006 280);
-  --sidebar-border: oklch(1 0 0 / 9%);
-  --sidebar-ring: oklch(0.62 0.205 277);
-}
-
-.dark {
-  color-scheme: dark;
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not(.light) {
-    color-scheme: dark;
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
-  }
+  color-scheme: light;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.255 0.022 35);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.255 0.022 35);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.255 0.022 35);
+  --primary: oklch(0.645 0.2 33);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.972 0.012 55);
+  --secondary-foreground: oklch(0.3 0.03 35);
+  --muted: oklch(0.973 0.007 60);
+  --muted-foreground: oklch(0.5 0.022 40);
+  --accent: oklch(0.958 0.028 42);
+  --accent-foreground: oklch(0.38 0.11 33);
+  --destructive: oklch(0.58 0.215 25);
+  --border: oklch(0.915 0.012 55);
+  --input: oklch(0.895 0.014 55);
+  --ring: oklch(0.7 0.16 35);
+  --chart-1: oklch(0.645 0.2 33);
+  --chart-2: oklch(0.68 0.13 235);
+  --chart-3: oklch(0.8 0.15 80);
+  --chart-4: oklch(0.72 0.13 165);
+  --chart-5: oklch(0.66 0.14 300);
+  --radius: 0.95rem;
+  --blurple: oklch(0.645 0.2 33);
+  --blurple-bright: oklch(0.555 0.19 32);
+  --coral: oklch(0.645 0.2 33);
+  --peach: oklch(0.86 0.09 55);
+  --sky: oklch(0.84 0.09 230);
+  --sunshine: oklch(0.92 0.12 92);
+  --lilac: oklch(0.85 0.08 300);
+  --mint: oklch(0.9 0.08 170);
+  --sidebar: oklch(0.985 0.006 60);
+  --sidebar-foreground: oklch(0.255 0.022 35);
+  --sidebar-primary: oklch(0.645 0.2 33);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.958 0.028 42);
+  --sidebar-accent-foreground: oklch(0.38 0.11 33);
+  --sidebar-border: oklch(0.915 0.012 55);
+  --sidebar-ring: oklch(0.7 0.16 35);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+  /* The white canvas lives on <html>. <body> stays transparent: as an in-flow
+     block it would otherwise paint over the fixed -z-10 ambient layer and hide
+     the daylight blooms entirely. */
   body {
-    @apply bg-background text-foreground;
+    @apply bg-transparent text-foreground;
   }
   html {
     @apply font-sans;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  /* Light, slim scrollbars so long timelines don't carry a heavy grey bar. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: oklch(0.86 0.02 50) transparent;
   }
   ::selection {
-    background: color-mix(in oklch, var(--blurple) 35%, transparent);
+    background: color-mix(in oklch, var(--coral) 22%, transparent);
     color: var(--foreground);
+  }
+  :focus-visible {
+    outline-color: var(--ring);
+  }
+  /* Monospace is for code and paths, never decorative labels: tabular
+     figures keep it quiet in prose. */
+  code,
+  kbd,
+  samp,
+  pre {
+    font-feature-settings: 'tnum' 1, 'zero' 1;
   }
 }
 
@@ -185,60 +170,105 @@
   text-wrap: balance;
 }
 
-/* Editorial display headline: tight serif with optical kerning */
+/* Display headline: Fraunces with its SOFT axis turned up so the serifs read
+   as rounded and friendly, while optical sizing keeps it couture at scale. */
 @utility font-editorial {
   font-family: var(--font-serif);
+  font-optical-sizing: auto;
+  font-variation-settings: 'SOFT' 100, 'WONK' 0;
   font-feature-settings: 'liga' 1, 'kern' 1;
-  letter-spacing: -0.01em;
-  font-weight: 400;
+  letter-spacing: -0.022em;
+  font-weight: 420;
 }
 
-/* Slow, premium drift for the background glow */
-@keyframes blurple-drift {
+/* Conversation prose: 16px / 1.7 for sustained, relaxed reading. Applied at
+   the MessageResponse composition site (Streamdown owns the markup). */
+@utility text-prose {
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+/* Sunrise gradient text for the one accented word in a headline. */
+@utility text-sunrise {
+  background-image: linear-gradient(
+    100deg,
+    oklch(0.64 0.21 30) 0%,
+    oklch(0.68 0.2 15) 38%,
+    oklch(0.74 0.17 55) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Coral-to-peach fill used by the brand mark and primary CTAs. */
+@utility bg-sunrise {
+  background-image: linear-gradient(
+    135deg,
+    oklch(0.7 0.19 40) 0%,
+    oklch(0.645 0.2 33) 45%,
+    oklch(0.63 0.21 18) 100%
+  );
+}
+
+/* Hairline: a 1px thread of coral light along a top edge, used for the
+   composer focus rule and panel headers. Name kept for existing call sites. */
+@utility hairline-indigo {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--coral) 75%, transparent),
+    color-mix(in oklch, var(--sunshine) 90%, transparent),
+    transparent
+  );
+}
+
+/* Slow, weightless drift for the ambient light */
+@keyframes gwen-drift {
   0%,
   100% {
     transform: translate3d(0, 0, 0) scale(1);
   }
   50% {
-    transform: translate3d(2%, -3%, 0) scale(1.08);
+    transform: translate3d(3%, -4%, 0) scale(1.08);
   }
 }
 
-@keyframes blurple-drift-alt {
+@keyframes gwen-drift-alt {
   0%,
   100% {
-    transform: translate3d(0, 0, 0) scale(1.05);
+    transform: translate3d(0, 0, 0) scale(1.04);
   }
   50% {
-    transform: translate3d(-3%, 2%, 0) scale(0.95);
+    transform: translate3d(-4%, 3%, 0) scale(0.94);
   }
 }
 
-.animate-blurple-drift {
-  animation: blurple-drift 18s ease-in-out infinite;
+.animate-gwen-drift {
+  animation: gwen-drift 22s ease-in-out infinite;
 }
 
-.animate-blurple-drift-alt {
-  animation: blurple-drift-alt 22s ease-in-out infinite;
+.animate-gwen-drift-alt {
+  animation: gwen-drift-alt 26s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-blurple-drift,
-  .animate-blurple-drift-alt {
+  .animate-gwen-drift,
+  .animate-gwen-drift-alt {
     animation: none;
   }
 }
 
-/* Soft pulse for live status dots (beta badge, thinking indicator) */
+/* Soft pulse for live status dots (badge, thinking indicator) */
 @keyframes pulse-soft {
   0%,
   100% {
     opacity: 1;
-    box-shadow: 0 0 8px 2px oklch(0.7 0.2 285 / 0.7);
+    box-shadow: 0 0 0 0 oklch(0.645 0.2 33 / 0.45);
   }
   50% {
-    opacity: 0.55;
-    box-shadow: 0 0 3px 1px oklch(0.7 0.2 285 / 0.35);
+    opacity: 0.7;
+    box-shadow: 0 0 0 5px oklch(0.645 0.2 33 / 0);
   }
 }
 
@@ -246,70 +276,329 @@
   animation: pulse-soft 2.4s ease-in-out infinite;
 }
 
-/* Blue-glass IDE: layered blurple-blue translucency, inner glow, and a soft
-   outer bloom. Used by ProjectIdePanel's frame, rails, and editor surface. */
+/* Ambient light. Pastel blooms sit far behind a white haze so the canvas
+   reads as a bright morning window, never as a coloured gradient. */
+.ambient-bloom {
+  background: radial-gradient(circle at center, oklch(0.82 0.14 38 / 0.85), transparent 66%);
+  filter: blur(80px);
+}
+
+.ambient-bloom-secondary {
+  background: radial-gradient(circle at center, oklch(0.84 0.1 232 / 0.85), transparent 66%);
+  filter: blur(90px);
+}
+
+.ambient-bloom-core {
+  background: radial-gradient(circle at center, oklch(0.94 0.13 92 / 0.8), transparent 68%);
+  filter: blur(100px);
+}
+
+.ambient-bloom-lilac {
+  background: radial-gradient(circle at center, oklch(0.86 0.09 305 / 0.75), transparent 68%);
+  filter: blur(100px);
+}
+
+.ambient-bloom-mint {
+  background: radial-gradient(circle at center, oklch(0.9 0.09 168 / 0.75), transparent 68%);
+  filter: blur(90px);
+}
+
+/* Fine film grain keeps the large pastel fields from banding and gives the
+   white a paper-like richness. */
+.ambient-grain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.25 0 0 0 0 0.2 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+}
+
+/* IDE surfaces: frosted white panels with a warm hairline and soft lift.
+   Used by ProjectIdePanel's frame, rails, and editor surface. */
 @utility bg-ide-glass {
   background:
-    linear-gradient(
-      180deg,
-      oklch(0.62 0.205 277 / 0.09) 0%,
-      oklch(0.5 0.2 290 / 0.05) 45%,
-      oklch(0.16 0.018 280 / 0.4) 100%
-    ),
-    oklch(0.2 0.04 282 / 0.55);
+    linear-gradient(180deg, oklch(1 0 0 / 0.92) 0%, oklch(0.99 0.006 60 / 0.86) 100%);
 }
 
 @utility ide-glass {
   position: relative;
   background:
-    linear-gradient(
-      160deg,
-      oklch(0.66 0.2 277 / 0.14) 0%,
-      oklch(0.55 0.2 290 / 0.08) 40%,
-      oklch(0.16 0.02 280 / 0.5) 100%
-    ),
-    oklch(0.19 0.045 282 / 0.6);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  border: 1px solid oklch(0.7 0.18 285 / 0.22);
+    linear-gradient(170deg, oklch(1 0 0 / 0.92) 0%, oklch(0.99 0.007 60 / 0.84) 100%);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  border: 1px solid oklch(0.9 0.014 55 / 0.95);
   box-shadow:
-    inset 0 1px 0 0 oklch(0.85 0.1 285 / 0.18),
-    inset 0 0 32px 0 oklch(0.6 0.2 277 / 0.08),
-    0 24px 64px -24px oklch(0.55 0.22 277 / 0.45),
-    0 8px 24px -12px oklch(0.3 0.15 282 / 0.5);
+    inset 0 1px 0 0 oklch(1 0 0),
+    0 1px 2px 0 oklch(0.45 0.06 40 / 0.05),
+    0 24px 64px -28px oklch(0.55 0.12 38 / 0.28),
+    0 8px 20px -12px oklch(0.55 0.08 40 / 0.1);
 }
 
 @utility ide-glass-inset {
-  background:
-    linear-gradient(
-      180deg,
-      oklch(0.62 0.205 277 / 0.07) 0%,
-      oklch(0.18 0.03 281 / 0.35) 100%
-    ),
-    oklch(0.17 0.035 282 / 0.5);
+  background: oklch(0.985 0.006 60 / 0.85);
   backdrop-filter: blur(12px) saturate(1.3);
   -webkit-backdrop-filter: blur(12px) saturate(1.3);
-  border-color: oklch(0.7 0.18 285 / 0.16);
+  border-color: oklch(0.915 0.012 55);
 }
 
 @utility ide-glass-edge {
-  border-color: oklch(0.7 0.18 285 / 0.16);
+  border-color: oklch(0.915 0.012 55);
 }
 
-/* Frosted code surface: keeps shiki token colours legible while tinting the
-   editor background toward the blurple glass theme. */
+/* Code surface: a calm off-white field for editor/preview chrome. Vendored
+   CodeBlock still paints its own shiki theme on top. */
 @utility ide-code-surface {
+  background: oklch(0.99 0.004 60);
+}
+
+/* ─── Tangerine glass ────────────────────────────────────────────────────
+   Gwen's work surfaces (IDE, terminal, Gwen's Computer) are frosted glass
+   tinted tangerine: translucent enough that the daylight blooms glow
+   through, saturated enough to feel warm and alive. White type on top.
+
+   `glass-tangerine`        chrome: headers and the view rail
+   `glass-ink`              content: code, terminal, file tree */
+@utility glass-tangerine {
   background:
-    linear-gradient(
-      180deg,
-      oklch(0.55 0.2 285 / 0.06) 0%,
-      oklch(0.14 0.02 280 / 0.3) 100%
-    ),
-    oklch(0.15 0.03 282 / 0.6);
+    radial-gradient(120% 140% at 0% 0%, oklch(0.86 0.12 70 / 0.55) 0%, transparent 55%),
+    linear-gradient(135deg, oklch(0.72 0.19 45 / 0.72) 0%, oklch(0.66 0.21 32 / 0.72) 55%, oklch(0.64 0.2 12 / 0.7) 100%);
+  backdrop-filter: blur(28px) saturate(1.8);
+  -webkit-backdrop-filter: blur(28px) saturate(1.8);
+  color: white;
+  box-shadow:
+    inset 0 1px 0 0 oklch(1 0 0 / 0.45),
+    inset 0 -1px 0 0 oklch(1 0 0 / 0.08);
+}
+
+/* Content glass: deep midnight plum, so tangerine chrome frames it instead
+   of melting into it, and electric pastels glow against real contrast. A
+   faint tangerine ember in one corner ties it back to the brand. */
+@utility glass-ink {
+  background:
+    radial-gradient(70% 60% at 100% 0%, oklch(0.62 0.2 35 / 0.22) 0%, transparent 65%),
+    radial-gradient(60% 70% at 0% 100%, oklch(0.55 0.18 300 / 0.28) 0%, transparent 65%),
+    linear-gradient(165deg, oklch(0.25 0.06 295 / 0.9) 0%, oklch(0.19 0.045 280 / 0.94) 100%);
+  backdrop-filter: blur(32px) saturate(1.5);
+  -webkit-backdrop-filter: blur(32px) saturate(1.5);
+  color: oklch(0.97 0.015 80);
+}
+
+/* Shell for the whole IDE: glassy, warm, softly lifted. */
+@utility glass-shell {
+  background: oklch(0.7 0.18 38 / 0.18);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  border: 1px solid oklch(1 0 0 / 0.55);
+  box-shadow:
+    inset 0 1px 0 0 oklch(1 0 0 / 0.5),
+    0 30px 80px -30px oklch(0.6 0.2 33 / 0.55),
+    0 10px 24px -14px oklch(0.5 0.15 30 / 0.35);
+}
+
+/* ─── Electric pastel syntax ──────────────────────────────────────────────
+   Vendored CodeBlock pins shiki's github-dark token colours with
+   `!important`. Inside a tangerine-glass surface, remap each github-dark
+   token hue to an electric pastel. Matching is on the token's own inline
+   `--shiki-dark` value, so highlighting logic is untouched. */
+.syntax-electric pre {
+  background: transparent !important;
+  color: oklch(0.97 0.02 80) !important;
+}
+.syntax-electric pre span {
+  background-color: transparent !important;
+}
+.syntax-electric span[style*="--shiki-dark: #F97583" i] { --shiki-dark: oklch(0.85 0.15 345) !important; color: oklch(0.85 0.15 345) !important; } /* keywords   → bubblegum  */
+.syntax-electric span[style*="--shiki-dark: #B392F0" i] { --shiki-dark: oklch(0.86 0.13 300) !important; color: oklch(0.86 0.13 300) !important; } /* functions  → lavender   */
+.syntax-electric span[style*="--shiki-dark: #79B8FF" i] { --shiki-dark: oklch(0.89 0.12 210) !important; color: oklch(0.89 0.12 210) !important; } /* constants  → ice blue   */
+.syntax-electric span[style*="--shiki-dark: #9ECBFF" i],
+.syntax-electric span[style*="--shiki-dark: #DBEDFF" i] { --shiki-dark: oklch(0.93 0.15 160) !important; color: oklch(0.93 0.15 160) !important; } /* strings    → mint       */
+.syntax-electric span[style*="--shiki-dark: #85E89D" i] { --shiki-dark: oklch(0.94 0.16 125) !important; color: oklch(0.94 0.16 125) !important; } /* tags       → lime       */
+.syntax-electric span[style*="--shiki-dark: #FFAB70" i] { --shiki-dark: oklch(0.94 0.14 95) !important; color: oklch(0.94 0.14 95) !important; }  /* params     → lemonade   */
+.syntax-electric span[style*="--shiki-dark: #FDAEB7" i] { --shiki-dark: oklch(0.9 0.1 20) !important; color: oklch(0.9 0.1 20) !important; }    /* invalid    → peach      */
+.syntax-electric span[style*="--shiki-dark: #6A737D" i] { --shiki-dark: oklch(0.85 0.05 50 / 0.7) !important; color: oklch(0.85 0.05 50 / 0.7) !important; font-style: italic; } /* comments */
+.syntax-electric span[style*="--shiki-dark: #E1E4E8" i],
+.syntax-electric span[style*="--shiki-dark: #D1D5DA" i] { --shiki-dark: oklch(0.97 0.02 80) !important; color: oklch(0.97 0.02 80) !important; }  /* plain text → cream      */
+.syntax-electric code > span::before {
+  color: oklch(1 0 0 / 0.35) !important;
+}
+
+/* Electric pastel terminal: cream output, lime prompt glow, pastel ANSI. */
+.terminal-electric {
+  color: oklch(0.97 0.02 80);
+  text-shadow: 0 0 18px oklch(0.85 0.15 345 / 0.18);
+}
+.terminal-electric [style*="color: rgb(0, 187, 0)"],
+.terminal-electric [style*="color:rgb(0, 187, 0)"] { color: oklch(0.93 0.16 140) !important; }
+.terminal-electric [style*="color: rgb(187, 0, 0)"] { color: oklch(0.85 0.15 345) !important; }
+.terminal-electric [style*="color: rgb(187, 187, 0)"] { color: oklch(0.94 0.14 95) !important; }
+.terminal-electric [style*="color: rgb(0, 0, 187)"] { color: oklch(0.89 0.12 210) !important; }
+.terminal-electric [style*="color: rgb(0, 187, 187)"] { color: oklch(0.9 0.12 190) !important; }
+.terminal-electric [style*="color: rgb(187, 0, 187)"] { color: oklch(0.86 0.13 300) !important; }
+
+/* File tree and nested surfaces on tangerine glass read white. */
+.glass-tree [role="tree"],
+.glass-tree [role="treeitem"] {
+  color: oklch(0.98 0.015 70);
+  background: transparent;
+}
+.glass-tree svg {
+  color: oklch(0.94 0.14 95 / 0.85);
+}
+.glass-tree [role="treeitem"] > div:hover,
+.glass-tree [role="treeitem"]:hover {
+  background: oklch(1 0 0 / 0.1);
+}
+.glass-tree .bg-muted {
+  background: oklch(1 0 0 / 0.18) !important;
 }
 
 @utility text-ide-glow {
-  text-shadow: 0 0 24px oklch(0.7 0.2 285 / 0.45);
+  text-shadow: 0 0 24px oklch(0.645 0.2 33 / 0.3);
+}
+
+/* Shared frosted-white surface for app containers (panes, headers, activity
+   cards, graph cards). Scoped app utilities only — they tint the container
+   while native AI Elements children keep their own behavior and animations.
+   Depth comes from a white top highlight and a warm, diffuse lift. */
+@utility app-glass {
+  background:
+    linear-gradient(170deg, oklch(1 0 0 / 0.9) 0%, oklch(0.995 0.005 60 / 0.78) 100%);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  border-color: oklch(0.915 0.012 55 / 0.95);
+  box-shadow:
+    inset 0 1px 0 0 oklch(1 0 0),
+    0 1px 2px 0 oklch(0.45 0.06 40 / 0.05),
+    0 14px 40px -18px oklch(0.55 0.12 38 / 0.22);
+}
+
+@utility app-glass-edge {
+  border-color: oklch(0.915 0.012 55);
+}
+
+/* Activity timeline polish. These hooks are applied from components/v0 to
+   composed AI Elements; the vendored primitives keep their own structure and
+   animations. */
+@keyframes activity-step-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.82);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.18);
+  }
+}
+
+@keyframes activity-scan {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translateX(-42%);
+  }
+  18%,
+  72% {
+    opacity: 1;
+  }
+  50% {
+    transform: translateX(42%);
+  }
+}
+
+.activity-step > :first-child {
+  isolation: isolate;
+}
+
+.activity-step[data-activity-status="active"] {
+  color: var(--foreground);
+}
+
+.activity-step[data-activity-status="active"] > :first-child::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  z-index: -1;
+  border-radius: 999px;
+  background: radial-gradient(
+    circle,
+    color-mix(in oklch, var(--coral) 30%, transparent),
+    transparent 70%
+  );
+  filter: blur(2px);
+  animation: activity-step-pulse 1.9s ease-in-out infinite;
+}
+
+.activity-step[data-activity-status="active"] > :first-child > svg {
+  color: var(--blurple-bright);
+  filter: drop-shadow(0 0 6px color-mix(in oklch, var(--coral) 40%, transparent));
+}
+
+.activity-step[data-activity-status="active"] > :first-child > div {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--coral) 70%, transparent),
+    color-mix(in oklch, var(--peach) 40%, transparent)
+  );
+  box-shadow: 0 0 10px color-mix(in oklch, var(--coral) 22%, transparent);
+}
+
+.activity-step[data-activity-status="pending"] {
+  color: color-mix(in oklch, var(--muted-foreground) 70%, transparent);
+}
+
+.activity-scan {
+  position: relative;
+  overflow: hidden;
+}
+
+.activity-scan::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 12%;
+  left: 12%;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--coral) 70%, transparent),
+    transparent
+  );
+  animation: activity-scan 3.2s ease-in-out infinite;
+}
+
+.activity-trigger {
+  border-radius: calc(var(--radius) * 0.72);
+  outline-offset: 4px;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    opacity 180ms ease;
+}
+
+.activity-trigger:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--coral) 7%, transparent);
+}
+
+.activity-trigger:disabled {
+  cursor: wait;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-step[data-activity-status="active"] > :first-child::before,
+  .activity-scan::after {
+    animation: none;
+  }
+}
+
+/* Elevated white: opaque-leaning panel for popovers and nested cards that sit
+   on top of an already-frosted surface (no double frosting). */
+@utility app-elevated {
+  background: oklch(1 0 0 / 0.98);
+  border-color: oklch(0.915 0.012 55);
+  box-shadow:
+    inset 0 1px 0 0 oklch(1 0 0),
+    0 1px 2px 0 oklch(0.45 0.06 40 / 0.06),
+    0 20px 50px -20px oklch(0.55 0.12 38 / 0.28);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -320,7 +609,7 @@
 
 /* https://ai.google.dev/gemini-api/docs/generate-content/maps-grounding
    Google Maps text attribution guidelines. Loading Roboto is optional;
-   Sans-Serif is the documented fallback. Dark UI uses white from the
+   Sans-Serif is the documented fallback. Light UI uses #5E5E5E from the
    allowed set (white / #1F1F1F / #5E5E5E). */
 .GMP-attribution {
   font-family: Roboto, Sans-Serif;
@@ -329,5 +618,5 @@
   font-size: 0.75rem;
   letter-spacing: normal;
   white-space: nowrap;
-  color: white;
+  color: #5e5e5e;
 }

@@ -1,0 +1,3 @@
+{"event": "initialized", "server_name": "weather", "server_version": "1.29.1", "protocol": "2025-06-18", "ts": "2026-09-07T06:58:03.489735+00:00"}
+{"event": "tools", "count": 3, "names": ["get_alerts", "get_forecast", "get_current_weather"], "ts": "2026-09-07T06:58:03.495468+00:00"}
+{"event": "call", "tool": "get_current_weather", "args": {"latitude": 37.77, "longitude": -122.42}, "is_error": false, "content": ["Current Weather Conditions:\nDescription: \nTemperature: 15.3\u00b0C (59.5\u00b0F)\nHumidity: 83.058930649279%\nWind Speed: None m/s\nWind Direction: None\u00b0"], "ts": "2026-09-07T06:58:03.761441+00:00"}

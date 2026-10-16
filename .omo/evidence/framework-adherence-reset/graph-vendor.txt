@@ -1,0 +1,95 @@
+# Graph vendor + activity_as_tool adherence evidence
+# Date: Tue Sep  8 12:51:20 PDT 2026
+# Task: vendor sibling strands_graph_tool into orchestrator/graph_tool.py + prove Temporal/Strands adherence
+
+## NOTE: protected-path override
+orchestrator/graph_tool.py was previously a protected/absent path (orchestrator/AGENTS.md: 'stays absent and protected').
+The user EXPLICITLY directed its creation: 'Duplicate it and bring it into the project, and then use the strands,
+and temporal types and props to determine adherence. The tool MUST be fully adherent as an IO activity_as_tool() option for the agent.'
+
+## TDD failing-first proof (test written before module existed)
+ModuleNotFoundError: No module named 'graph_tool' -- 1 error in 0.72s (tests/test_graph_tool_adherence.py:40 import graph_tool)
+
+## Framework adherence markers asserted (via installed SDK source)
+- strands.tools.decorator.DecoratedFunctionTool: isinstance(graph_tool.graph, DecoratedFunctionTool); tool_name=='graph'; tool_type=='function'; tool_spec{name,description,inputSchema}
+- temporalio.activity: __temporal_activity_definition attr present; activity._Definition.from_callable(graph_activity).name == 'graph' (temporalio/activity.py:547-611)
+- temporalio.contrib.strands.workflow.activity_as_tool -> TemporalActivityTool (_temporal_activity_tool.py): tool_name=='graph', tool_type=='temporal_activity', spec derived via strands FunctionToolMetadata(activity_fn).extract_metadata()
+- input schema STRUCTURAL: properties.topology is {"$ref": "#/$defs/GraphTopology"} (never untyped {"type":"object"}); $defs carries GraphTopology/GraphNode/GraphEdge/GraphTask; task is {"type":"string"}
+- activity_as_tool rejects undecorated callables with ValueError('activity_fn must be decorated with @activity.defn')
+- IO contract: every published frame == {"tool_use": {"name":"graph","toolUseId":...}, "data": ...}; first data frame type=='graph_topology'; terminal frame {"status":"success","content":[...]}
+- malformed input: resolve_model('nope', None) raises ValueError listing registered ids; create with unknown model_id yields status=='error' ToolResultEvent and registers nothing
+
+## Stale-state check (old editable install must not resolve)
+graph_activity.sibling_graph is graph_tool.graph: True
+strands_graph_tool absent from sys.modules after full import chain: True
+graph_tool.__file__ = /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/graph_tool.py
+
+## Import gate
+import graph_tool: OK -> /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/graph_tool.py
+
+## Adherence suite (verbose)
+============================= test session starts ==============================
+platform darwin -- Python 3.13.13, pytest-9.1.1, pluggy-1.6.0 -- /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 8 items
+
+tests/test_graph_tool_adherence.py::test_graph_is_a_strands_decorated_function_tool PASSED [ 12%]
+tests/test_graph_tool_adherence.py::test_graph_tool_never_imports_the_external_package PASSED [ 25%]
+tests/test_graph_tool_adherence.py::test_graph_activity_carries_the_temporal_activity_definition PASSED [ 37%]
+tests/test_graph_tool_adherence.py::test_activity_as_tool_produces_structural_graph_spec PASSED [ 50%]
+tests/test_graph_tool_adherence.py::test_activity_as_tool_rejects_undecorated_callables PASSED [ 62%]
+tests/test_graph_tool_adherence.py::test_one_shot_execute_emits_envelope_topology_and_terminal_success PASSED [ 75%]
+tests/test_graph_tool_adherence.py::test_resolve_model_unknown_id_raises_value_error PASSED [ 87%]
+tests/test_graph_tool_adherence.py::test_create_with_unknown_model_id_yields_error_at_create PASSED [100%]
+
+============================== 8 passed in 1.90s ===============================
+
+## Full pytest transcript (cd orchestrator && .venv/bin/python -m pytest tests -q)
+........................................................................ [ 11%]
+........................................................................ [ 23%]
+........................................................................ [ 34%]
+........................................................................ [ 46%]
+........................................................................ [ 58%]
+........................................................................ [ 69%]
+........................................................................ [ 81%]
+........................................................................ [ 93%]
+..........................................                               [100%]
+=============================== warnings summary ===============================
+tests/test_hot_load.py::test_load_tool_file_read_runs_as_activity
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_mcp_shell.py::test_load_tool_registers_io_community_tool_as_activity
+  /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands_tools/load_tool.py:222: DeprecationWarning: load_tool_from_filepath is deprecated and will be removed in Strands SDK 2.0. `process_tools` automatically handles loading tools from a filepath.
+    current_agent.tool_registry.load_tool_from_filepath(tool_name=name, tool_path=path)
+
+tests/test_hot_load.py::test_load_tool_file_read_runs_as_activity
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_mcp_shell.py::test_load_tool_registers_io_community_tool_as_activity
+  /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/tools/registry.py:186: DeprecationWarning: ToolLoader.load_tools is deprecated and will be removed in Strands SDK 2.0. Use the `load_tools_from_string` or `load_tools_from_module` methods instead.
+    loaded_tools = ToolLoader.load_tools(tool_path, tool_name)
+
+tests/test_hot_load.py::test_load_tool_file_read_runs_as_activity
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_hot_load.py::test_load_tool_survives_continue_as_new
+tests/test_mcp_shell.py::test_load_tool_registers_io_community_tool_as_activity
+  /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/tools/loader.py:346: DeprecationWarning: ToolLoader.load_python_tool is deprecated and will be removed in Strands SDK 2.0. Use the `load_tools_from_string` or `load_tools_from_module` methods instead.
+    return cls.load_python_tools(abs_path, tool_name)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+618 passed, 18 warnings in 21.44s
+
+## Re-run stability (stale-state adversarial check)
+Three consecutive full-suite runs after repointing, all green: 615 passed -> 618 passed -> 621 passed
+(count drift is OTHER concurrent lanes adding tests to test_config.py/test_think_activity.py/test_workflow.py,
+visible in git status; zero failures/errors in every run; this lane's adherence suite contributes 8 tests).
+test_workflow.py ran INSIDE the suite (no temporal-CLI skip encountered; temporal CLI available on PATH).

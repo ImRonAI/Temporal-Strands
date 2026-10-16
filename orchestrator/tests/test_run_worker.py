@@ -1,4 +1,4 @@
-"""run_worker model-factory assembly, params, and readiness. No network.
+"""run_worker model-factory assembly, params, and catalog registration. No network.
 
 Run from inside orchestrator/ (no conftest.py):
 
@@ -7,18 +7,23 @@ Run from inside orchestrator/ (no conftest.py):
 
 from __future__ import annotations
 
-import json
+import ast
 import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import run_worker
+with patch("dotenv.load_dotenv", return_value=False):
+    import run_worker
+
+import agent_api_tools
 from config import (
     BUILTIN_SKILLS,
+    CONNECTORS,
     DEFAULT_MODEL_ID,
     GEMINI_MODEL_IDS,
     PERPLEXITY_PRESETS,
@@ -40,15 +45,9 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch):
         "DATACOMMONS_MCP_URL",
         "DC_API_KEY",
         "POPHIVE_MCP_URL",
-        "PERPLEXITY_CONNECTOR_IDS",
     ):
         monkeypatch.delenv(name, raising=False)
     yield
-    # assemble_model_factories installs a client factory on success paths;
-    # clear it so no other suite inherits a test key.
-    import perplexity_operations
-
-    perplexity_operations.configure(None)
 
 
 def _patch_catalog(monkeypatch: pytest.MonkeyPatch, ids: list[str]) -> None:
@@ -56,6 +55,46 @@ def _patch_catalog(monkeypatch: pytest.MonkeyPatch, ids: list[str]) -> None:
         return sorted(set(ids))
 
     monkeypatch.setattr(run_worker, "fetch_model_ids", fake_fetch)
+
+
+# --- provider-declaring catalog --------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_catalog_declares_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every registered id carries a declared provider; Gemini ids are google-ai-studio."""
+    from config import (
+        PROVIDER_GOOGLE_AI_STUDIO,
+        PROVIDER_PERPLEXITY_AGENT_API,
+        RegisteredModel,
+    )
+
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "pplx-test")
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-test")
+    _patch_catalog(monkeypatch, CATALOG_IDS)
+
+    factories, catalog, default_model = await run_worker.assemble_model_factories()
+
+    assert default_model == DEFAULT_MODEL_ID
+    # 6 presets + 3 catalog ids + 3 Gemini ids, in registration order.
+    assert len(catalog) == len(PRESET_IDS) + len(SORTED_CATALOG) + len(GEMINI_MODEL_IDS)
+    assert [entry.id for entry in catalog] == list(factories)
+
+    known_providers = {PROVIDER_PERPLEXITY_AGENT_API, PROVIDER_GOOGLE_AI_STUDIO}
+    for entry in catalog:
+        assert isinstance(entry, RegisteredModel)
+        assert entry.provider in known_providers
+        assert entry.label
+
+    by_id = {entry.id: entry for entry in catalog}
+    for preset_id in PRESET_IDS:
+        assert by_id[preset_id].provider == PROVIDER_PERPLEXITY_AGENT_API
+        assert by_id[preset_id].label.endswith("(preset)")
+    for catalog_id in SORTED_CATALOG:
+        assert by_id[catalog_id].provider == PROVIDER_PERPLEXITY_AGENT_API
+        assert by_id[catalog_id].label == catalog_id
+    for gemini_id in GEMINI_MODEL_IDS:
+        assert by_id[gemini_id].provider == PROVIDER_GOOGLE_AI_STUDIO
 
 
 # --- factory union and order ---------------------------------------------------
@@ -67,7 +106,7 @@ async def test_factory_union_order_and_default(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("GOOGLE_API_KEY", "google-test")
     _patch_catalog(monkeypatch, CATALOG_IDS)
 
-    factories, default_model = await run_worker.assemble_model_factories()
+    factories, _catalog, default_model = await run_worker.assemble_model_factories()
 
     assert list(factories) == [*PRESET_IDS, *SORTED_CATALOG, *GEMINI_MODEL_IDS]
     assert default_model == DEFAULT_MODEL_ID == "preset:high"
@@ -89,20 +128,28 @@ async def test_perplexity_client_pins_base_url_and_retries(
     monkeypatch.setenv("PERPLEXITY_BASE_URL", "https://api.perplexity.ai/router")
     _patch_catalog(monkeypatch, CATALOG_IDS)
 
-    factories, _ = await run_worker.assemble_model_factories()
+    factories, _catalog, _default = await run_worker.assemble_model_factories()
     model = factories["preset:high"]()
-    assert str(model.client.base_url).rstrip("/") == "https://api.perplexity.ai"
-    assert model.client.max_retries == 0
+    # PerplexityModel resolves its own client args per request; the pinned base
+    # URL and max_retries=0 live there, not in a preconstructed SDK client.
+    client_args = model._resolve_client_args()
+    assert client_args["base_url"] == "https://api.perplexity.ai/v1"
+    assert client_args["max_retries"] == 0
+    assert client_args["api_key"] == "pplx-test"
+    assert "api_key" not in model.get_config()
 
 
 # --- model params ---------------------------------------------------------------
 
 
-def test_preset_params_have_no_max_output_tokens() -> None:
+def test_preset_params_carry_the_platform_output_ceiling() -> None:
+    """Presets merge request fields over their defaults, so the ceiling lifts
+    the fast/low presets' published 8192/32768 budgets without touching the
+    preset's own model, prompt, or tools."""
     tools = run_worker.native_tools()
     for preset_id in PRESET_IDS:
         params = run_worker.model_params(preset_id, tools)
-        assert "max_output_tokens" not in params
+        assert params["max_output_tokens"] == 128_000
         assert params["background"] is True
         assert params["store"] is True
         assert params["max_steps"] == 100
@@ -132,13 +179,84 @@ def test_max_output_tokens_for_provider_prefixes() -> None:
 
 
 def test_native_tool_types_are_the_documented_union_members() -> None:
+    """Native tools are Agent API request objects. The API executes them."""
     assert [tool["type"] for tool in run_worker.NATIVE_TOOLS] == [
         "web_search",
         "fetch_url",
+        "image_search",
         "people_search",
         "finance_search",
         "sandbox",
     ]
+    assert all(set(tool) == {"type"} for tool in run_worker.NATIVE_TOOLS)
+
+
+def test_validate_tools_accepts_every_documented_native_type() -> None:
+    """Every member of the OpenAPI ``Tool`` discriminator passes, including the
+    documented per-tool options."""
+    agent_api_tools._validate_tools([
+        {"type": "web_search", "search_type": "fast", "max_results": 10,
+         "max_tokens": 6000, "max_tokens_per_page": 1200,
+         "filters": {"search_domain_filter": [".gov"], "search_recency_filter": "month"}},
+        {"type": "image_search", "max_results": 30,
+         "filters": {"domain_filter": ["nasa.gov"], "format_filter": ["jpeg", "png"], "safe_search": True}},
+        {"type": "fetch_url", "max_urls": 10},
+        {"type": "people_search"},
+        {"type": "finance_search"},
+        {"type": "sandbox"},
+        {"type": "mcp", "server_label": "deepwiki", "server_url": "https://mcp.deepwiki.com/mcp",
+         "defer_loading": True, "allowed_tools": ["ask_question"]},
+        {"type": "connector", "id": "connector_github", "server_label": "github",
+         "allowed_tools": ["get_file_contents"]},
+        {"type": "function", "name": "lookup", "parameters": {"type": "object", "properties": {}}},
+    ])
+
+
+@pytest.mark.parametrize("tool,message", [
+    ({"type": "code_interpreter"}, "unknown tool type"),
+    ({"type": "image_search", "max_results": 31}, "image_search max_results must be 1-30"),
+    ({"type": "image_search", "filters": {"format_filter": ["tiff"]}}, "format_filter"),
+    ({"type": "image_search", "filters": {"domain_filter": [f"d{i}.example" for i in range(11)]}}, "at most 10"),
+    ({"type": "image_search", "filters": {"safe_search": "yes"}}, "safe_search must be a boolean"),
+    ({"type": "web_search", "search_type": "deep"}, "search_type"),
+    ({"type": "connector", "id": "connector_github", "server_label": "github", "allowed_tools": "x"}, "allowed_tools"),
+])
+def test_validate_tools_rejects_contract_violations(tool, message) -> None:
+    from temporalio.exceptions import ApplicationError
+
+    with pytest.raises(ApplicationError, match=message) as caught:
+        agent_api_tools._validate_tools([tool])
+    assert caught.value.non_retryable is True
+
+
+def test_validate_skills_accepts_the_documented_skill_shapes() -> None:
+    agent_api_tools._validate_skills([
+        *(dict(skill) for skill in BUILTIN_SKILLS),
+        {"type": "inline", "name": "fact-check", "description": "Verify claims.",
+         "instructions": "Check every claim against two sources."},
+        {"type": "custom", "id": "skill_abc123", "version": "latest"},
+        {"type": "custom", "id": "skill_def456", "version": "3"},
+    ])
+
+
+@pytest.mark.parametrize("skills,message", [
+    ([{"type": "builtin", "name": "office/odt"}], "unknown builtin skill"),
+    ([{"type": "inline", "name": "Fact_Check", "description": "d", "instructions": "i"}], "invalid inline skill name"),
+    ([{"type": "inline", "name": "office", "description": "d", "instructions": "i"}], "conflicts with a built-in"),
+    ([{"type": "inline", "name": "a", "description": "", "instructions": "i"}], "description must be"),
+    ([{"type": "inline", "name": "a", "description": "d", "instructions": "x" * 65_537}], "instructions must be"),
+    ([{"type": "custom", "id": "abc"}], "invalid custom skill id"),
+    ([{"type": "custom", "id": "skill_abc", "version": "v1"}], "version must be"),
+    ([{"type": "builtin", "name": "office"}] * 2, "listed more than once"),
+    ([{"type": "builtin", "name": "office"}] + [{"type": "custom", "id": f"skill_{i}"} for i in range(16)], "at most 16"),
+    ("office", "skills must be a list"),
+])
+def test_validate_skills_rejects_contract_violations(skills, message) -> None:
+    from temporalio.exceptions import ApplicationError
+
+    with pytest.raises(ApplicationError, match=message) as caught:
+        agent_api_tools._validate_skills(skills)
+    assert caught.value.non_retryable is True
 
 
 def test_mcp_tools_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -161,36 +279,63 @@ def test_mcp_tools_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert tools["pophive"]["server_url"] == "https://pophive.example/mcp"
     assert "headers" not in tools["pophive"]
     assert "allowed_tools" not in tools["pophive"]
+    # Agent API "Defer tool definitions": schemas leave the initial context
+    # and the per-request mcp_list_tools item stops carrying them.
+    assert tools["datacommons"]["defer_loading"] is True
+    assert tools["pophive"]["defer_loading"] is True
 
 
 # --- connectors -----------------------------------------------------------------
 
 
-def test_native_tools_include_both_dashboard_connectors() -> None:
-    connectors = [
-        tool for tool in run_worker.native_tools() if tool["type"] == "connector"
-    ]
+def test_connector_tools_are_the_documented_request_shape() -> None:
+    """One {"type": "connector"} entry per config.CONNECTORS item, verbatim.
+
+    https://docs.perplexity.ai/docs/agent-api/tools/connectors documents
+    ``type``/``id``/``server_label`` plus optional ``server_description``.
+    """
+    connectors = run_worker.connector_tools()
+    assert connectors == [{"type": "connector", **connector} for connector in CONNECTORS]
     assert [(c["id"], c["server_label"]) for c in connectors] == [
-        ("connector_googledrive", "google_drive"),
         ("connector_github", "github"),
     ]
-    # Descriptions come from config.CONNECTORS verbatim.
     for connector in connectors:
+        assert set(connector) <= {"type", "id", "server_label", "server_description"}
         assert connector["server_description"]
+    assert agent_api_tools.CONNECTORS == CONNECTORS
 
 
-def test_connector_tools_env_override_replaces_config(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        "PERPLEXITY_CONNECTOR_IDS",
-        "drive_alt=connector_drivealt, gh_alt=connector_ghalt,malformed",
-    )
-    connectors = run_worker.connector_tools()
-    assert connectors == [
-        {"type": "connector", "id": "connector_drivealt", "server_label": "drive_alt"},
-        {"type": "connector", "id": "connector_ghalt", "server_label": "gh_alt"},
+def test_all_factories_share_native_tools(monkeypatch, caplog) -> None:
+    monkeypatch.setenv("DATACOMMONS_MCP_URL", "https://dc.example/mcp")
+    monkeypatch.setenv("DC_API_KEY", "private-mcp-key")
+    monkeypatch.setenv("POPHIVE_MCP_URL", "https://pophive.example/mcp")
+    with caplog.at_level("INFO", logger="run_worker"):
+        factories, _ = run_worker.build_perplexity_factories("private-api-key", CATALOG_IDS)
+    tools = run_worker.native_tools()
+    assert tools == [*run_worker.NATIVE_TOOLS, *run_worker.mcp_tools(), *run_worker.connector_tools()]
+    assert [tool["type"] for tool in tools] == [
+        "web_search", "fetch_url", "image_search", "people_search", "finance_search", "sandbox",
+        "mcp", "mcp", "connector",
     ]
+    for factory in factories.values():
+        assert factory().get_config()["params"]["tools"] == tools
+    records = [r for r in caplog.records if "Registered Agent API connectors" in r.getMessage()]
+    assert len(records) == 1 and records[0].levelname == "INFO"
+    assert "['github']" in records[0].getMessage()
+    assert not [r for r in caplog.records if r.levelno >= 30]
+    assert "private-api-key" not in caplog.text and "private-mcp-key" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_startup_registers_all_factories(monkeypatch) -> None:
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "not-a-real-key")
+    monkeypatch.setenv("GOOGLE_API_KEY", "not-a-real-google-key")
+    _patch_catalog(monkeypatch, CATALOG_IDS)
+
+    factories, catalog, default = await run_worker.assemble_model_factories()
+    assert list(factories) == [*PRESET_IDS, *SORTED_CATALOG, *GEMINI_MODEL_IDS]
+    assert [entry.id for entry in catalog] == list(factories)
+    assert default == DEFAULT_MODEL_ID
 
 
 @pytest.mark.parametrize(
@@ -203,7 +348,7 @@ def test_model_params_tools_include_connectors(model_id: str) -> None:
     connector_ids = [
         tool["id"] for tool in params["tools"] if tool.get("type") == "connector"
     ]
-    assert connector_ids == ["connector_googledrive", "connector_github"]
+    assert connector_ids == ["connector_github"]
 
 
 # --- catalog fetch --------------------------------------------------------------
@@ -264,7 +409,7 @@ async def test_missing_perplexity_key_registers_gemini_only(
 ) -> None:
     monkeypatch.setenv("GOOGLE_API_KEY", "google-test")
 
-    factories, default_model = await run_worker.assemble_model_factories()
+    factories, _catalog, default_model = await run_worker.assemble_model_factories()
     assert list(factories) == list(GEMINI_MODEL_IDS)
     assert default_model == GEMINI_MODEL_IDS[0]
 
@@ -276,7 +421,7 @@ async def test_missing_gemini_key_registers_perplexity_only(
     monkeypatch.setenv("PERPLEXITY_API_KEY", "pplx-test")
     _patch_catalog(monkeypatch, CATALOG_IDS)
 
-    factories, default_model = await run_worker.assemble_model_factories()
+    factories, _catalog, default_model = await run_worker.assemble_model_factories()
     assert list(factories) == [*PRESET_IDS, *SORTED_CATALOG]
     assert default_model == "preset:high"
 
@@ -292,7 +437,7 @@ async def test_catalog_failure_degrades_to_presets_only(
 
     monkeypatch.setattr(run_worker, "fetch_model_ids", broken_fetch)
 
-    factories, default_model = await run_worker.assemble_model_factories()
+    factories, _catalog, default_model = await run_worker.assemble_model_factories()
     assert list(factories) == PRESET_IDS
     assert default_model == "preset:high"
 
@@ -303,20 +448,183 @@ async def test_no_keys_at_all_raises_system_exit() -> None:
         await run_worker.assemble_model_factories()
 
 
-# --- readiness ------------------------------------------------------------------
+# --- outbound tool spec validation ----------------------------------------------
 
 
-def test_write_readiness_includes_models_order_and_default(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    readiness = tmp_path / "worker-readiness.json"
-    monkeypatch.setattr(run_worker, "READINESS_PATH", readiness)
+def test_workflow_tool_specs_include_all_registered_tools() -> None:
+    names = [spec["name"] for spec in run_worker.workflow_tool_specs()]
+    for expected in (
+        "graph", "use_agent", "use_skill", "mcp_client", "browser", "think",
+        "python_repl", "discover_tools", "unload_tools",
+    ):
+        assert expected in names, f"missing {expected}"
 
-    model_ids = [*PRESET_IDS, *SORTED_CATALOG, *GEMINI_MODEL_IDS]
-    run_worker.write_readiness(model_ids, "Gwen", "preset:high")
 
-    record = json.loads(readiness.read_text())
-    assert record["models"] == model_ids
-    assert record["default_model"] == "preset:high"
-    assert record["agent"] == "Gwen"
-    assert record["task_queue"] == "perplexity-orchestrator"
+def test_python_repl_is_a_thin_activity_over_the_installed_tool() -> None:
+    """Local code execution is the installed community REPL bound the Temporal
+    way: a worker-registered ``@activity.defn`` wrapping the public callable,
+    exposed through ``activity_as_tool`` with the config envelope -- not the
+    AWS AgentCore code interpreter and not a vendored loop."""
+    import inspect
+
+    from temporalio import activity
+    from temporalio.contrib.strands._temporal_activity_tool import TemporalActivityTool
+    from strands_tools import python_repl as installed
+
+    import python_repl_activity
+    from config import (
+        PYTHON_REPL_HEARTBEAT_TIMEOUT, PYTHON_REPL_RETRY_POLICY, PYTHON_REPL_START_TO_CLOSE,
+    )
+    from workflow import PERMANENT_COMMUNITY_TOOLS
+
+    assert python_repl_activity.python_repl in run_worker.WORKER_ACTIVITIES
+    assert activity._Definition.from_callable(python_repl_activity.python_repl).name == "python_repl"
+    assert python_repl_activity.native_python_repl is installed.python_repl
+    source = inspect.getsource(python_repl_activity)
+    assert "code_interpreter" not in source and "AgentCore" not in source
+    tool = next(tool for tool in PERMANENT_COMMUNITY_TOOLS if tool.tool_name == "python_repl")
+    assert isinstance(tool, TemporalActivityTool)
+    assert tool._options["start_to_close_timeout"] == PYTHON_REPL_START_TO_CLOSE
+    assert tool._options["heartbeat_timeout"] == PYTHON_REPL_HEARTBEAT_TIMEOUT
+    assert tool._options["retry_policy"] == PYTHON_REPL_RETRY_POLICY
+    schema = tool.tool_spec["inputSchema"]["json"]
+    assert schema["required"] == ["code"]
+    assert set(schema["properties"]) == {"code", "reset_state"}
+
+
+def test_validate_outbound_tools_accepts_current_registry(monkeypatch) -> None:
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "pplx-test")
+    run_worker.validate_outbound_tools()  # must not raise
+
+
+def test_validate_outbound_tools_accepts_gemini_only_without_connectors(monkeypatch) -> None:
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-test")
+    run_worker.validate_outbound_tools()
+
+
+# --- installed strands_tools package (no symlink farm) --------------------------
+
+
+def test_worker_has_no_symlink_farm_bootstrap() -> None:
+    """The ``orchestrator/tools/`` symlink farm and its bootstrap are gone.
+
+    ``strands_tools`` is consumed as the installed package; ``load_tool``
+    resolves module names inside it (todo 8).
+    """
+    assert not hasattr(run_worker, "ensure_strands_tools_dir")
+    assert not hasattr(run_worker, "_SKIP_COMMUNITY_FILES")
+    assert not (run_worker._ROOT / "tools").exists()
+    source = (run_worker._ROOT / "run_worker.py").read_text(encoding="utf-8")
+    assert "ensure_strands_tools_dir" not in source
+    assert "_SKIP_COMMUNITY_FILES" not in source
+
+
+def test_worker_activities_register_the_public_load_tool_activity() -> None:
+    """The worker boots with ``load_tool`` as a registered Temporal activity."""
+    from temporalio import activity
+
+    from load_tool import load_tool_activity
+
+    names = {
+        defn.name
+        for defn in (
+            activity._Definition.from_callable(fn) for fn in run_worker.WORKER_ACTIVITIES
+        )
+        if defn is not None
+    }
+    assert "load_tool" in names
+    assert load_tool_activity in run_worker.WORKER_ACTIVITIES
+
+
+def test_validate_outbound_tools_rejects_bad_spec(monkeypatch: pytest.MonkeyPatch) -> None:
+    good = run_worker.workflow_tool_specs()
+    broken = [*good, {"name": "", "description": "", "inputSchema": {"json": {"type": "object"}}}]
+    monkeypatch.setattr(run_worker, "workflow_tool_specs", lambda: broken)
+    with pytest.raises(SystemExit):
+        run_worker.validate_outbound_tools()
+
+
+def test_validate_outbound_tools_rejects_unserializable(monkeypatch: pytest.MonkeyPatch) -> None:
+    good = run_worker.workflow_tool_specs()
+    poisoned = [
+        *good,
+        {
+            "name": "bad",
+            "description": "d",
+            "inputSchema": {"json": {"type": "object", "properties": {"x": {"default": object()}}}},
+        },
+    ]
+    monkeypatch.setattr(run_worker, "workflow_tool_specs", lambda: poisoned)
+    with pytest.raises(SystemExit):
+        run_worker.validate_outbound_tools()
+
+
+# --- Temporal-native catalog registration ---------------------------------------
+# The custom JSON readiness lease is gone: liveness is DescribeTaskQueue and the
+# catalog is served by ModelCatalogWorkflow + the model_catalog activity. These
+# checks read run_worker.main's own AST, so no worker/Temporal is started.
+
+
+def _main_worker_call() -> ast.Call:
+    tree = ast.parse(Path(run_worker.__file__).read_text(encoding="utf-8"))
+    main = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "main"
+    )
+    for node in ast.walk(main):
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == "Worker":
+            return node
+    raise AssertionError("run_worker.main does not construct a Worker")
+
+
+def _kwarg_elements(call: ast.Call, name: str) -> list[str]:
+    for keyword in call.keywords:
+        if keyword.arg == name:
+            assert isinstance(keyword.value, ast.List), f"{name} must be a list literal"
+            return [ast.unparse(element) for element in keyword.value.elts]
+    raise AssertionError(f"Worker(...) has no {name}= argument")
+
+
+def test_worker_registers_model_catalog_workflow_and_activity() -> None:
+    call = _main_worker_call()
+    assert "ModelCatalogWorkflow" in _kwarg_elements(call, "workflows")
+    from temporalio import activity
+
+    from catalog_workflow import model_catalog
+
+    assert model_catalog in run_worker.WORKER_ACTIVITIES
+    assert (
+        activity._Definition.from_callable(model_catalog).name == "model_catalog"
+    )
+
+
+def test_worker_installs_the_boot_catalog() -> None:
+    source = Path(run_worker.__file__).read_text(encoding="utf-8")
+    assert "set_catalog(model_catalog" in source or "set_catalog(" in source
+    tree = ast.parse(source)
+    main = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "main"
+    )
+    calls = [
+        ast.unparse(node.func)
+        for node in ast.walk(main)
+        if isinstance(node, ast.Call)
+    ]
+    assert any(name.endswith("set_catalog") for name in calls), calls
+
+
+def test_no_readiness_lease_symbols_remain() -> None:
+    """Nothing named for the deleted JSON lease survives in run_worker.
+
+    Catches the whole family at once (the writer, the heartbeat task, the
+    ownership-scoped cleanup, and the file path) rather than a fixed list, so a
+    partially-reverted lease cannot slip back in under a new name.
+    """
+    leftovers = [name for name in vars(run_worker) if "readiness" in name.lower()]
+    assert leftovers == [], (
+        f"run_worker still exposes {leftovers}; the JSON lease is replaced by "
+        f"Temporal-native liveness + ModelCatalogWorkflow"
+    )

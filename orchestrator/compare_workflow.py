@@ -15,7 +15,6 @@ forwards with the model id parsed back out of the topic name, which is what
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
 from dataclasses import dataclass, field
 
 from temporalio import workflow
@@ -27,6 +26,7 @@ from config import (
     MODEL_RETRY_POLICY,
     MODEL_SCHEDULE_TO_CLOSE,
     MODEL_START_TO_CLOSE,
+    MODEL_STREAM_BATCH_INTERVAL,
 )
 
 MODEL_TOPIC_PREFIX = "model:"
@@ -78,7 +78,7 @@ class CompareWorkflow:
                 schedule_to_close_timeout=MODEL_SCHEDULE_TO_CLOSE,
                 heartbeat_timeout=MODEL_HEARTBEAT,
                 retry_policy=MODEL_RETRY_POLICY,
-                streaming_batch_interval=timedelta(milliseconds=200),
+                streaming_batch_interval=MODEL_STREAM_BATCH_INTERVAL,
                 streaming_topic=model_topic(model_id),
                 system_prompt=input.system_prompt,
             )

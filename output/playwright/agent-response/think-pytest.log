@@ -1,0 +1,76 @@
+...........s............................................................ [  5%]
+........................................................................ [ 11%]
+........................................................................ [ 16%]
+........................................................................ [ 22%]
+........................................................................ [ 28%]
+........................................................................ [ 33%]
+........................................................................ [ 39%]
+......................................................................F. [ 45%]
+F....................................................................... [ 50%]
+........................................................................ [ 56%]
+........................................................................ [ 62%]
+........................................................................ [ 67%]
+........................................................................ [ 73%]
+........................................................................ [ 79%]
+........................................................................ [ 84%]
+......s................................................................. [ 90%]
+........................................................................ [ 96%]
+..................................................                       [100%]
+=================================== FAILURES ===================================
+______________________ test_f_no_timedelta_outside_config ______________________
+
+    def test_f_no_timedelta_outside_config() -> None:
+        for path in _source_modules():
+            if path.name == "config.py":
+                continue
+            tree = _parse(path)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                fn = ast.unparse(node.func)
+                if fn == "timedelta" or fn == "datetime.timedelta":
+>                   pytest.fail(
+                        f"(f) {_file_label(path)}:{node.lineno} timedelta literal "
+                        f"outside config.py; move the constant to config.py and "
+                        f"reference it"
+                    )
+E                   Failed: (f) orchestrator/compare_workflow.py:81 timedelta literal outside config.py; move the constant to config.py and reference it
+
+tests/test_framework_adherence.py:214: Failed
+________________________ test_h_no_empty_except_handler ________________________
+
+    def test_h_no_empty_except_handler() -> None:
+        for path in _source_modules():
+            tree = _parse(path)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ExceptHandler):
+                    continue
+                if len(node.body) == 1 and isinstance(node.body[0], ast.Pass):
+>                   pytest.fail(
+                        f"(h) {_file_label(path)}:{node.lineno} empty except "
+                        f"handler (bare `pass`); handle the error or propagate it"
+                    )
+E                   Failed: (h) orchestrator/graph_activity.py:579 empty except handler (bare `pass`); handle the error or propagate it
+
+tests/test_framework_adherence.py:252: Failed
+=============================== warnings summary ===============================
+tests/test_hot_load.py: 9 warnings
+tests/test_mcp_shell.py: 1 warning
+  /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands_tools/load_tool.py:222: DeprecationWarning: load_tool_from_filepath is deprecated and will be removed in Strands SDK 2.0. `process_tools` automatically handles loading tools from a filepath.
+    current_agent.tool_registry.load_tool_from_filepath(tool_name=name, tool_path=path)
+
+tests/test_hot_load.py: 9 warnings
+tests/test_mcp_shell.py: 1 warning
+  /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/tools/registry.py:186: DeprecationWarning: ToolLoader.load_tools is deprecated and will be removed in Strands SDK 2.0. Use the `load_tools_from_string` or `load_tools_from_module` methods instead.
+    loaded_tools = ToolLoader.load_tools(tool_path, tool_name)
+
+tests/test_hot_load.py: 9 warnings
+tests/test_mcp_shell.py: 1 warning
+  /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/tools/loader.py:346: DeprecationWarning: ToolLoader.load_python_tool is deprecated and will be removed in Strands SDK 2.0. Use the `load_tools_from_string` or `load_tools_from_module` methods instead.
+    return cls.load_python_tools(abs_path, tool_name)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_framework_adherence.py::test_f_no_timedelta_outside_config
+FAILED tests/test_framework_adherence.py::test_h_no_empty_except_handler - Fa...
+2 failed, 1270 passed, 2 skipped, 30 warnings in 158.58s (0:02:38)

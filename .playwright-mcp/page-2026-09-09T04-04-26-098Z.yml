@@ -1,0 +1,30 @@
+- generic [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: v0 / studio
+      - navigation [ref=e9]:
+        - button "Community" [ref=e10]
+        - button "Pricing" [ref=e11]
+        - button "Enterprise" [ref=e12]
+        - button "Docs" [ref=e13]
+      - generic [ref=e14]:
+        - button "Compare models" [ref=e15] [cursor=pointer]
+        - button "Sign in" [ref=e16]
+        - button "Start building" [ref=e17]
+    - generic [ref=e179]:
+      - log [ref=e180]:
+        - generic [ref=e182]:
+          - paragraph [ref=e187]: "Use native browser directly: init session linux-visual-check, navigate to file:///tmp/vision-check.html inside the remote Linux browser. Inspect attached screenshot, visually identify the BLUE rectangle, then use computer_click with session_name linux-visual-check and x/y from its visual center. Coordinates are CSS pixels at scale 1. Read the exact VISION-###### code from the post-click screenshot and report it. Do not use execute_cdp, evaluate, DOM/text/HTML inspection, HTTP, shell, file reading, or delegation. The file URL is only for navigation to the supplied test page. At most 5 tool actions. Leave browser open. Think may plan; outer agent performs browser actions."
+          - paragraph [ref=e212]: "Run the requested visual test now: browser init session linux-visual-check, navigate file:///tmp/vision-check.html, visually locate blue rectangle using screenshot only, call computer_click with session_name and x/y, report random VISION code shown in screenshot. No DOM, source, shell or delegation. Leave browser open."
+          - button "Thinking…" [expanded] [ref=e218]
+      - group [ref=e195]:
+        - group [ref=e196]
+        - textbox "Ask for a change, or start something new…" [active] [ref=e198]
+        - group [ref=e199]:
+          - generic [ref=e200]:
+            - button [ref=e201]
+            - button "gpt-6-astra" [ref=e202]
+            - button "Web preview" [ref=e206]
+          - button "Stop" [ref=e230]
+  - button "Open Next.js Dev Tools" [ref=e69] [cursor=pointer]
+  - alert [ref=e76]

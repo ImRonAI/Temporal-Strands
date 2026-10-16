@@ -9,13 +9,26 @@ __v0_jsx-dev-runtime.ts
 # Environment variables
 .env*.local
 
+# Supplied bootstrap credential: never include in source or release contexts.
+fair-expanse-493212-h8-138622c839d2.json
+
 # Common ignores
 node_modules
 .next/
+.next-desktop-acceptance/
+.next-obsidian-inspect/
 .DS_Store
 .worktrees/
 # Graph tool durable state (SQLite store + session dirs)
 orchestrator/.graph-tool/
-# Installed strands_tools package, linked at worker start for load_tool discovery
-orchestrator/strands-tools
-orchestrator/tools/*.py
+# Local browser screenshot evidence is runtime data, not source.
+orchestrator/.runtime/browser-observations/
+orchestrator/.runtime/desktop-temporal.db*
+
+# GCP service-account keys / GCE metadata — never commit
+fair-expanse-*.json
+*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].json
+compute.json
+orchestrator/.runtime/
+__pycache__/
+*.pyc

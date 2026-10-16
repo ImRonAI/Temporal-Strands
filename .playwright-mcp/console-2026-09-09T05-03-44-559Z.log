@@ -1,0 +1,43 @@
+[     424ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[     471ms] [LOG] [HMR] connected @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[     695ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[     974ms] [LOG] [Fast Refresh] done in 396ms @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   20136ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   20570ms] [LOG] [Fast Refresh] done in 535ms @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   50515ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   50716ms] [LOG] [Fast Refresh] done in 304ms @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   80998ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[   81265ms] [LOG] [Fast Refresh] done in 367ms @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  111510ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  112049ms] [LOG] [Fast Refresh] done in 640ms @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  141952ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  142160ms] [LOG] [Fast Refresh] done in 308ms @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  203457ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  203695ms] [LOG] [Fast Refresh] done in 353ms @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  235449ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  239300ms] [LOG] [Fast Refresh] done in 4021ms @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  294877ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  295503ms] [LOG] [Fast Refresh] done in 739ms @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  299832ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  300175ms] [LOG] [Fast Refresh] done in 456ms @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  318145ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  318560ms] [LOG] [Fast Refresh] done in 535ms @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  319309ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  319901ms] [LOG] [Fast Refresh] done in 707ms @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  325451ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  325768ms] [LOG] [Fast Refresh] done in 431ms @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  359923ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  364330ms] [LOG] [Fast Refresh] done in 4603ms @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  374803ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_0kq63wv._.js:2489
+[  376288ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=iGCa82-_VuhibI09f_0Kj' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_client_1yj3q4e._.js:13422
+[  377439ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=iGCa82-_VuhibI09f_0Kj' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_client_1yj3q4e._.js:13422
+[  378563ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=iGCa82-_VuhibI09f_0Kj' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_client_1yj3q4e._.js:13422
+[  379734ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=iGCa82-_VuhibI09f_0Kj' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_client_1yj3q4e._.js:13422
+[  380851ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=iGCa82-_VuhibI09f_0Kj' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_client_1yj3q4e._.js:13422
+[  385945ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=iGCa82-_VuhibI09f_0Kj' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_client_1yj3q4e._.js:13422
+[  391039ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=iGCa82-_VuhibI09f_0Kj' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_client_1yj3q4e._.js:13422
+[  396109ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=iGCa82-_VuhibI09f_0Kj' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_client_1yj3q4e._.js:13422
+[  401168ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=iGCa82-_VuhibI09f_0Kj' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_client_1yj3q4e._.js:13422
+[  406293ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=iGCa82-_VuhibI09f_0Kj' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_client_1yj3q4e._.js:13422
+[  411622ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=iGCa82-_VuhibI09f_0Kj' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_client_1yj3q4e._.js:13422
+[  417015ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:3000/_next/webpack-hmr?id=iGCa82-_VuhibI09f_0Kj' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:3000/_next/static/chunks/12e1_next_dist_client_1yj3q4e._.js:13422

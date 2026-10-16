@@ -1,0 +1,61 @@
+Task 6 — framework-adherence-reset: shrink orchestrator/gemini_model.py stream() to thin super().stream() wrapper
+Date: 2026-09-08
+
+## Change summary
+- Deleted the full copied parent stream loop (~92 lines, former :252-343).
+- stream() now: sets self._reasoning_effort from invocation_state; resets self._grounding = {};
+  `async for chunk in super().stream(...)`: yield chunk; then appends trailing
+  {"gemini": search} / {"gemini": maps} frames from the grounding sink; clears effort in finally.
+- reasoning_effort merged in an override of _format_request_config (parent strands/models/gemini.py:291),
+  which receives the params dict — {"thinking_config": {**existing, "thinking_level": effort}}.
+  self.config["params"] is never mutated (params dict is rebuilt, not written through).
+- Grounding captured via _get_client() override returning _GroundingTapClient(super()._get_client(), sink):
+  proxy whose .aio.models.generate_content_stream(**kw) awaits the real call and wraps the async
+  iterator, calling existing maps_from_grounding/search_from_grounding on each raw event, storing the
+  latest non-None result on the sink, yielding every event unchanged.
+- Error handling (ClientError -> ModelThrottledException / ContextWindowOverflowException) now comes
+  entirely from the parent; local match block deleted. Unused `copy` import and exception imports removed.
+- KEPT unchanged: _format_request_content, _computer_use_function_response,
+  _format_request_content_part (video + computer-use), _format_request_tools.
+
+## Failing-first proof (tests written before implementation, run on old code)
+$ .venv/bin/python -m pytest tests/test_gemini_multimodal.py -q   # BEFORE implementation
+FAILED tests/test_gemini_multimodal.py::test_stream_is_thin_wrapper_over_parent_stream
+FAILED tests/test_gemini_multimodal.py::test_stream_yields_parent_frames_unchanged_plus_search_grounding_frame
+FAILED tests/test_gemini_multimodal.py::test_stream_appends_maps_grounding_frame
+3 failed, 17 passed in 1.11s
+(old code emitted gemini frames BEFORE the metadata frame and bypassed super().stream() entirely)
+
+## Verification (after implementation)
+$ .venv/bin/python -m pytest tests/test_gemini_multimodal.py tests/test_computer_use_activity.py -q
+30 passed in 1.04s
+
+$ .venv/bin/python -m pytest tests -q --ignore=tests/test_workflow.py   # from orchestrator/
+628 passed, 18 warnings in 11.62s
+
+$ pnpm exec vitest run --exclude '**/.worktrees/**' --exclude '**/.kilo/**' app/api/orchestrator/route.test.ts
+Test Files  1 passed (1) / Tests  22 passed (22)
+
+## Acceptance greps
+$ grep -c '_format_chunk({"chunk_type"' orchestrator/gemini_model.py
+0
+$ grep -c "super().stream(" orchestrator/gemini_model.py
+1
+
+## Parent frames unchanged
+test_stream_yields_parent_frames_unchanged_plus_search_grounding_frame and
+test_stream_appends_maps_grounding_frame snapshot the *actual parent* (strands GeminiModel)
+frame sequence from an identical fake genai stream and assert the subclass output is that exact
+sequence as a strict prefix, plus exactly one trailing {"gemini": ...} frame. -> UNCHANGED: true.
+
+## Adversarial coverage
+- No grounding metadata: test_stream_without_grounding_yields_no_gemini_frames — output identical
+  to parent, zero gemini frames, no crash.
+- Throttle via parent: test_resource_exhausted_surfaces_as_throttle_via_parent — real
+  genai.errors.ClientError(429, RESOURCE_EXHAUSTED) raised from generate_content_stream surfaces
+  as ModelThrottledException with no local match block in the subclass.
+- Bypass guard: test_stream_is_thin_wrapper_over_parent_stream monkeypatches the parent stream
+  and raises AssertionError if the subclass hits the genai client directly.
+- Stale state: _grounding is reset to {} at the top of every stream(); _reasoning_effort cleared
+  in finally; existing test_reasoning_effort_maps_to_thinking_level_without_mutating_defaults
+  still asserts config defaults untouched across turns.

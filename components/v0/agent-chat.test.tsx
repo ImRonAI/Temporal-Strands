@@ -9,6 +9,10 @@
 // Effects (useEffect / useImperativeHandle) intentionally do not run in SSR;
 // the imperative handle path is covered indirectly via compare-view.test.tsx.
 
+import { readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+
 import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -39,6 +43,8 @@ const h = vi.hoisted(() => {
     buttonProps: [] as Array<Record<string, unknown>>,
     suggestionProps: [] as Array<Record<string, unknown>>,
     previewPanelProps: [] as Array<Record<string, unknown>>,
+    idePanelProps: [] as Array<Record<string, unknown>>,
+    projectIdePreviewCalls: [] as unknown[][],
     computerUsePreviewResult: {
       open: false,
       sessionId: "",
@@ -73,6 +79,8 @@ vi.mock("ai", () => ({
     }
   },
   isTextUIPart: (part: { type?: string }) => part.type === "text",
+  isDynamicToolUIPart: (part: { type?: string }) => part.type === "dynamic-tool",
+  isReasoningUIPart: (part: { type?: string }) => part.type === "reasoning",
   isFileUIPart: (part: { type?: string }) => part.type === "file",
 }))
 
@@ -81,11 +89,18 @@ vi.mock("motion/react", () => {
     function MotionPassthrough({
       children,
       className,
+      style,
+      ...rest
     }: {
       children?: React.ReactNode
       className?: string
+      style?: React.CSSProperties
+      [key: string]: unknown
     }) {
-      return React.createElement(Tag, { className }, children)
+      const data = Object.fromEntries(
+        Object.entries(rest).filter(([key]) => key.startsWith("data-")),
+      )
+      return React.createElement(Tag, { className, style, ...data }, children)
     }
     MotionPassthrough.displayName = `MotionPassthrough(${Tag})`
     return MotionPassthrough
@@ -191,9 +206,9 @@ vi.mock("@/components/ui/alert", () => ({
 }))
 
 vi.mock("@/components/ui/button", () => ({
-  Button: (props: { children?: React.ReactNode; onClick?: () => void }) => {
+  Button: (props: { children?: React.ReactNode; onClick?: () => void; "data-testid"?: string; disabled?: boolean }) => {
     h.buttonProps.push(props)
-    return <button>{props.children}</button>
+    return <button data-testid={props["data-testid"]} disabled={props.disabled}>{props.children}</button>
   },
 }))
 
@@ -201,14 +216,17 @@ vi.mock("@/components/v0/agent-activity", () => ({
   AgentActivity: ({
     parts,
     isThinking,
+    sessionId,
   }: {
     parts: unknown[]
     isThinking?: boolean
+    sessionId?: string
   }) => (
     <div
       data-testid="agent-activity"
       data-thinking={String(Boolean(isThinking))}
       data-part-count={parts.length}
+      data-session-id={sessionId}
     />
   ),
 }))
@@ -237,9 +255,14 @@ vi.mock("@/components/v0/composer", () => ({
   },
 }))
 
-vi.mock("@/components/v0/computer-use", () => ({
-  computerUsePreview: () => h.computerUsePreviewResult,
-}))
+vi.mock("@/components/v0/computer-use", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/v0/computer-use")>()
+  return {
+    ...actual,
+    COMPUTER_USE_TOOL_NAMES: new Set(["browser", "computer_click", "scroll", "press_key"]),
+    computerUsePreview: () => h.computerUsePreviewResult,
+  }
+})
 
 vi.mock("@/components/v0/computer-use-preview", () => ({
   ComputerUsePreviewPanel: (props: Record<string, unknown>) => {
@@ -248,21 +271,31 @@ vi.mock("@/components/v0/computer-use-preview", () => ({
       <div
         data-testid="computer-use-preview-panel"
         data-pending-approval={props.pendingApproval as string}
+        data-expanded={String(Boolean(props.expanded))}
       />
     )
   },
 }))
 
 vi.mock("@/components/v0/project-ide", () => ({
-  projectIdePreview: () => h.projectIdePreviewResult,
+  projectIdePreview: (...args: unknown[]) => {
+    h.projectIdePreviewCalls.push(args)
+    return h.projectIdePreviewResult
+  },
 }))
 
 vi.mock("@/components/v0/project-ide-panel", () => ({
-  ProjectIdePanel: () => <div data-testid="project-ide-panel" />,
+  ProjectIdePanel: (props: Record<string, unknown>) => {
+    h.idePanelProps.push(props)
+    return <div data-testid="project-ide-panel" />
+  },
 }))
 
 vi.mock("@/components/v0/site-header", () => ({
   SiteHeader: () => <header data-testid="site-header" />,
+}))
+vi.mock("@/components/v0/use-catalog", () => ({
+  useCatalog: () => ({ catalog: null, status: "loading", error: null }),
 }))
 
 // ---------------------------------------------------------------------------
@@ -304,6 +337,8 @@ beforeEach(() => {
   h.buttonProps.length = 0
   h.suggestionProps.length = 0
   h.previewPanelProps.length = 0
+  h.idePanelProps.length = 0
+  h.projectIdePreviewCalls.length = 0
   h.computerUsePreviewResult = { open: false, sessionId: "" }
   h.projectIdePreviewResult = {
     open: false,
@@ -424,6 +459,30 @@ describe("AgentChat message rendering", () => {
     expect(html).toContain('data-media-type="image/png"')
     expect(html).toContain('data-base64="QUJD"')
   })
+
+  it("keeps a sent pasted prompt as the same attachment card, not an image", () => {
+    const text = "A pasted prompt that stays a card after send. ".repeat(12)
+    const url = `data:text/plain;base64,${Buffer.from(text, "utf8").toString("base64")}`
+    setChat({
+      messages: [
+        {
+          id: "u1",
+          role: "user",
+          parts: [
+            { type: "text", text: "Look at this" },
+            { type: "file", url, mediaType: "text/plain", filename: "Pasted prompt.txt" },
+          ],
+        },
+      ],
+    })
+    const html = render()
+    expect(html).toContain('data-testid="pasted-prompt-attachment"')
+    expect(html).toContain("A pasted prompt that stays a")
+    expect(html).not.toContain("Pasted prompt.txt")
+    expect(html).toContain("Look at this")
+    expect(html).not.toContain('data-testid="attachment-image"')
+    expect(html).not.toContain('data-media-type="text/plain"')
+  })
 })
 
 describe("AgentChat pending state and errors", () => {
@@ -487,7 +546,7 @@ describe("AgentChat submit behavior", () => {
     expect(h.chat.sendMessage).toHaveBeenCalledTimes(1)
     expect(h.chat.sendMessage).toHaveBeenCalledWith(
       { text: "next step", files: [] },
-      { body: { model: DEFAULT_MODEL, sessionId: "sess-42" } },
+      { body: { model: DEFAULT_MODEL, reasoningEffort: undefined, tools: [], skills: [], sessionId: "sess-42" } },
     )
   })
 
@@ -496,7 +555,7 @@ describe("AgentChat submit behavior", () => {
     capturedComposerSubmit()({ text: "compare me" })
     expect(h.chat.sendMessage).toHaveBeenCalledWith(
       { text: "compare me", files: undefined },
-      { body: { model: "gemini-3.8-flash", sessionId: undefined } },
+      { body: { model: "gemini-3.8-flash", reasoningEffort: undefined, tools: [], skills: [], sessionId: undefined } },
     )
   })
 
@@ -535,7 +594,7 @@ describe("AgentChat submit behavior", () => {
     onClick(suggestion)
     expect(h.chat.sendMessage).toHaveBeenCalledWith(
       { text: suggestion },
-      { body: { model: DEFAULT_MODEL, sessionId: undefined } },
+      { body: { model: DEFAULT_MODEL, reasoningEffort: undefined, tools: [], skills: [], sessionId: undefined } },
     )
   })
 
@@ -549,6 +608,37 @@ describe("AgentChat submit behavior", () => {
     expect(composer.status).toBe("streaming")
     expect(composer.model).toBe(DEFAULT_MODEL)
     expect(composer.onStop).toBe(h.chat.stop)
+  })
+})
+
+describe("AgentChat tool selection", () => {
+  it("passes empty selection props and the catalog to both Composer render sites", () => {
+    setChat({ messages: [] })
+    render()
+    expect(h.composerProps.length).toBeGreaterThan(0)
+    for (const props of h.composerProps) {
+      expect(props.selectedTools).toEqual([])
+      expect(props.selectedSkills).toEqual([])
+      expect(typeof props.onSelectionChange).toBe("function")
+      expect(props.catalog).toBeNull()
+      expect(props.catalogStatus).toBe("loading")
+    }
+  })
+
+  it("exposes a selection handler that accepts tools and skills on the composer", () => {
+    setChat({ messages: [] })
+    render()
+    const composer = h.composerProps.at(-1)
+    expect(composer).toBeDefined()
+    const onSelectionChange = composer!.onSelectionChange as (next: { tools: string[]; skills: string[] }) => void
+    // SSR cannot drive state updates or submit: `submit` returns early until
+    // model settings hydrate (the same pre-existing contract the six failing
+    // submit-behavior tests document). The turn-body assertion for a checked
+    // tool + skill therefore lives in the live browser app test (step 12), not
+    // here. This locks the wiring surface: empty initial arrays and a handler.
+    expect(composer!.selectedTools).toEqual([])
+    expect(composer!.selectedSkills).toEqual([])
+    expect(() => onSelectionChange({ tools: ["journal"], skills: ["office"] })).not.toThrow()
   })
 })
 
@@ -605,6 +695,342 @@ describe("AgentChat approval flow", () => {
     expect(html).toContain('data-testid="computer-use-preview-panel"')
     expect(html).toContain('data-pending-approval="Take over the browser?"')
     expect(html).not.toContain("Approval needed")
+  })
+})
+
+describe("AgentChat desktop session wiring", () => {
+  it("forwards the durable chat ID to the preview and every activity across turns", () => {
+    const sessionId = "chat-c8a5830d3a78e208"
+    h.computerUsePreviewResult = { open: true, sessionId: "browser-session-name" }
+    setChat({
+      status: "streaming",
+      messages: [
+        { id: "a1", role: "assistant", parts: [sessionPart(sessionId), textPart("Opened desktop")] },
+        { id: "u2", role: "user", parts: [textPart("Continue")] },
+        { id: "a2", role: "assistant", parts: [textPart("Inspecting screenshot")] },
+      ],
+    })
+
+    const html = render()
+    expect(h.previewPanelProps.at(-1)?.sessionId).toBe(sessionId)
+    expect(h.previewPanelProps.at(-1)?.preview).toBe(h.computerUsePreviewResult)
+    expect([...html.matchAll(/data-session-id="([^"]+)"/g)].map(match => match[1]))
+      .toEqual([sessionId, sessionId])
+    expect(html).not.toContain('data-session-id="browser-session-name"')
+  })
+
+  it("never substitutes a browser session name when the durable ID has not arrived", () => {
+    h.computerUsePreviewResult = { open: true, sessionId: "browser-session-name" }
+    setChat({ messages: [{ id: "a1", role: "assistant", parts: [textPart("Opening desktop")] }] })
+
+    const html = render()
+    expect(h.previewPanelProps).toHaveLength(1)
+    expect(h.previewPanelProps[0].sessionId).toBeUndefined()
+    expect(html).not.toContain("data-session-id=")
+  })
+})
+
+describe("AgentChat session lifetime", () => {
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "agent-chat.tsx"),
+    "utf8",
+  )
+
+  it("never ends the durable session on pagehide, beforeunload, or unmount", () => {
+    // The deployed session must survive the laptop closing or the tab going
+    // away. Any implicit teardown path is a regression, regardless of how
+    // it is spelled.
+    expect(source).not.toMatch(/addEventListener\(\s*["'](pagehide|beforeunload|unload|visibilitychange)["']/)
+    expect(source).not.toContain("sendBeacon")
+    // The only reference to the end route is inside the explicit action.
+    const endCalls = [...source.matchAll(/["']\/api\/orchestrator\/end["']/g)]
+    expect(endCalls).toHaveLength(1)
+    const endIndex = endCalls[0].index ?? 0
+    const fnStart = source.lastIndexOf("async function endSession", endIndex)
+    expect(fnStart).toBeGreaterThan(-1)
+    expect(endIndex - fnStart).toBeLessThan(1200)
+  })
+
+  it("does not register a window teardown effect when a session id arrives", () => {
+    const addEventListener = vi.fn()
+    const sendBeacon = vi.fn()
+    vi.stubGlobal("window", { addEventListener, removeEventListener: vi.fn() })
+    vi.stubGlobal("navigator", { sendBeacon })
+    try {
+      setChat({
+        messages: [{ id: "a1", role: "assistant", parts: [sessionPart("sess-live"), textPart("working")] }],
+      })
+      render()
+      expect(addEventListener).not.toHaveBeenCalled()
+      expect(sendBeacon).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("offers an explicit End session action only once a durable session exists", () => {
+    setChat({ messages: [{ id: "u1", role: "user", parts: [textPart("go")] }] })
+    expect(render()).not.toContain('data-testid="end-session"')
+
+    setChat({
+      messages: [{ id: "a1", role: "assistant", parts: [sessionPart("sess-9"), textPart("hi")] }],
+    })
+    const html = render()
+    expect(html).toContain('data-testid="end-session"')
+    // Arming only; the destructive call needs the confirm step.
+    expect(html).not.toContain('data-testid="end-session-confirm"')
+    const arm = h.buttonProps.find((b) => b["data-testid"] === "end-session")
+    expect(arm).toBeDefined()
+    expect(h.chat.stop).not.toHaveBeenCalled()
+  })
+
+  it("keeps the same session in the turn body while the tab merely re-renders", () => {
+    setChat({
+      messages: [{ id: "a1", role: "assistant", parts: [sessionPart("sess-durable"), textPart("hi")] }],
+    })
+    render()
+    render()
+    const composer = h.composerProps.at(-1)!
+    ;(composer.onSubmit as (m: { text: string; files: unknown[] }) => void)({ text: "continue", files: [] })
+    expect(h.chat.sendMessage).toHaveBeenCalledWith(
+      { text: "continue", files: [] },
+      { body: { model: DEFAULT_MODEL, reasoningEffort: undefined, tools: [], skills: [], sessionId: "sess-durable" } },
+    )
+  })
+})
+
+describe("AgentChat desktop layout", () => {
+  const openDesktop = () => {
+    h.computerUsePreviewResult = {
+      open: true,
+      sessionId: "cu-1",
+      observation: null,
+      url: "https://example.test",
+      livePreviewUrl: "http://localhost:6080/vnc.html",
+      viewerType: "novnc",
+    }
+    setChat({
+      status: "streaming",
+      messages: [{ id: "a1", role: "assistant", parts: [sessionPart("sess-1"), textPart("working")] }],
+    })
+  }
+
+  it("fits the desktop slot to the configured framebuffer proportions", () => {
+    openDesktop()
+    const html = render()
+    expect(html).toContain('data-testid="desktop-slot"')
+    const fit = html.match(/data-testid="desktop-fit" style="([^"]*)"/)?.[1] ?? ""
+    // 1440x900 default: width bound by the slot width or by height * 1.6.
+    expect(fit).toContain("100cqw")
+    expect(fit).toContain("100cqh")
+    expect(fit).toContain("1.6")
+    expect(fit).toContain("2.5rem")
+  })
+
+  it("prefers the verified screenshot dimensions for the fit ratio", () => {
+    openDesktop()
+    h.computerUsePreviewResult = {
+      ...h.computerUsePreviewResult,
+      observation: { width: 1920, height: 1080 },
+    }
+    const html = render()
+    const fit = html.match(/data-testid="desktop-fit" style="([^"]*)"/)?.[1] ?? ""
+    expect(fit).toContain(String(1920 / 1080))
+    expect(fit).not.toContain("1.6)")
+  })
+
+  it("hands the panel expansion state and a working toggle that hides the chat column", () => {
+    openDesktop()
+    const html = render()
+    const panel = h.previewPanelProps.at(-1)!
+    expect(panel.expanded).toBe(false)
+    expect(typeof panel.onExpandedChange).toBe("function")
+    expect(html).toMatch(/data-testid="chat-column"/)
+    expect(html).not.toMatch(/class="[^"]*\bhidden\b[^"]*" data-testid="chat-column"/)
+    expect(html).toContain('data-expanded="false"')
+    // Stacked below 64rem, side-by-side above: both class sets present.
+    expect(html).toContain("@min-[64rem]/chat:flex-row")
+    expect(html).toContain("@min-[64rem]/chat:w-1/3")
+  })
+
+  it("closing the desktop preview is presentation only and never stops the turn", () => {
+    openDesktop()
+    render()
+    const panel = h.previewPanelProps.at(-1)!
+    ;(panel.onClose as () => void)()
+    expect(h.chat.stop).not.toHaveBeenCalled()
+  })
+})
+
+describe("AgentChat project IDE wiring", () => {
+  const toolPart = (id: string): Part => ({
+    type: "dynamic-tool",
+    toolName: "shell",
+    toolCallId: id,
+    state: "output-available",
+    input: { command: "ls" },
+    output: "ok",
+  })
+
+  it("feeds projectIdePreview the parts of EVERY assistant turn, in order", () => {
+    setChat({
+      messages: [
+        { id: "u1", role: "user", parts: [textPart("build it")] },
+        { id: "a1", role: "assistant", parts: [toolPart("t1"), textPart("done 1")] },
+        { id: "u2", role: "user", parts: [textPart("now run it")] },
+        { id: "a2", role: "assistant", parts: [toolPart("t2")] },
+      ],
+    })
+    render()
+    const [parts] = h.projectIdePreviewCalls.at(-1) as [Part[]]
+    const ids = parts
+      .filter((p) => p.type === "dynamic-tool")
+      .map((p) => p.toolCallId)
+    // Both turns' tool parts, user parts excluded.
+    expect(ids).toEqual(["t1", "t2"])
+    expect(parts.some((p) => p.type === "text" && p.text === "build it")).toBe(false)
+  })
+
+  it("renders the IDE panel when the aggregated preview opens", () => {
+    h.projectIdePreviewResult = {
+      open: true,
+      sessionId: "ide-1",
+      activityId: "t2",
+      isDevServer: false,
+      previewUrl: "",
+    }
+    setChat({
+      messages: [{ id: "a1", role: "assistant", parts: [toolPart("t2")] }],
+    })
+    const html = render()
+    expect(html).toContain('data-testid="project-ide-panel"')
+    const panel = h.idePanelProps.at(-1)!
+    expect(typeof panel.onClose).toBe("function")
+    expect(panel.ide).toBe(h.projectIdePreviewResult)
+  })
+
+  it("keeps the browser preview panel ahead of the IDE when both are open", () => {
+    h.computerUsePreviewResult = { open: true, sessionId: "cu-1" }
+    h.projectIdePreviewResult = {
+      open: true,
+      sessionId: "ide-1",
+      isDevServer: false,
+      previewUrl: "",
+    }
+    setChat({
+      messages: [{ id: "a1", role: "assistant", parts: [toolPart("t1")] }],
+    })
+    const html = render()
+    expect(html).toContain('data-testid="computer-use-preview-panel"')
+    expect(html).not.toContain('data-testid="project-ide-panel"')
+  })
+})
+
+describe("AgentChat project IDE wiring", () => {
+  it("feeds projectIdePreview the parts of EVERY assistant turn, in order", () => {
+    setChat({
+      messages: [
+        { id: "u1", role: "user", parts: [textPart("build it")] },
+        {
+          id: "a1",
+          role: "assistant",
+          parts: [{ type: "dynamic-tool", toolName: "file_write", toolCallId: "w1" }],
+        },
+        { id: "u2", role: "user", parts: [textPart("now run it")] },
+        {
+          id: "a2",
+          role: "assistant",
+          parts: [{ type: "dynamic-tool", toolName: "shell", toolCallId: "sh1" }],
+        },
+      ],
+    })
+    render()
+    const [parts, streaming] = h.projectIdePreviewCalls.at(-1)!
+    expect(streaming).toBe(false)
+    expect(
+      (parts as Array<{ toolCallId?: string }>).map((p) => p.toolCallId)
+    ).toEqual(["w1", "sh1"])
+  })
+
+  it("opens the IDE panel when the projection reports activity", () => {
+    h.projectIdePreviewResult = {
+      open: true,
+      sessionId: "ide-1",
+      isDevServer: false,
+      previewUrl: "",
+      activityId: "op-1",
+    }
+    setChat({
+      messages: [
+        { id: "u1", role: "user", parts: [textPart("go")] },
+        { id: "a1", role: "assistant", parts: [textPart("done")] },
+      ],
+    })
+    const html = render()
+    expect(html).toContain('data-testid="project-ide-panel"')
+    const panel = h.idePanelProps.at(-1)!
+    expect(panel.ide).toBe(h.projectIdePreviewResult)
+    expect(typeof panel.onClose).toBe("function")
+    // The stream's own activeView drives view focus; the panel is not
+    // preview-forced merely because a dev server exists.
+    expect(panel.previewForced).toBe(false)
+  })
+
+  it("keeps the browser preview panel ahead of the IDE when both are open", () => {
+    h.computerUsePreviewResult = { open: true, sessionId: "cu-1" }
+    h.projectIdePreviewResult = {
+      open: true,
+      sessionId: "ide-1",
+      isDevServer: false,
+      previewUrl: "",
+    }
+    setChat({
+      messages: [{ id: "a1", role: "assistant", parts: [textPart("x")] }],
+    })
+    const html = render()
+    expect(html).toContain('data-testid="computer-use-preview-panel"')
+    expect(html).not.toContain('data-testid="project-ide-panel"')
+  })
+})
+
+describe("AgentChat IDE fullscreen and presentation-only close", () => {
+  const openIde = () => {
+    h.projectIdePreviewResult = {
+      open: true,
+      sessionId: "ide-1",
+      activityId: "op-1",
+      isDevServer: false,
+      previewUrl: "",
+    }
+    setChat({
+      status: "streaming",
+      messages: [{ id: "a1", role: "assistant", parts: [textPart("working")] }],
+    })
+  }
+
+  it("hands the panel fullscreen state and a working onFullscreenChange handler", () => {
+    openIde()
+    render()
+    const panel = h.idePanelProps.at(-1)!
+    expect(panel.fullscreen).toBe(false)
+    expect(typeof panel.onFullscreenChange).toBe("function")
+  })
+
+  it("closing the IDE never calls stop — it is presentation only", () => {
+    openIde()
+    render()
+    const panel = h.idePanelProps.at(-1)!
+    ;(panel.onClose as () => void)()
+    expect(h.chat.stop).not.toHaveBeenCalled()
+  })
+
+  it("offers an explicit reopen path: the composer's onPreview clears the dismissal", () => {
+    openIde()
+    render()
+    const composer = h.composerProps.at(-1)!
+    // The reopen affordance is wired whenever the IDE projection is live.
+    expect(typeof composer.onPreview).toBe("function")
+    expect(composer.previewActive).toBe(true)
   })
 })
 

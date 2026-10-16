@@ -1,0 +1,60 @@
+- generic [ref=f9e1]:
+  - main [ref=f9e2]:
+    - generic [ref=f9e3]:
+      - generic [ref=f9e4]: v0 / studio
+      - navigation [ref=f9e9]:
+        - button "Community" [ref=f9e10]
+        - button "Pricing" [ref=f9e11]
+        - button "Enterprise" [ref=f9e12]
+        - button "Docs" [ref=f9e13]
+      - generic [ref=f9e14]:
+        - button "Compare models" [ref=f9e15] [cursor=pointer]
+        - button "Sign in" [ref=f9e16]
+        - button "Start building" [ref=f9e17]
+    - generic [ref=f9e19]:
+      - generic [ref=f9e20]: Now in beta
+      - heading "What should we ship today?" [level=1] [ref=f9e23]:
+        - generic [ref=f9e24]: What
+        - generic [ref=f9e26]: should
+        - generic [ref=f9e28]: we
+        - generic [ref=f9e30]: ship
+        - generic [ref=f9e32]: today?
+      - paragraph [ref=f9e35]: Describe an interface in plain language. v0 turns it into clean, production-ready React — components, styling, and all.
+      - generic [ref=f9e36]:
+        - group [ref=f9e38]:
+          - group [ref=f9e39]
+          - textbox "Describe what you want to ship…" [ref=f9e41]
+          - group [ref=f9e42]:
+            - generic [ref=f9e43]:
+              - button [ref=f9e44]
+              - button "High (preset)" [expanded] [ref=f9e81]
+              - dialog [ref=f9e85]:
+                - generic [ref=f9e86]:
+                  - group [ref=f9e89]:
+                    - combobox [expanded] [active] [ref=f9e90]
+                    - group [ref=f9e91]
+                  - listbox "Suggestions" [ref=f9e95]:
+                    - generic [ref=f9e96]:
+                      - generic [aria-hidden] [ref=f9e97]: Perplexity
+                      - group "Perplexity" [ref=f9e98]:
+                        - option "Fast (preset)" [ref=f9e99]
+                        - option "Low (preset)" [ref=f9e100]
+                        - option "Medium (preset)" [ref=f9e101]
+                        - option "High (preset)" [selected] [ref=f9e102]
+                        - option "XHigh (preset)" [ref=f9e103]
+                        - option "Wide Research (preset)" [ref=f9e104]
+                      - generic [aria-hidden] [ref=f9e105]: Google
+                      - group "Google" [ref=f9e106]:
+                        - option "gemini-3.8-flash" [ref=f9e107]
+                        - option "gemini-3.7-flash" [ref=f9e108]
+                        - option "gemini-flash-latest" [ref=f9e109]
+            - button "Submit" [disabled]
+        - generic [ref=f9e51]:
+          - button "A pricing page with a yearly toggle" [ref=f9e53] [cursor=pointer]
+          - button "An analytics dashboard with charts" [ref=f9e55] [cursor=pointer]
+          - button "A waitlist landing page" [ref=f9e57] [cursor=pointer]
+          - button "A Kanban board with drag and drop" [ref=f9e59] [cursor=pointer]
+          - button "A settings page with tabs" [ref=f9e61] [cursor=pointer]
+      - paragraph [ref=f9e65]: Trusted by design engineers shipping at the edge of the web.
+  - button "Open Next.js Dev Tools" [ref=f9e112] [cursor=pointer]
+  - alert [ref=f9e79]

@@ -26,17 +26,9 @@ const READINESS_IDS = [
   "gemini-flash-latest",
 ]
 
-const FALLBACK_IDS = [
-  "preset:fast",
-  "preset:low",
-  "preset:medium",
-  "preset:high",
-  "preset:xhigh",
-  "preset:wide-research",
-  "gemini-3.8-flash",
-  "gemini-3.7-flash",
-  "gemini-flash-latest",
-]
+const READINESS_MODELS = READINESS_IDS.map(id => ({
+  id, provider: id.includes("/") || id.startsWith("preset:") ? "perplexity-agent-api" : "google-ai-studio", label: id,
+}))
 
 function healthResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -58,12 +50,24 @@ afterEach(() => {
 })
 
 describe("listModels", () => {
-  it("returns the readiness catalog in worker order with derived owned_by", async () => {
+  it("preserves every worker-declared model object and provider without inference", async () => {
+    const catalog = READINESS_IDS.map((id) => ({
+      id, provider: id.includes("/") || id.startsWith("preset:") ? "perplexity-agent-api" : "google-ai-studio",
+      label: id,
+    }))
+    fetchMock.mockResolvedValue(healthResponse({ models: catalog, providers: {
+      "perplexity-agent-api": "Perplexity Agent API", "google-ai-studio": "Google AI Studio",
+    } }))
+    const result = await listModels()
+    expect(result.map(model => model.id)).toEqual(READINESS_IDS)
+    expect(result.find(model => model.id === "openai/gpt-5.6-sol")?.owned_by).toBe("perplexity-agent-api")
+    expect(result.find(model => model.id === "gemini-3.8-flash")?.owned_by).toBe("google-ai-studio")
+  })
+  it("returns the readiness catalog in worker order with declared owned_by", async () => {
     fetchMock.mockResolvedValue(
       healthResponse({
         status: "ok",
-        models: READINESS_IDS.length,
-        model_ids: READINESS_IDS,
+        models: READINESS_MODELS,
         default_model: "preset:high",
       })
     )
@@ -72,14 +76,7 @@ describe("listModels", () => {
 
     expect(models.map((m) => m.id)).toEqual(READINESS_IDS)
     const owners = Object.fromEntries(models.map((m) => [m.id, m.owned_by]))
-    expect(owners["preset:high"]).toBe("perplexity")
-    expect(owners["anthropic/claude-fable-5"]).toBe("anthropic")
-    expect(owners["openai/gpt-5.6-sol"]).toBe("openai")
-    expect(owners["google/gemini-3.6-flash"]).toBe("google")
-    expect(owners["perplexity/kimi-k3"]).toBe("perplexity")
-    expect(owners["xai/grok-fresh"]).toBe("xai")
-    expect(owners["gemini-3.8-flash"]).toBe("google")
-    expect(owners["gemini-flash-latest"]).toBe("google")
+    for (const entry of READINESS_MODELS) expect(owners[entry.id]).toBe(entry.provider)
     for (const model of models) {
       expect(model.object).toBe("model")
       expect(model.created).toBe(0)
@@ -88,7 +85,7 @@ describe("listModels", () => {
 
   it("hits ${ORCHESTRATOR_URL}/health with cache: no-store", async () => {
     vi.stubEnv("ORCHESTRATOR_URL", "http://example.test:9999")
-    fetchMock.mockResolvedValue(healthResponse({ model_ids: READINESS_IDS }))
+    fetchMock.mockResolvedValue(healthResponse({ models: READINESS_MODELS }))
 
     await listModels()
 
@@ -98,30 +95,35 @@ describe("listModels", () => {
     )
   })
 
-  it("falls back to the static catalog when /health is unreachable", async () => {
+  it("reports unavailable catalog instead of inventing models when health is unreachable", async () => {
     fetchMock.mockRejectedValue(new TypeError("fetch failed"))
 
-    const models = await listModels()
-
-    expect(models.map((m) => m.id)).toEqual(FALLBACK_IDS)
+    await expect(listModels()).rejects.toThrow("Live model catalog unavailable")
   })
 
-  it("falls back to the static catalog when /health returns no models", async () => {
+  it("reports an empty worker catalog", async () => {
     fetchMock.mockResolvedValue(
-      healthResponse({ status: "degraded", models: 0, model_ids: [] })
+      healthResponse({ status: "degraded", models: [] })
     )
 
-    const models = await listModels()
-
-    expect(models.map((m) => m.id)).toEqual(FALLBACK_IDS)
+    await expect(listModels()).rejects.toThrow("Live model catalog unavailable")
   })
 
-  it("falls back on a non-OK /health response", async () => {
+  it("reports a non-OK health response", async () => {
     fetchMock.mockResolvedValue(new Response("boom", { status: 502 }))
 
-    const models = await listModels()
+    await expect(listModels()).rejects.toThrow("Live model catalog unavailable")
+  })
 
-    expect(models.map((m) => m.id)).toEqual(FALLBACK_IDS)
+  it("does not infer missing provider declarations from an ID prefix", async () => {
+    fetchMock.mockResolvedValue(healthResponse({ models: [{ id: "openai/new-model" }] }))
+    await expect(listModels()).rejects.toThrow("Invalid worker model catalog")
+  })
+
+  it("does not filter models to the agent-delegation policy or known vendors", async () => {
+    const entries = Array.from({ length: 120 }, (_, index) => ({ id: `new-provider/model-${index}`, provider: "perplexity-agent-api" }))
+    fetchMock.mockResolvedValue(healthResponse({ models: entries }))
+    expect((await listModels()).map(model => model.id)).toEqual(entries.map(model => model.id))
   })
 
   it("keeps the listPerplexityModels alias", () => {

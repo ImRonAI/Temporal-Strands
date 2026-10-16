@@ -1,0 +1,425 @@
+"""Desktop startup contracts; these tests never launch a host browser."""
+
+import asyncio
+import fcntl
+import os
+import sys
+import time
+from datetime import timedelta
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, call
+
+import pytest
+from temporalio import activity, workflow
+from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.contrib.strands.workflow import activity_as_tool
+from temporalio.exceptions import ApplicationError
+from temporalio.testing import ActivityEnvironment
+
+import browser_activity as browser
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def forbid_host_desktop(monkeypatch):
+    gui = MagicMock(spec=["size", "click", "moveTo", "mouseDown", "mouseUp", "write",
+                          "dragTo", "press", "keyDown", "keyUp", "hotkey", "scroll", "hscroll"])
+    gui.size.side_effect = AssertionError("Tests must not access the host display")
+    monkeypatch.setitem(sys.modules, "pyautogui", gui)
+    monkeypatch.setattr(browser.LocalChromiumBrowser, "browser", MagicMock(
+        side_effect=AssertionError("Tests must not execute a browser on the host"),
+    ))
+    monkeypatch.setattr(browser.ImageGrab, "grab", MagicMock(
+        side_effect=AssertionError("Tests must not capture the host display"),
+    ))
+    return gui
+
+
+@pytest.fixture
+def runtime(monkeypatch, tmp_path):
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(tmp_path))
+    monkeypatch.setenv("DISPLAY", ":99")
+    monkeypatch.setattr(browser.platform, "system", lambda: "Linux")
+    info = SimpleNamespace(namespace="test", workflow_id="owner", workflow_run_id="run-1", activity_id="action-1")
+    monkeypatch.setattr(browser.activity, "info", lambda: info)
+    browser.initialize_desktop()
+    return info
+
+
+def test_image_has_an_allowlisted_source_context_and_desktop_dependencies():
+    dockerfile = (ROOT / "desktop/Dockerfile").read_text()
+    ignore = (ROOT / ".dockerignore").read_text()
+    assert ignore.splitlines()[0] == "**"
+    assert "COPY . ." not in dockerfile
+    assert "COPY desktop/requirements.txt" in dockerfile
+    requirements = (ROOT / "desktop/requirements.txt").read_text()
+    assert "strands-agents-tools[local-chromium-browser]==0.8.5" in requirements
+    assert "PyAutoGUI==0.9.54" in requirements
+    assert "../" not in requirements
+    for source in ("computer_use_activity.py", "desktop_observation.py", "workspace_state.py"):
+        assert source in dockerfile
+        assert f"!{source}" in ignore.splitlines()
+    assert "PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright" in dockerfile
+    assert "USER desktop" in dockerfile
+    assert "HEALTHCHECK" in dockerfile
+    assert "xauth" in dockerfile
+    for package in ("xfce4-session", "xfwm4", "xfce4-panel", "xfdesktop4", "dbus-x11"):
+        assert package in dockerfile
+    assert "openbox" not in dockerfile
+    assert "XAUTHORITY=/home/desktop/.Xauthority" in dockerfile
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("readiness_failure", [False, True])
+async def test_worker_uses_native_pydantic_converter_and_single_activity_slot(monkeypatch, tmp_path, readiness_failure):
+    import desktop_worker
+    from computer_use_activity import COMPUTER_USE_TOOL_NAMES
+    from desktop_provision_activity import QUEUE_FILE
+
+    monkeypatch.setenv("TEMPORAL_ADDRESS", "test-temporal:7233")
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(tmp_path))
+    # The host's provision activity has already claimed this container.
+    (tmp_path / QUEUE_FILE).write_text("desktop-browser-chat-42")
+    client = object()
+    connect = AsyncMock(return_value=client)
+    monkeypatch.setattr(desktop_worker.Client, "connect", connect)
+    monkeypatch.setattr(desktop_worker, "telemetry_plugins", lambda: [])
+    verify = MagicMock(side_effect=RuntimeError("Display unavailable") if readiness_failure else None)
+    initialize = MagicMock()
+    monkeypatch.setattr(desktop_worker, "verify_browser_runtime", verify)
+    monkeypatch.setattr(desktop_worker, "initialize_desktop", initialize)
+    stopped = SimpleNamespace(set=MagicMock(), wait=AsyncMock(), is_set=MagicMock(return_value=False))
+    monkeypatch.setattr(desktop_worker.asyncio, "Event", lambda: stopped)
+    monkeypatch.setattr(asyncio.get_running_loop(), "add_signal_handler", MagicMock())
+    worker = MagicMock(return_value=AsyncMock())
+    monkeypatch.setattr(desktop_worker, "Worker", worker)
+
+    if readiness_failure:
+        with pytest.raises(RuntimeError, match="Display unavailable"):
+            await desktop_worker.main()
+        initialize.assert_not_called()
+        worker.assert_not_called()
+        return
+
+    await desktop_worker.main()
+
+    connect.assert_awaited_once_with("test-temporal:7233", data_converter=pydantic_data_converter, plugins=[])
+    verify.assert_called_once_with()
+    initialize.assert_called_once_with()
+    worker.assert_called_once()
+    assert worker.call_args.args == (client,)
+    options = worker.call_args.kwargs
+    # Polls only the queue the host assigned to this session's container.
+    assert options["task_queue"] == "desktop-browser-chat-42"
+    assert options["max_concurrent_activities"] == 1
+    assert options["activity_executor"]._max_workers == 1
+    assert {activity._Definition.must_from_callable(fn).name for fn in options["activities"]} == {
+        "browser", "desktop_control", "release_desktop", *COMPUTER_USE_TOOL_NAMES,
+    }
+    stopped.wait.assert_awaited_once_with()
+
+
+def test_both_tool_paths_route_natively_with_heartbeat_and_no_retry():
+    from computer_use_activity import COMPUTER_USE_TOOL_NAMES
+    from config import DESKTOP_JOB_HEARTBEAT_TIMEOUT, DESKTOP_TASK_TIMEOUT, desktop_task_queue
+    from agent_tools import desktop_tools
+    import run_worker
+
+    tools = desktop_tools("chat-42")
+    assert {tool.tool_name for tool in tools} == {"browser", *COMPUTER_USE_TOOL_NAMES}
+    for tool in tools:
+        assert tool.tool_type == "temporal_activity"
+        # Every desktop tool executes on this session's own container.
+        assert tool._options["task_queue"] == desktop_task_queue("chat-42") == "desktop-browser-chat-42"
+        assert tool._options["retry_policy"].maximum_attempts == 1
+        assert tool._options.get("start_to_close_timeout") == DESKTOP_TASK_TIMEOUT
+        assert tool._options.get("schedule_to_start_timeout") is None
+        assert tool._options.get("schedule_to_close_timeout") is None
+        # Both paths run inside desktop_action(), which heartbeats during GUI work.
+        assert tool._options["heartbeat_timeout"] == DESKTOP_JOB_HEARTBEAT_TIMEOUT
+        assert tool._options["cancellation_type"] == workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED
+    host_names = {activity._Definition.must_from_callable(fn).name for fn in run_worker.WORKER_ACTIVITIES}
+    assert not host_names & {"browser", *COMPUTER_USE_TOOL_NAMES}
+    # The host claims and releases containers; it never runs GUI input.
+    assert {"provision_desktop", "teardown_desktop"} <= host_names
+
+
+def test_stock_browser_explicitly_preserves_chromium_sandbox():
+    from browser_activity import _browser
+
+    assert _browser._launch_options["chromium_sandbox"] is True
+    assert _browser._launch_options["headless"] is False
+
+
+@pytest.mark.parametrize("failure", [None, "returned_error", "raised_exception"])
+def test_readiness_always_closes_its_disposable_stock_session(monkeypatch, forbid_host_desktop, failure):
+    import desktop_worker
+
+    monkeypatch.setenv("DISPLAY", ":99")
+    gui = forbid_host_desktop
+    gui.size.side_effect = None
+    gui.size.return_value = (1440, 900)
+    image = MagicMock(size=(1440, 900))
+    image.__enter__.return_value = image
+    grab = MagicMock(return_value=image)
+    monkeypatch.setattr(browser.ImageGrab, "grab", grab)
+    stock = MagicMock()
+
+    def dispatch(*, browser_input):
+        if browser_input.action.type == "init_session":
+            if failure == "returned_error":
+                return {"status": "error", "content": [{"text": "unavailable"}]}
+            if failure == "raised_exception":
+                raise RuntimeError("unavailable")
+        return {"status": "success", "content": []}
+
+    stock.browser.side_effect = dispatch
+    constructor = MagicMock(return_value=stock)
+    monkeypatch.setattr(desktop_worker, "LocalChromiumBrowser", constructor)
+    if failure:
+        with pytest.raises(RuntimeError, match="unavailable"):
+            desktop_worker.verify_browser_runtime()
+    else:
+        desktop_worker.verify_browser_runtime()
+    constructor.assert_called_once_with(launch_options={"headless": False, "chromium_sandbox": True})
+    actions = [item.kwargs["browser_input"].action for item in stock.browser.call_args_list]
+    assert [item.type for item in actions] == ["init_session", "close"]
+    assert all(item.session_name == "desktop-readiness" for item in actions)
+    gui.size.assert_called_once_with()
+    assert gui.method_calls == [call.size()]
+    grab.assert_called_once_with(xdisplay=":99")
+    image.load.assert_called_once_with()
+    image.__exit__.assert_called_once()
+
+
+@pytest.mark.parametrize("failure", ["import", "xlib", "capture", "dimensions"])
+def test_readiness_rejects_unusable_python_display_before_browser_start(monkeypatch, forbid_host_desktop, failure):
+    import desktop_worker
+
+    monkeypatch.setenv("DISPLAY", ":99")
+    gui = forbid_host_desktop
+    gui.size.side_effect = None
+    gui.size.return_value = (1440, 900)
+    monkeypatch.setitem(sys.modules, "pyautogui", None if failure == "import" else gui)
+    image = MagicMock(size=(0, 0) if failure == "dimensions" else (1440, 900))
+    image.__enter__.return_value = image
+    grab = MagicMock(return_value=image)
+    monkeypatch.setattr(browser.ImageGrab, "grab", grab)
+    if failure == "xlib":
+        gui.size.side_effect = RuntimeError("Xlib unavailable")
+    if failure == "capture":
+        grab.side_effect = OSError("X capture unavailable")
+    constructor = MagicMock()
+    monkeypatch.setattr(desktop_worker, "LocalChromiumBrowser", constructor)
+
+    with pytest.raises((ImportError, RuntimeError, OSError)):
+        desktop_worker.verify_browser_runtime()
+
+    constructor.assert_not_called()
+
+
+@pytest.mark.parametrize("name", ["click", "moveTo", "mouseDown", "mouseUp", "write", "dragTo",
+                                 "press", "keyDown", "keyUp", "hotkey", "scroll", "hscroll"])
+@pytest.mark.parametrize("missing", [True, False])
+def test_readiness_rejects_unusable_input_api_without_gui_side_effects(monkeypatch, forbid_host_desktop, name, missing):
+    import desktop_worker
+
+    gui = forbid_host_desktop
+    if missing:
+        delattr(gui, name)
+    else:
+        setattr(gui, name, None)
+    constructor = MagicMock()
+    monkeypatch.setattr(desktop_worker, "LocalChromiumBrowser", constructor)
+
+    with pytest.raises(RuntimeError, match=f"PyAutoGUI input API unavailable: {name}"):
+        desktop_worker.verify_browser_runtime()
+
+    assert gui.method_calls == []
+    browser.ImageGrab.grab.assert_not_called()
+    constructor.assert_not_called()
+
+
+@pytest.mark.parametrize("system,display", [("Darwin", ":99"), ("Windows", ":99"), ("Linux", None)])
+def test_platform_fence_rejects_startup_and_both_tools_before_gui_access(monkeypatch, tmp_path, system, display):
+    import computer_use_activity as cua
+    from strands_tools.browser.models import BrowserInput
+
+    monkeypatch.setenv("DESKTOP_ARTIFACT_ROOT", str(tmp_path / "must-not-be-created"))
+    monkeypatch.setattr(browser.platform, "system", lambda: system)
+    if display:
+        monkeypatch.setenv("DISPLAY", display)
+    else:
+        monkeypatch.delenv("DISPLAY", raising=False)
+    info = MagicMock(side_effect=AssertionError("Platform fence must precede activity context"))
+    monkeypatch.setattr(browser.activity, "info", info)
+    with pytest.raises(RuntimeError, match="isolated Linux X display"):
+        browser.initialize_desktop()
+    for invoke in (
+        lambda: cua.execute_computer_use("click", {"x": 500, "y": 500}),
+    ):
+        with pytest.raises(ApplicationError, match="cannot execute on the host") as error:
+            invoke()
+        assert error.value.non_retryable
+    info.assert_not_called()
+    assert not browser.artifact_root().exists()
+
+
+def test_action_binds_owner_and_preserves_session_across_run_ids(runtime):
+    with browser.desktop_action() as first_epoch:
+        with browser.desktop_state() as state:
+            state["session_name"] = "shared-browser-session"
+    runtime.workflow_run_id = "run-2"
+    runtime.activity_id = "action-2"
+    with browser.desktop_action() as second_epoch:
+        assert second_epoch == first_epoch
+    with browser.desktop_state() as state:
+        assert state["owner"] == {"namespace": "test", "workflow_id": "owner"}
+        assert state["session_name"] == "shared-browser-session"
+        assert state["mode"] == "agent"
+
+
+def test_desktop_action_heartbeats_while_gui_work_blocks(runtime, monkeypatch):
+    monkeypatch.setattr(browser, "DESKTOP_JOB_HEARTBEAT_INTERVAL", timedelta(milliseconds=40))
+    env = ActivityEnvironment()
+    beats: list[tuple] = []
+    env.on_heartbeat = lambda *details: beats.append(details)
+
+    def run():
+        with browser.desktop_action():
+            time.sleep(0.15)
+        return True
+
+    assert env.run(run) is True
+    assert len(beats) >= 2
+
+
+def test_action_records_the_session_as_owner_without_a_cross_session_lock(runtime):
+    """One container per session: the owner field is a record, not a gate."""
+    with browser.desktop_state() as state:
+        assert state["owner"] is None
+    with browser.desktop_action():
+        pass
+    with browser.desktop_state() as state:
+        assert state["owner"] == {"namespace": "test", "workflow_id": "owner"}
+        assert state["mode"] == "agent"
+    # A later action from the same session proceeds; there is no one to reject.
+    with browser.desktop_action():
+        pass
+
+
+@pytest.mark.parametrize("mode", ["stopping", "human", "relinquishing", "steering", "resuming", "recovery"])
+def test_non_agent_modes_fence_input_without_changing_ownership(runtime, mode):
+    with browser.desktop_state() as state:
+        state["mode"] = mode
+    with pytest.raises(ApplicationError, match="paused for human control or requires recovery") as error:
+        with browser.desktop_action():
+            pytest.fail("Paused desktop admitted input")
+    assert error.value.non_retryable
+    with browser.desktop_state() as state:
+        assert state["mode"] == mode
+        assert state["owner"] is None
+
+
+def test_inflight_action_keeps_lock_during_stopping_until_cleanup(runtime):
+    with browser.desktop_action():
+        # Ownership can be fenced without waiting on the GUI lock, but another
+        # action cannot enter until the original context actually finishes.
+        with browser.desktop_state() as state:
+            state["mode"] = "stopping"
+        with pytest.raises(ApplicationError, match="already in flight") as error:
+            with browser.desktop_action():
+                pytest.fail("Overlapping action entered")
+        assert error.value.non_retryable
+    descriptor = os.open(browser.artifact_root() / "action.lock", os.O_RDWR)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        os.close(descriptor)
+    with pytest.raises(ApplicationError, match="paused for human control or requires recovery"):
+        with browser.desktop_action():
+            pytest.fail("Stopping desktop admitted new input")
+
+
+@pytest.mark.parametrize("exception", [RuntimeError("native failure"), asyncio.CancelledError()])
+def test_action_exception_releases_lock_but_requires_recovery(runtime, exception):
+    with pytest.raises(type(exception)):
+        with browser.desktop_action():
+            raise exception
+    with browser.desktop_state() as state:
+        assert state["mode"] == "recovery"
+        assert state["owner"] == {"namespace": "test", "workflow_id": "owner"}
+    descriptor = os.open(browser.artifact_root() / "action.lock", os.O_RDWR)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        os.close(descriptor)
+    with pytest.raises(ApplicationError, match="paused for human control or requires recovery"):
+        with browser.desktop_action():
+            pytest.fail("Failed action was blindly retried")
+
+
+def test_worker_start_resets_to_a_fresh_unowned_agent_desktop(runtime, monkeypatch):
+    """A container serves exactly one session and is discarded on stop, so
+    start-up never inherits ownership or recovery from a previous life."""
+    with browser.desktop_action() as epoch:
+        with browser.desktop_state() as state:
+            state["session_name"] = "shared-browser-session"
+            state["mode"] = "recovery"
+    monkeypatch.setattr(browser.time, "time_ns", lambda: epoch + 1)
+    browser.initialize_desktop()
+    with browser.desktop_state() as state:
+        assert state == {"epoch": epoch + 1, "owner": None, "mode": "agent"}
+
+def test_state_exception_does_not_commit_partial_changes_and_releases_lock(runtime):
+    with pytest.raises(RuntimeError, match="abort state update"):
+        with browser.desktop_state() as state:
+            state["mode"] = "human"
+            raise RuntimeError("abort state update")
+    with browser.desktop_state() as state:
+        assert state["mode"] == "agent"
+    assert (browser.artifact_root() / "runtime.json").stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("name", ["state.lock", "action.lock"])
+def test_native_lock_files_cannot_follow_symlinks(runtime, tmp_path, name):
+    lock = browser.artifact_root() / name
+    lock.unlink(missing_ok=True)
+    target = tmp_path / "outside-lock"
+    target.write_text("untouched")
+    lock.symlink_to(target)
+    context = browser.desktop_state if name == "state.lock" else browser.desktop_action
+    with pytest.raises(OSError):
+        with context():
+            pytest.fail("Followed symlink lock")
+    assert target.read_text() == "untouched"
+
+
+def test_startup_waits_for_display_and_supervises_all_children():
+    source = (ROOT / "desktop/start-desktop.sh").read_text()
+    assert source.index("xdpyinfo") < source.index("startxfce4 &")
+    assert "openbox" not in source
+    assert source.index("startxfce4 &") < source.index("x11vnc -display")
+    assert "wait -n" in source
+    assert "trap" in source
+    assert "kill" in source
+    assert "-nolisten tcp" in source
+    assert "-localhost" in source
+    assert "-viewonly" in source
+
+
+def test_startup_authenticates_display_before_launching_any_client():
+    source = (ROOT / "desktop/start-desktop.sh").read_text()
+    assert 'export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"' in source
+    assert source.index("umask 077") < source.index('> "$XAUTHORITY"')
+    assert source.index('chmod 600 "$XAUTHORITY"') < source.index("secrets.token_hex(16)")
+    assert source.index("secrets.token_hex(16)") < source.index('Xvfb "$DISPLAY"')
+    assert "MIT-MAGIC-COOKIE-1" in source
+    assert 'xauth -q -f "$XAUTHORITY" source -' in source
+    assert 'Xvfb "$DISPLAY" -auth "$XAUTHORITY"' in source
+    assert 'x11vnc -display "$DISPLAY" -auth "$XAUTHORITY"' in source
+    assert " -ac" not in source
+    assert "xhost +" not in source

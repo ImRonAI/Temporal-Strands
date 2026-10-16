@@ -1,0 +1,31 @@
+### Result
+[{"text":"A queue","expanded":"true","disabled":false,"hasJson":false,"time":1789546822434},{"text":"A queue follows FIFO (first in,","expanded":"true","disabled":false,"hasJson":false,"time":1789546822486}]
+### Ran Playwright code
+```js
+await (async (page) => {
+  await page.evaluate(() => {
+    window.__thinkEvidence = [];
+    const observer = new MutationObserver(() => {
+      const header = [...document.querySelectorAll("button")].find(b => b.textContent === "Thinking…");
+      if (!header) return;
+      const chain = header.parentElement.parentElement;
+      const text = [...chain.querySelectorAll("p")].map(p => p.textContent).join("\n");
+      const records = window.__thinkEvidence;
+      if (text && records.at(-1)?.text !== text) records.push({
+        text, expanded: header.getAttribute("aria-expanded"), disabled: header.disabled,
+        hasJson: !!chain.querySelector("pre"), time: Date.now()
+      });
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
+  await page.getByRole("button", {name: "Submit", exact: true}).click();
+  await page.waitForFunction(() => window.__thinkEvidence.length >= 2, {timeout: 120000});
+  await page.screenshot({path: "output/playwright/agent-response/think-streaming.png", fullPage: true});
+  return await page.evaluate(() => window.__thinkEvidence);
+})(page);
+```
+### Page
+- Page URL: http://localhost:3000/
+- Page Title: v0 — Ship something interesting
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T08-17-43-745Z.log#L12-L19

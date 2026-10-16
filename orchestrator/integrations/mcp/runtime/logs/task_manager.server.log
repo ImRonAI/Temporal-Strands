@@ -1,0 +1,38 @@
+INFO:     Started server process [69747]
+INFO:     Waiting for application startup.
+[09/06/26 23:57:15] INFO     StreamableHTTP       streamable_http_manager.py:144
+                             session manager                                    
+                             started                                            
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:52076 - "POST /mcp/ HTTP/1.1" 307 Temporary Redirect
+[09/06/26 23:57:20] INFO     Created new          streamable_http_manager.py:302
+                             transport with                                     
+                             session ID:                                        
+                             c6639370ff7d46ebaacc                               
+                             58f839dbe66c                                       
+INFO:     127.0.0.1:52076 - "POST /mcp HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52079 - "POST /mcp/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:52080 - "GET /mcp/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:52079 - "POST /mcp HTTP/1.1" 202 Accepted
+INFO:     127.0.0.1:52080 - "GET /mcp HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52082 - "POST /mcp/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:52082 - "POST /mcp HTTP/1.1" 200 OK
+                    INFO     Processing request of type            server.py:733
+                             ListToolsRequest                                   
+INFO:     127.0.0.1:52084 - "POST /mcp/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:52084 - "POST /mcp HTTP/1.1" 200 OK
+                    INFO     Processing request of type            server.py:733
+                             CallToolRequest                                    
+INFO:     127.0.0.1:52086 - "DELETE /mcp/ HTTP/1.1" 307 Temporary Redirect
+                    INFO     Terminating session:         streamable_http.py:788
+                             c6639370ff7d46ebaacc58f839db                       
+                             e66c                                               
+INFO:     127.0.0.1:52086 - "DELETE /mcp HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+                    INFO     StreamableHTTP       streamable_http_manager.py:148
+                             session manager                                    
+                             shutting down                                      
+INFO:     Application shutdown complete.
+INFO:     Finished server process [69747]

@@ -1,0 +1,48 @@
+# Task 13+14 — framework-adherence-reset
+
+Date: 2026-09-09
+Gate: `cd orchestrator && .venv/bin/python -m pytest tests/test_config.py tests/test_workflow.py -q`
+
+## Result: 21 passed
+
+## Goal A — .gitignore GCP/GCE artifact guard
+Append-only edit at the end of `.gitignore` (never touched other lines; the
+`orchestrator/tools/*.py` line from a concurrent lane is still present).
+Added comment `# GCP service-account keys / GCE metadata — never commit` plus
+patterns:
+- `fair-expanse-*.json`
+- `*-[0-9a-f]…[0-9a-f].json` (hex-suffix service-account key)
+- `compute.json`
+- `orchestrator/.runtime/`
+
+The pre-existing `fair-expanse-493212-h8-138622c839d2.json` line is preserved.
+No credential file was opened/moved/deleted.
+
+## Goal B — move outer model batch interval into config
+- `orchestrator/config.py`: added
+  `MODEL_STREAM_BATCH_INTERVAL = timedelta(milliseconds=200)` carrying the
+  history-pressure rationale ported from `workflow.py` (~:981-986).
+- `orchestrator/workflow.py`: replaced the literal
+  `streaming_batch_interval=timedelta(milliseconds=200)` at the TemporalAgent
+  construction site with `streaming_batch_interval=MODEL_STREAM_BATCH_INTERVAL`
+  (imported from config). No other edit to workflow.py.
+
+## Tests (TDD — written first, observed failing on undefined constant)
+- `tests/test_config.py::test_model_stream_batch_interval` — asserts the value
+  equals `timedelta(milliseconds=200)`.
+- `tests/test_workflow.py::test_workflow_builds_agent_with_config_model_stream_batch_interval`
+  — patches `workflow.TemporalAgent` and `temporal_mcp_clients`, drives
+  `ChatWorkflow._build_agent`, asserts the mock was constructed with
+  `streaming_batch_interval == config.MODEL_STREAM_BATCH_INTERVAL`.
+
+## Gate
+`21 passed in 12.36s`
+
+## Acceptance
+- `grep -rn "timedelta(" orchestrator/*.py | grep -v config.py` → remaining hits
+  are `compare_workflow.py:81` (pre-existing site, out of scope) and the THINK
+  hook region `workflow.py:173-174` (owned by a concurrent lane); the :987
+  literal is gone.
+- `git check-ignore fair-expanse-493212-h8-138622c839d2.json compute.json`
+  → prints both.
+- `git check-ignore .env.local` → prints `.env.local` (still ignored).

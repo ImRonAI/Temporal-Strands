@@ -1,247 +1,255 @@
-"""Tests for the think activity: strands_tools' think as a streaming activity.
+"""Tests for the thin think activity wrapper (Pattern 2, surface 3).
 
-Runs the activity body under ``temporalio.testing.ActivityEnvironment`` with
-the workflow-stream client and workflow query patched out, so the cycle loop,
-streaming publishes, and return shape are exercised without a Temporal server.
+``think_activity.think`` owns no cycle logic: it builds a ToolUse from the
+model's input and delegates to the installed ``strands_tools.think`` callable
+on the activity executor (workflows block ``run_in_executor``; activities do
+not). The cycle loop itself is upstream in strands-tools — these tests pin
+only the wrapper contract: delegation, provider defaults, replay-compatible
+input forms, the activity registration, and the custom model-provider module
+the nested cycles resolve through.
 """
 
 from __future__ import annotations
 
-from typing import Any, AsyncGenerator
-from unittest.mock import AsyncMock, MagicMock, patch
+import asyncio
+import importlib.util
+import inspect
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import patch
 
 import pytest
-from strands.models.model import Model
-from temporalio.exceptions import ApplicationError
+from temporalio import activity
 from temporalio.testing import ActivityEnvironment
+from temporalio.contrib.workflow_streams import WorkflowStreamClient
 
 import think_activity
 from think_activity import think
 
 
-def text_events(reply: str) -> list[dict[str, Any]]:
-    """The frame sequence PerplexityModel.stream yields for a text-only turn."""
-    return [
-        {"messageStart": {"role": "assistant"}},
-        {"contentBlockStart": {"contentBlockIndex": 0, "start": {}}},
-        {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": reply}}},
-        {"contentBlockStop": {"contentBlockIndex": 0}},
-        {"messageStop": {"stopReason": "end_turn"}},
-        {
-            "metadata": {
-                "usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2},
-                "metrics": {"latencyMs": 1},
-            }
-        },
-    ]
-
-
-class ScriptedModel(Model):
-    """Yields one scripted event list per stream() call."""
-
-    def __init__(self, scripts: list[list[dict[str, Any]]]) -> None:
-        self.scripts = list(scripts)
-        self.calls: list[dict[str, Any]] = []
-
-    def update_config(self, **model_config: Any) -> None:  # pragma: no cover
-        pass
-
-    def get_config(self) -> Any:  # pragma: no cover
-        return {}
-
-    async def structured_output(
-        self, output_model: Any, prompt: Any, system_prompt: Any = None, **kwargs: Any
-    ) -> AsyncGenerator[dict[str, Any], None]:  # pragma: no cover
-        raise NotImplementedError
-        yield
-
-    async def stream(
-        self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
-    ) -> AsyncGenerator[dict[str, Any], None]:
-        self.calls.append({"messages": messages, "system_prompt": system_prompt})
-        for event in self.scripts.pop(0):
-            yield event
-
-
-class FakeTopic:
-    def __init__(self) -> None:
-        self.published: list[Any] = []
-
-    def publish(self, value: Any, *, force_flush: bool = False) -> None:
-        self.published.append(value)
-
-
-class FakeStreamClient:
-    """Stands in for WorkflowStreamClient.from_within_activity()."""
-
-    def __init__(self) -> None:
-        self.topics: dict[str, FakeTopic] = {}
-        self.entered = False
-        self.exited = False
-
-    def topic(self, name: str, **_: Any) -> FakeTopic:
-        return self.topics.setdefault(name, FakeTopic())
-
-    async def __aenter__(self) -> "FakeStreamClient":
-        self.entered = True
-        return self
-
-    async def __aexit__(self, *exc: object) -> None:
-        self.exited = True
-
-
 @pytest.fixture(autouse=True)
-def reset_factories() -> None:
-    think_activity._MODEL_FACTORIES.clear()
-    yield
-    think_activity._MODEL_FACTORIES.clear()
+def thinking_stream(monkeypatch):
+    class Stream:
+        def __init__(self):
+            self.frames = []
+            self.closed = False
+
+        def topic(self, name):
+            assert name == "thinking"
+            return self
+
+        def publish(self, frame):
+            assert not self.closed
+            self.frames.append(frame)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            self.closed = True
+
+    stream = Stream()
+    monkeypatch.setattr(WorkflowStreamClient, "from_within_activity", lambda **kwargs: stream)
+    return stream
 
 
-async def run_think(
-    model: ScriptedModel,
-    stream: FakeStreamClient,
-    **kwargs: Any,
-) -> Any:
-    """Run the activity under ActivityEnvironment with infra patched out.
+@pytest.mark.asyncio
+async def test_stock_think_streams_cycles_before_returning(monkeypatch, thinking_stream):
+    """Exercise the installed cycle loop and real provider parser, not a fake Think."""
+    import httpx
+    from perplexity_model import PerplexityModel
+    from test_perplexity_model import COMPLETED, CREATED, sse, text_delta
 
-    Awaited INSIDE the patch context: env.run returns a coroutine, and the
-    activity body only touches activity.client() / from_within_activity when
-    it actually executes.
-    """
-    think_activity.configure({"fake/text": lambda: model})
+    module = load_provider_module(monkeypatch)
+    requests = []
+    release = asyncio.Event()
+
+    async def handler(request):
+        requests.append(request)
+        if len(requests) == 2:
+            await asyncio.wait_for(release.wait(), 5)
+        return httpx.Response(200, content=sse(CREATED, text_delta(f"Analysis {len(requests)}."), COMPLETED),
+                             headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "test-key")
+    monkeypatch.setattr(module, "native_tools", lambda: [])
+    monkeypatch.setattr(module, "model_params", lambda *args: {})
+    monkeypatch.setattr(module, "PerplexityModel", lambda **kwargs: PerplexityModel(
+        **kwargs, transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr("strands_tools.think.create_model", lambda provider, config: module.instance(**config))
+    pending = asyncio.create_task(ActivityEnvironment().run(
+        think, thought="Compare queues and stacks", cycle_count=2, model_settings={"model_id": "test/model"}))
+    try:
+        async with asyncio.timeout(4):
+            while not thinking_stream.frames:
+                await asyncio.sleep(0.01)
+        assert not pending.done()
+    finally:
+        release.set()
+        result = await pending
+
+    text = "".join(frame.get("contentBlockDelta", {}).get("delta", {}).get("text", "")
+                   for frame in thinking_stream.frames)
+    assert text == "Analysis 1.Analysis 2."
+    assert "Cycle 1/2:" in result["content"][0]["text"]
+    assert "Cycle 2/2:" in result["content"][0]["text"]
+    assert thinking_stream.closed
+
+
+def recorded_native(calls: list[dict[str, Any]], result: dict[str, Any] | None = None):
+    """A stand-in for the installed strands_tools.think callable."""
+
+    async def stub(**kwargs: Any) -> dict[str, Any]:
+        kwargs["model_settings"] = {key: value for key, value in kwargs["model_settings"].items()
+                                   if key != "stream_callback"}
+        calls.append(kwargs)
+        return result or {"status": "success", "content": [{"text": "think notes"}]}
+
+    return stub
+
+
+async def run_think(calls: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
     env = ActivityEnvironment()
-
-    handle = MagicMock()
-    handle.query = AsyncMock(return_value="fake/text")
-    client = MagicMock()
-    client.get_workflow_handle.return_value = handle
-
-    with (
-        patch.object(think_activity.activity, "client", return_value=client),
-        patch.object(
-            think_activity.WorkflowStreamClient,
-            "from_within_activity",
-            return_value=stream,
-        ),
-    ):
-        return await env.run(think, **kwargs)
+    heartbeats: list[Any] = []
+    env.on_heartbeat = lambda *details: heartbeats.append(details)
+    with patch.object(think_activity, "native_think", recorded_native(calls)):
+        result = await env.run(think, **kwargs)
+    # The activity heartbeats the requested cycle count before delegating.
+    assert heartbeats == [({"cycle_count": calls[0]["cycle_count"]},)]
+    return result
 
 
-@pytest.mark.asyncio
-async def test_cycles_chain_and_return_shape_matches_original() -> None:
-    """N cycles run, each conclusion feeds the next, output is the original's."""
-    model = ScriptedModel([text_events("first insight"), text_events("second insight")])
-    stream = FakeStreamClient()
-
-    result = await run_think(
-        model,
-        stream,
-        thought="What are Saturn's largest moons?",
-        cycle_count=2,
-        system_prompt="You are an astronomer.",
-    )
-
-    assert result["status"] == "success"
-    text = result["content"][0]["text"]
-    assert "Cycle 1/2:\nfirst insight" in text
-    assert "Cycle 2/2:\nsecond insight" in text
-
-    # Cycle 2's prompt chains cycle 1's conclusion, verbatim per the original.
-    assert len(model.calls) == 2
-    second_prompt = model.calls[1]["messages"]
-    assert "Previous cycle concluded: first insight" in str(second_prompt)
-    assert "Continue developing these ideas further." in str(second_prompt)
-    # The per-cycle system prompt is the caller's, not the default.
-    assert model.calls[0]["system_prompt"] == "You are an astronomer."
+def test_activity_is_registered_under_the_think_name() -> None:
+    """The worker registers this callable as the ``think`` activity, and its
+    docstring/signature are what the model-facing schema is derived from."""
+    assert activity._Definition.from_callable(think).name == "think"
+    signature = inspect.signature(think)
+    assert list(signature.parameters) == [
+        "thought",
+        "cycle_count",
+        "system_prompt",
+        "tools",
+        "model_provider",
+        "model_settings",
+        "thinking_system_prompt",
+    ]
+    assert signature.parameters["cycle_count"].default == 3
+    # The model-facing guidance: cycles chain recursively.
+    assert "Each cycle builds on the previous cycle" in " ".join((think.__doc__ or "").split())
 
 
 @pytest.mark.asyncio
-async def test_every_model_chunk_streams_to_the_thinking_topic() -> None:
-    """Each raw StreamEvent is published live, unchanged, in order."""
-    events = text_events("streamed reply")
-    model = ScriptedModel([events])
-    stream = FakeStreamClient()
+async def test_activity_delegates_to_native_think_with_keyword_arguments() -> None:
+    calls: list[dict[str, Any]] = []
+    result = await run_think(calls, thought="Investigate", cycle_count=2, system_prompt="sys")
 
+    assert result == {"status": "success", "content": [{"text": "think notes"}]}
+    assert calls == [{
+        "thought": "Investigate",
+        "cycle_count": 2,
+        "system_prompt": "sys",
+        "model_provider": "perplexity",
+        "model_settings": {},
+    }]
+
+
+@pytest.mark.asyncio
+async def test_omitted_provider_defaults_to_perplexity_custom_provider() -> None:
+    """With no parent agent to inherit from, the wrapper injects the tool's
+    documented custom-provider path; {} routes create_model straight to
+    ``.models/perplexity.py`` (get_provider_config knows only built-ins)."""
+    calls: list[dict[str, Any]] = []
+    await run_think(calls, thought="t")
+    tool_input = calls[0]
+    assert tool_input["model_provider"] == "perplexity"
+    assert tool_input["model_settings"] == {}
+    # Optional parameters stay absent unless the model supplies them.
+    assert "tools" not in tool_input
+    assert "thinking_system_prompt" not in tool_input
+
+
+@pytest.mark.asyncio
+async def test_explicit_provider_settings_and_options_pass_through() -> None:
+    calls: list[dict[str, Any]] = []
     await run_think(
-        model,
-        stream,
-        thought="stream me",
-        cycle_count=1,
-        system_prompt="prompt",
+        calls,
+        thought="t",
+        cycle_count=3,
+        system_prompt="sp",
+        tools=["calculator"],
+        model_provider="env",
+        model_settings={"model_id": "other/model"},
+        thinking_system_prompt="Use first principles.",
+    )
+    assert calls[0] == {
+        "thought": "t",
+        "cycle_count": 3,
+        "system_prompt": "sp",
+        "tools": ["calculator"],
+        "model_provider": "env",
+        "model_settings": {"model_id": "other/model"},
+        "thinking_system_prompt": "Use first principles.",
+    }
+
+
+def load_provider_module(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Load ``orchestrator/.models/perplexity.py`` the way create_model does.
+
+    Importing run_worker reads the protected .env.local via dotenv, so the
+    loader is stubbed first (same guard as test_perplexity_model.py).
+    """
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
+    path = Path(__file__).resolve().parents[1] / ".models" / "perplexity.py"
+    spec = importlib.util.spec_from_file_location("think_perplexity_provider", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize(
+    "argument,environment,expected",
+    [
+        pytest.param("explicit/model", {}, "explicit/model", id="argument-wins"),
+        pytest.param(None, {"STRANDS_MODEL_ID": "env/model"}, "env/model", id="environment-fallback"),
+        pytest.param(None, {}, None, id="config-default-fallback"),
+    ],
+)
+def test_custom_provider_instance_builds_the_session_perplexity_model(
+    monkeypatch: pytest.MonkeyPatch, argument: str | None, environment: dict[str, str], expected: str | None
+) -> None:
+    module = load_provider_module(monkeypatch)
+    if expected is None:
+        from config import DEFAULT_MODEL_ID
+
+        expected = DEFAULT_MODEL_ID
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "test-key")
+    monkeypatch.delenv("STRANDS_MODEL_ID", raising=False)
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+
+    tools = [{"type": "web_search"}]
+    params = {"tools": tools, "max_steps": 100}
+    built: list[dict[str, Any]] = []
+    monkeypatch.setattr(module, "native_tools", lambda: tools)
+    monkeypatch.setattr(module, "model_params", lambda model_id, native: {**params, "model_id": model_id})
+    monkeypatch.setattr(
+        module,
+        "PerplexityModel",
+        lambda model_id, params, api_key: built.append(
+            {"model_id": model_id, "params": params, "api_key": api_key}
+        )
+        or SimpleNamespace(model_id=model_id),
     )
 
-    from workflow import THINKING_TOPIC
+    model = module.instance(argument) if argument else module.instance()
 
-    assert stream.entered and stream.exited
-    assert stream.topics[THINKING_TOPIC].published == events
-
-
-@pytest.mark.asyncio
-async def test_unregistered_model_is_a_nonretryable_error() -> None:
-    """A model id outside the worker catalog fails fast, not forever."""
-    stream = FakeStreamClient()
-    env = ActivityEnvironment()
-
-    handle = MagicMock()
-    handle.query = AsyncMock(return_value="not/registered")
-    client = MagicMock()
-    client.get_workflow_handle.return_value = handle
-
-    with (
-        patch.object(think_activity.activity, "client", return_value=client),
-        patch.object(
-            think_activity.WorkflowStreamClient,
-            "from_within_activity",
-            return_value=stream,
-        ),
-    ):
-        with pytest.raises(ApplicationError) as excinfo:
-            await env.run(
-                think,
-                thought="anything",
-                cycle_count=1,
-                system_prompt="prompt",
-            )
-    assert excinfo.value.non_retryable
-
-
-@pytest.mark.asyncio
-async def test_empty_system_prompt_falls_back_to_the_default_persona() -> None:
-    """No system_prompt -> DEFAULT_THINK_SYSTEM_PROMPT; no thinking_system_prompt
-    -> DEFAULT_THINKING_SYSTEM_PROMPT injected into the cycle prompt."""
-    model = ScriptedModel([text_events("ok")])
-    stream = FakeStreamClient()
-
-    await run_think(model, stream, thought="t", cycle_count=1, system_prompt="")
-
-    from think_activity import (
-        DEFAULT_THINK_SYSTEM_PROMPT,
-        DEFAULT_THINKING_SYSTEM_PROMPT,
-    )
-
-    assert model.calls[0]["system_prompt"] == DEFAULT_THINK_SYSTEM_PROMPT
-    prompt_text = str(model.calls[0]["messages"])
-    assert "PARALLEL EVIDENCE GATHERING" in prompt_text
-    assert DEFAULT_THINKING_SYSTEM_PROMPT.splitlines()[0] in prompt_text
-
-
-@pytest.mark.asyncio
-async def test_model_failure_returns_error_result_like_the_original() -> None:
-    """A mid-cycle exception becomes {"status": "error"} per the original."""
-
-    class ExplodingModel(ScriptedModel):
-        async def stream(
-            self, messages: Any, tool_specs: Any = None, system_prompt: Any = None, **kwargs: Any
-        ) -> AsyncGenerator[dict[str, Any], None]:
-            raise RuntimeError("provider exploded")
-            yield  # pragma: no cover
-
-    model = ExplodingModel([])
-    stream = FakeStreamClient()
-
-    result = await run_think(
-        model, stream, thought="t", cycle_count=1, system_prompt="p"
-    )
-
-    assert result["status"] == "error"
-    assert "provider exploded" in result["content"][0]["text"]
+    assert model.model_id == expected
+    # Params come from run_worker.model_params over agent_api_tools.native_tools
+    # — the identical surface the outer agent gets.
+    assert built == [{
+        "model_id": expected,
+        "params": {**params, "model_id": expected},
+        "api_key": "test-key",
+    }]

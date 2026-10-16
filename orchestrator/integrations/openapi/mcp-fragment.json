@@ -1,0 +1,130 @@
+{
+  "$comment": "Native MCP config fragment for parent integration (merge into orchestrator/mcp.json mcpServers by hand — this lane never edits the shared file). Converter: @ivotoby/openapi-mcp-server@1.16.1, installed in orchestrator/integrations/openapi/node_modules. ${VAR} entries are env references only; never inline secrets. All servers verified 2026-09-07 via MCP ClientSession initialize + tools/list (see manifests/verification-report.json).",
+  "mcpServers": {
+    "cms-coverage": {
+      "command": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server",
+      "args": [
+        "--transport", "stdio",
+        "--api-base-url", "https://api.coverage.cms.gov",
+        "--openapi-spec", "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs/coverageapi.json"
+      ]
+    },
+    "optum-claim-status": {
+      "command": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server",
+      "args": [
+        "--transport", "stdio",
+        "--api-base-url", "https://sandbox-apigw.optum.com",
+        "--openapi-spec", "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs/Claim_Status_V2.json",
+        "--headers", "Authorization:Bearer ${OPTUM_SANDBOX_TOKEN}"
+      ]
+    },
+    "optum-eligibility": {
+      "command": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server",
+      "args": [
+        "--transport", "stdio",
+        "--api-base-url", "https://sandbox-apigw.optum.com",
+        "--openapi-spec", "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs/Eligibility.json",
+        "--headers", "Authorization:Bearer ${OPTUM_SANDBOX_TOKEN}"
+      ]
+    },
+    "optum-enhanced-eligibility": {
+      "command": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server",
+      "args": [
+        "--transport", "stdio",
+        "--api-base-url", "https://sandbox-apigw.optum.com",
+        "--openapi-spec", "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs/Enhanced_Eligibility_API_v1.json",
+        "--headers", "Authorization:Bearer ${OPTUM_SANDBOX_TOKEN}"
+      ]
+    },
+    "optum-institutional-claims": {
+      "command": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server",
+      "args": [
+        "--transport", "stdio",
+        "--api-base-url", "https://sandbox-apigw.optum.com",
+        "--openapi-spec", "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs/InstitutionalClaims.json",
+        "--headers", "Authorization:Bearer ${OPTUM_SANDBOX_TOKEN}"
+      ]
+    },
+    "optum-professional-claims": {
+      "command": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server",
+      "args": [
+        "--transport", "stdio",
+        "--api-base-url", "https://sandbox.apigw.optum.com",
+        "--openapi-spec", "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs/MedicalNetworkClaims.json",
+        "--headers", "Authorization:Bearer ${OPTUM_SANDBOX_TOKEN}"
+      ]
+    },
+    "optum-prior-auth": {
+      "command": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server",
+      "args": [
+        "--transport", "stdio",
+        "--api-base-url", "https://sandbox-apigw.optum.com",
+        "--openapi-spec", "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs/priorauthorizationv1.json",
+        "--headers", "Authorization:Bearer ${OPTUM_SANDBOX_TOKEN}"
+      ]
+    },
+    "telnyx": {
+      "command": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server",
+      "args": [
+        "--transport", "stdio",
+        "--api-base-url", "https://api.telnyx.com/v2",
+        "--openapi-spec", "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs/Telnyx.json",
+        "--headers", "Authorization:Bearer ${TELNYX_API_KEY}"
+      ]
+    },
+    "zoom-meetings": {
+      "command": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server",
+      "args": [
+        "--transport", "stdio",
+        "--api-base-url", "https://api.zoom.us/v2",
+        "--openapi-spec", "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs/zoom_meetings.json",
+        "--headers", "Authorization:Bearer ${ZOOM_ACCESS_TOKEN}"
+      ]
+    },
+    "perplexity-chat": {
+      "command": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server",
+      "args": [
+        "--transport", "stdio",
+        "--api-base-url", "https://api.perplexity.ai",
+        "--openapi-spec", "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs/chatCompletions.yml",
+        "--headers", "Authorization:Bearer ${PERPLEXITY_API_KEY}"
+      ]
+    },
+    "perplexity-async-create": {
+      "command": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server",
+      "args": [
+        "--transport", "stdio",
+        "--api-base-url", "https://api.perplexity.ai",
+        "--openapi-spec", "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs/asyncCompletions.yml",
+        "--headers", "Authorization:Bearer ${PERPLEXITY_API_KEY}"
+      ]
+    },
+    "perplexity-async-get": {
+      "command": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server",
+      "args": [
+        "--transport", "stdio",
+        "--api-base-url", "https://api.perplexity.ai",
+        "--openapi-spec", "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs/getasyncCompletions.yml",
+        "--headers", "Authorization:Bearer ${PERPLEXITY_API_KEY}"
+      ]
+    },
+    "perplexity-async-list": {
+      "command": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server",
+      "args": [
+        "--transport", "stdio",
+        "--api-base-url", "https://api.perplexity.ai",
+        "--openapi-spec", "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs/listasyncCompletions.yml",
+        "--headers", "Authorization:Bearer ${PERPLEXITY_API_KEY}"
+      ]
+    },
+    "perplexity-agentic-research": {
+      "command": "orchestrator/integrations/openapi/node_modules/.bin/openapi-mcp-server",
+      "args": [
+        "--transport", "stdio",
+        "--api-base-url", "https://api.perplexity.ai",
+        "--openapi-spec", "/Users/tims-stuff/Desktop/strands-tools/src/openapi_specs/agenticResearch.yml",
+        "--headers", "Authorization:Bearer ${PERPLEXITY_API_KEY}"
+      ]
+    }
+  }
+}

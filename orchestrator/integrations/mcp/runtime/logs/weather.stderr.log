@@ -1,0 +1,15 @@
+[09/06/26 23:58:03] INFO     Processing request of type            server.py:733
+                             ListToolsRequest                                   
+                    INFO     Processing request of type            server.py:733
+                             CallToolRequest                                    
+                    INFO     HTTP Request: GET                   _client.py:1740
+                             https://api.weather.gov/points/37.7                
+                             7,-122.42 "HTTP/1.1 200 OK"                        
+                    INFO     HTTP Request: GET                   _client.py:1740
+                             https://api.weather.gov/gridpoints/                
+                             MTR/85,105/stations "HTTP/1.1 200                  
+                             OK"                                                
+                    INFO     HTTP Request: GET                   _client.py:1740
+                             https://api.weather.gov/stations/SF                
+                             OC1/observations/latest "HTTP/1.1                  
+                             200 OK"                                            

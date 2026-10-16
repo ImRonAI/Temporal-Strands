@@ -1,0 +1,100 @@
+=== todo-3 evidence: think_activity.py -> thin wrapper over strands_tools.think ===
+date: 2026-09-08T20:01:15Z
+repo: /Users/tims-stuff/Desktop/v0-clone-blurple  (NOT committed)
+
+### FAILING-FIRST PROOF (new tests vs the OLD 394-line fork) ###
+$ .venv/bin/python -m pytest tests/test_think_activity.py -q   # BEFORE implementation
+9 errors in 0.53s
+E  AttributeError: module 'think_activity' has no attribute 'set_model_factories'
+tests/test_think_activity.py:100: AttributeError  (reset_factories fixture)
+-> every new-behavior test errored on the old module: it exposed configure() only,
+   had no set_model_factories, no strands_tools.think delegation, and its own
+   ThoughtProcessor + DEFAULT_THINK*_PROMPT constants.
+
+### ACCEPTANCE 1: wc -l orchestrator/think_activity.py  (< 120) ###
+     118 think_activity.py
+
+### ACCEPTANCE 2: grep strands_tools.think import  (>= 1) ###
+21:from strands_tools.think import ThoughtProcessor
+
+### ACCEPTANCE 3: grep fork residue  (= 0) ###
+grep -c "class ThoughtProcessor|DEFAULT_THINK_SYSTEM_PROMPT" -> 0
+(no matches - clean)
+
+### ToolSpec still generates from the new signature ###
+tool_name: think
+required: ['thought', 'cycle_count', 'system_prompt']
+properties: ['thought', 'cycle_count', 'system_prompt', 'thinking_system_prompt']
+description head: Recursive thinking tool for sophisticated thought generation.
+
+### agent.json 'think' key: the two prompts moved verbatim ###
+keys: ['system_prompt', 'thinking_system_prompt']
+system_prompt chars: 896
+thinking_system_prompt chars: 2372
+system_prompt line 1: You are an evidence-based reasoning specialist operating as a nested thinking 
+thinking line 1: THINKING METHODOLOGY — Evidence-Based Parallel Analysis
+verbatim check (run BEFORE the module rewrite, comparing agent.json against the
+old module's DEFAULT_THINK_SYSTEM_PROMPT / DEFAULT_THINKING_SYSTEM_PROMPT):
+  VERBATIM OK   (896 chars persona, 2372 chars methodology, byte-equal)
+
+### workflow.py call-site change (minimal) ###
+261:def think_prompts() -> tuple[str, str | None]:
+276:THINK_SYSTEM_PROMPT, THINK_METHODOLOGY_PROMPT = think_prompts()
+963:            think_system_prompt=THINK_SYSTEM_PROMPT,
+964-            thinking_system_prompt=THINK_METHODOLOGY_PROMPT,
+747:        args: list[Any] = [prompt, 1, self._think_system_prompt or self._system_prompt]
+748-        if self._thinking_system_prompt is not None:
+749-            args.append(self._thinking_system_prompt)
+750-        try:
+
+### run_worker.py wiring ###
+543-    # The ONE permitted registry for think: strands_tools.think's
+544-    # model_provider cannot name a Temporal model factory, so the activity
+545-    # resolves the session model from this mapping instead.
+546:    think_activity.set_model_factories(model_factories)
+
+### GATE: cd orchestrator && .venv/bin/python -m pytest tests -q ###
+635 passed, 18 warnings in 21.61s
+
+NOTE: the full unscoped suite passes. temporal CLI IS on PATH
+(/opt/homebrew/bin/temporal), so tests/test_workflow.py ran for real
+(WorkflowEnvironment.start_local) and passed -- it exercises think end to end
+through the think-first hook with a scripted ThinkModel.
+
+Timeline note: an earlier run of this gate was blocked at COLLECTION by
+tests/test_graph_tool_adherence.py ("ModuleNotFoundError: No module named
+'graph_tool'", 1 error, 0 tests run). That file and orchestrator/graph_tool.py
+belong to a CONCURRENT lane, not this one; that lane landed graph_tool.py
+mid-run and the unscoped gate has passed since. Counts during the block, with
+that one file ignored: 602 -> 610 -> 627 passed as this lane's work landed.
+
+### think-lane suites ###
+$ .venv/bin/python -m pytest tests/test_think_activity.py tests/test_think_hook.py -q
+....................                                                     [100%]
+20 passed in 0.66s
+
+### MANUAL QA (ActivityEnvironment + scripted fake model, /tmp/qa_think.py) ###
+happy: >=1 frame on THINKING_TOPIC and status==success
+failure: factory raises -> status==error with message
+plus: unregistered model id, and empty-thought adversarial input
+
+Error in think tool: QA factory exploded
+Error in think tool: no registered model factory for 'ghost/model'
+HAPPY: status = success
+HAPPY: frames on THINKING_TOPIC = 12
+HAPPY: heartbeats = 12
+HAPPY: first frame = {'messageStart': {'role': 'assistant'}}
+HAPPY: content text =
+Cycle 1/2:
+QA insight A
+
+Cycle 2/2:
+QA insight B
+
+FAILURE(factory raises): status = error
+FAILURE: message head = Error in think tool: QA factory exploded
+
+FAILURE(unregistered id): status = error
+FAILURE: message head = Error in think tool: no registered model factory for 'ghost/model'
+
+ADVERSARIAL(empty thought): status = success | text = 'Cycle 1/1:\nempty-thought reply'

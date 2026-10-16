@@ -1,0 +1,1892 @@
+Already up to date
+Done in 196ms using pnpm v11.18.0
+[api] $ wait-on -t 60000 tcp:127.0.0.1:7233 && cd orchestrator && .venv/bin/python -u -m uvicorn server:app --port 8787
+[worker] $ wait-on -t 60000 tcp:127.0.0.1:7233 && cd orchestrator && .venv/bin/python -u ../scripts/worker_supervisor.py -- .venv/bin/python -u run_worker.py
+[web] $ node scripts/wait-for-stack.mjs && next dev --port 3000
+[temporal] $ temporal server start-dev
+[web] [startup] Waiting for API/desktop (TypeError)
+[worker] [worker-supervisor] child started pid=7175
+[temporal] Temporal CLI 1.7.0 (Server 1.31.0, UI 2.49.1)
+[temporal] 
+[temporal] Temporal Server:  localhost:7233
+[temporal] Temporal UI:      http://localhost:8233
+[temporal] Temporal Metrics: http://localhost:62459/metrics
+[api] INFO:     Started server process [7173]
+[api] INFO:     Waiting for application startup.
+[worker] INFO:httpx:HTTP Request: GET https://api.perplexity.ai/v1/models "HTTP/1.1 200 OK"
+[worker] INFO:__main__:Registered Agent API connectors: ['github', 'linear']
+[worker] INFO:__main__:Provider-declaring model catalog: 57 entries
+[worker] INFO:__main__:Connected stdio MCP server 'shell' (/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/bin/strands-shell)
+[worker] INFO:__main__:Validated 27 outbound tool definitions
+[api] INFO:     Application startup complete.
+[api] INFO:     Uvicorn running on http://127.0.0.1:8787 (Press CTRL+C to quit)
+[worker] INFO:agentskills.discovery:Discovered 697 skills in /Users/tims-stuff/Desktop/strands-tools/src/skills
+[worker] INFO:skills_config:Resolved 170 duplicate skill entries to canonical paths
+[worker] INFO:skills_config:discovered 527 skills in /Users/tims-stuff/Desktop/strands-tools/src/skills
+[worker] INFO:__main__:Worker up on 'perplexity-orchestrator' agent=Orchestrator default_model=preset:high models=57 skills=527 skills_dir=/Users/tims-stuff/Desktop/strands-tools/src/skills mcp_servers=['shell']
+[api] INFO:     127.0.0.1:62504 - "GET /health HTTP/1.1" 200 OK
+[web] [startup] Waiting for worker, pollers, healthy API
+[api] INFO:     127.0.0.1:62504 - "GET /health HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:62504 - "GET /health HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:62504 - "GET /health HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:62504 - "GET /health HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:62504 - "GET /health HTTP/1.1" 200 OK
+[web] [startup] Backend, 57 models, and Linux desktop ready. Starting http://localhost:3000
+[web] ▲ Next.js 16.2.12 (Turbopack)
+[web] - Local:         http://localhost:3000
+[web] - Network:       http://10.11.7.65:3000
+[web] - Environments: .env.local
+[web] ✓ Ready in 306ms
+[web] 
+[api] INFO:     127.0.0.1:62537 - "GET /health HTTP/1.1" 200 OK
+[web] ○ Compiling / ...
+[web]  GET / 200 in 4.7s (next.js: 4.2s, application-code: 521ms)
+[api] INFO:     127.0.0.1:62564 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 93ms (next.js: 38ms, application-code: 56ms)
+[web]  GET / 200 in 119ms (next.js: 7ms, application-code: 112ms)
+[api] INFO:     127.0.0.1:62564 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 10ms (next.js: 1301µs, application-code: 9ms)
+[api] INFO:     127.0.0.1:62613 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 22ms (next.js: 3ms, application-code: 19ms)
+[api] INFO:     127.0.0.1:62613 - "POST /sessions HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:62615 - "POST /sessions/chat-1fa50f4dbfdf2509/turns/stream HTTP/1.1" 200 OK
+[worker] INFO:strands.telemetry.metrics:Creating Strands MetricsClient
+[worker] INFO:httpx:HTTP Request: GET https://api.perplexity.ai/v1/models "HTTP/1.1 200 OK"
+[worker] 2026-09-16T07:35:45.711695Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=752130 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #1: think
+[worker] 2026-09-16T07:35:57.983658Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1180827 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] Yes, I can respond.
+[web]  POST /api/orchestrator 200 in 21.9s (next.js: 942ms, application-code: 20.9s)
+[web]  GET / 200 in 37ms (next.js: 6ms, application-code: 31ms)
+[api] INFO:     127.0.0.1:62702 - "POST /sessions/chat-1fa50f4dbfdf2509/end HTTP/1.1" 204 No Content
+[web]  POST /api/orchestrator/end 204 in 90ms (next.js: 81ms, application-code: 8ms)
+[api] INFO:     127.0.0.1:62702 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 183ms (next.js: 2ms, application-code: 181ms)
+[api] INFO:     127.0.0.1:62702 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 6ms (next.js: 1806µs, application-code: 4ms)
+[api] INFO:     127.0.0.1:62702 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 9ms (next.js: 1729µs, application-code: 8ms)
+[web]  GET / 200 in 67ms (next.js: 10ms, application-code: 57ms)
+[api] INFO:     127.0.0.1:62807 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 21ms (next.js: 1617µs, application-code: 20ms)
+[api] INFO:     127.0.0.1:62850 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 179ms (next.js: 6ms, application-code: 173ms)
+[api] INFO:     127.0.0.1:63049 - "POST /sessions HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:63052 - "POST /sessions/chat-79646ef2dd2cca72/turns/stream HTTP/1.1" 200 OK
+[worker] INFO:httpx:HTTP Request: GET https://api.perplexity.ai/v1/models "HTTP/1.1 200 OK"
+[api] INFO:     127.0.0.1:63049 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 13ms (next.js: 3ms, application-code: 10ms)
+[worker] 2026-09-16T07:37:33.715278Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=752327 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[api] INFO:     127.0.0.1:63049 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 6ms (next.js: 1243µs, application-code: 5ms)
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '3', 'activity_type': 'invoke_model_streaming', 'attempt': 1, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-79646ef2dd2cca72', 'workflow_run_id': '01a0a926-4840-7d46-8de7-1b746e98337b', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py", line 23, in wrapper
+[worker]     return await fn(*args, **kwargs)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py", line 92, in invoke_model_streaming
+[worker]     async for event in _stream(model, input):
+[worker]         events.append(event)
+[worker]         topic.publish(event)
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py", line 318, in stream
+[worker]     async for chunk in super().stream(*args, **kwargs):
+[worker]     ...<3 lines>...
+[worker]         yield chunk
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/models/openai_responses.py", line 334, in stream
+[worker]     async for event in response:
+[worker]     ...<114 lines>...
+[worker]                 break
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 158, in __aiter__
+[worker]     async for item in self._iterator:
+[worker]         yield item
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 205, in __stream__
+[worker]     raise APIError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] openai.APIError: invalid request
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '3', 'activity_type': 'invoke_model_streaming', 'attempt': 2, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-79646ef2dd2cca72', 'workflow_run_id': '01a0a926-4840-7d46-8de7-1b746e98337b', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py", line 23, in wrapper
+[worker]     return await fn(*args, **kwargs)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py", line 92, in invoke_model_streaming
+[worker]     async for event in _stream(model, input):
+[worker]         events.append(event)
+[worker]         topic.publish(event)
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py", line 318, in stream
+[worker]     async for chunk in super().stream(*args, **kwargs):
+[worker]     ...<3 lines>...
+[worker]         yield chunk
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/models/openai_responses.py", line 334, in stream
+[worker]     async for event in response:
+[worker]     ...<114 lines>...
+[worker]                 break
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 158, in __aiter__
+[worker]     async for item in self._iterator:
+[worker]         yield item
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 205, in __stream__
+[worker]     raise APIError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] openai.APIError: invalid request
+[api] INFO:     127.0.0.1:63072 - "POST /sessions HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:63074 - "POST /sessions/chat-745341b5acd6ff14/turns/stream HTTP/1.1" 200 OK
+[worker] INFO:httpx:HTTP Request: GET https://api.perplexity.ai/v1/models "HTTP/1.1 200 OK"
+[worker] 2026-09-16T07:37:39.286290Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=752261 limit=524288
+[api] INFO:     127.0.0.1:63072 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 104ms (next.js: 1866µs, application-code: 103ms)
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '3', 'activity_type': 'invoke_model_streaming', 'attempt': 1, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-745341b5acd6ff14', 'workflow_run_id': '01a0a926-5dee-7493-9944-729afb74466e', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py", line 23, in wrapper
+[worker]     return await fn(*args, **kwargs)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py", line 92, in invoke_model_streaming
+[worker]     async for event in _stream(model, input):
+[worker]         events.append(event)
+[worker]         topic.publish(event)
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py", line 318, in stream
+[worker]     async for chunk in super().stream(*args, **kwargs):
+[worker]     ...<3 lines>...
+[worker]         yield chunk
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/models/openai_responses.py", line 334, in stream
+[worker]     async for event in response:
+[worker]     ...<114 lines>...
+[worker]                 break
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 158, in __aiter__
+[worker]     async for item in self._iterator:
+[worker]         yield item
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 205, in __stream__
+[worker]     raise APIError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] openai.APIError: invalid request
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '3', 'activity_type': 'invoke_model_streaming', 'attempt': 3, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-79646ef2dd2cca72', 'workflow_run_id': '01a0a926-4840-7d46-8de7-1b746e98337b', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py", line 23, in wrapper
+[worker]     return await fn(*args, **kwargs)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py", line 92, in invoke_model_streaming
+[worker]     async for event in _stream(model, input):
+[worker]         events.append(event)
+[worker]         topic.publish(event)
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py", line 318, in stream
+[worker]     async for chunk in super().stream(*args, **kwargs):
+[worker]     ...<3 lines>...
+[worker]         yield chunk
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/models/openai_responses.py", line 334, in stream
+[worker]     async for event in response:
+[worker]     ...<114 lines>...
+[worker]                 break
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 158, in __aiter__
+[worker]     async for item in self._iterator:
+[worker]         yield item
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 205, in __stream__
+[worker]     raise APIError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] openai.APIError: invalid request
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '3', 'activity_type': 'invoke_model_streaming', 'attempt': 2, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-745341b5acd6ff14', 'workflow_run_id': '01a0a926-5dee-7493-9944-729afb74466e', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py", line 23, in wrapper
+[worker]     return await fn(*args, **kwargs)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py", line 92, in invoke_model_streaming
+[worker]     async for event in _stream(model, input):
+[worker]         events.append(event)
+[worker]         topic.publish(event)
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py", line 318, in stream
+[worker]     async for chunk in super().stream(*args, **kwargs):
+[worker]     ...<3 lines>...
+[worker]         yield chunk
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/models/openai_responses.py", line 334, in stream
+[worker]     async for event in response:
+[worker]     ...<114 lines>...
+[worker]                 break
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 158, in __aiter__
+[worker]     async for item in self._iterator:
+[worker]         yield item
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 205, in __stream__
+[worker]     raise APIError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] openai.APIError: invalid request
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '3', 'activity_type': 'invoke_model_streaming', 'attempt': 3, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-745341b5acd6ff14', 'workflow_run_id': '01a0a926-5dee-7493-9944-729afb74466e', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py", line 23, in wrapper
+[worker]     return await fn(*args, **kwargs)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py", line 92, in invoke_model_streaming
+[worker]     async for event in _stream(model, input):
+[worker]         events.append(event)
+[worker]         topic.publish(event)
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py", line 318, in stream
+[worker]     async for chunk in super().stream(*args, **kwargs):
+[worker]     ...<3 lines>...
+[worker]         yield chunk
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/models/openai_responses.py", line 334, in stream
+[worker]     async for event in response:
+[worker]     ...<114 lines>...
+[worker]                 break
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 158, in __aiter__
+[worker]     async for item in self._iterator:
+[worker]         yield item
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 205, in __stream__
+[worker]     raise APIError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] openai.APIError: invalid request
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '3', 'activity_type': 'invoke_model_streaming', 'attempt': 4, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-79646ef2dd2cca72', 'workflow_run_id': '01a0a926-4840-7d46-8de7-1b746e98337b', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py", line 23, in wrapper
+[worker]     return await fn(*args, **kwargs)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py", line 92, in invoke_model_streaming
+[worker]     async for event in _stream(model, input):
+[worker]         events.append(event)
+[worker]         topic.publish(event)
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py", line 318, in stream
+[worker]     async for chunk in super().stream(*args, **kwargs):
+[worker]     ...<3 lines>...
+[worker]         yield chunk
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/models/openai_responses.py", line 334, in stream
+[worker]     async for event in response:
+[worker]     ...<114 lines>...
+[worker]                 break
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 158, in __aiter__
+[worker]     async for item in self._iterator:
+[worker]         yield item
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 205, in __stream__
+[worker]     raise APIError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] openai.APIError: invalid request
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '3', 'activity_type': 'invoke_model_streaming', 'attempt': 4, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-745341b5acd6ff14', 'workflow_run_id': '01a0a926-5dee-7493-9944-729afb74466e', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py", line 23, in wrapper
+[worker]     return await fn(*args, **kwargs)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py", line 92, in invoke_model_streaming
+[worker]     async for event in _stream(model, input):
+[worker]         events.append(event)
+[worker]         topic.publish(event)
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py", line 318, in stream
+[worker]     async for chunk in super().stream(*args, **kwargs):
+[worker]     ...<3 lines>...
+[worker]         yield chunk
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/models/openai_responses.py", line 334, in stream
+[worker]     async for event in response:
+[worker]     ...<114 lines>...
+[worker]                 break
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 158, in __aiter__
+[worker]     async for item in self._iterator:
+[worker]         yield item
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 205, in __stream__
+[worker]     raise APIError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] openai.APIError: invalid request
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '3', 'activity_type': 'invoke_model_streaming', 'attempt': 5, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-79646ef2dd2cca72', 'workflow_run_id': '01a0a926-4840-7d46-8de7-1b746e98337b', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py", line 23, in wrapper
+[worker]     return await fn(*args, **kwargs)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py", line 92, in invoke_model_streaming
+[worker]     async for event in _stream(model, input):
+[worker]         events.append(event)
+[worker]         topic.publish(event)
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py", line 318, in stream
+[worker]     async for chunk in super().stream(*args, **kwargs):
+[worker]     ...<3 lines>...
+[worker]         yield chunk
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/models/openai_responses.py", line 334, in stream
+[worker]     async for event in response:
+[worker]     ...<114 lines>...
+[worker]                 break
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 158, in __aiter__
+[worker]     async for item in self._iterator:
+[worker]         yield item
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 205, in __stream__
+[worker]     raise APIError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] openai.APIError: invalid request
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '3', 'activity_type': 'invoke_model_streaming', 'attempt': 5, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-745341b5acd6ff14', 'workflow_run_id': '01a0a926-5dee-7493-9944-729afb74466e', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py", line 23, in wrapper
+[worker]     return await fn(*args, **kwargs)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py", line 92, in invoke_model_streaming
+[worker]     async for event in _stream(model, input):
+[worker]         events.append(event)
+[worker]         topic.publish(event)
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py", line 318, in stream
+[worker]     async for chunk in super().stream(*args, **kwargs):
+[worker]     ...<3 lines>...
+[worker]         yield chunk
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/models/openai_responses.py", line 334, in stream
+[worker]     async for event in response:
+[worker]     ...<114 lines>...
+[worker]                 break
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 158, in __aiter__
+[worker]     async for item in self._iterator:
+[worker]         yield item
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 205, in __stream__
+[worker]     raise APIError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] openai.APIError: invalid request
+[web] ✓ Compiled in 6.3s
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '3', 'activity_type': 'invoke_model_streaming', 'attempt': 6, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-79646ef2dd2cca72', 'workflow_run_id': '01a0a926-4840-7d46-8de7-1b746e98337b', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py", line 23, in wrapper
+[worker]     return await fn(*args, **kwargs)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py", line 92, in invoke_model_streaming
+[worker]     async for event in _stream(model, input):
+[worker]         events.append(event)
+[worker]         topic.publish(event)
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py", line 318, in stream
+[worker]     async for chunk in super().stream(*args, **kwargs):
+[worker]     ...<3 lines>...
+[worker]         yield chunk
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/models/openai_responses.py", line 334, in stream
+[worker]     async for event in response:
+[worker]     ...<114 lines>...
+[worker]                 break
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 158, in __aiter__
+[worker]     async for item in self._iterator:
+[worker]         yield item
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 205, in __stream__
+[worker]     raise APIError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] openai.APIError: invalid request
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '3', 'activity_type': 'invoke_model_streaming', 'attempt': 6, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-745341b5acd6ff14', 'workflow_run_id': '01a0a926-5dee-7493-9944-729afb74466e', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py", line 23, in wrapper
+[worker]     return await fn(*args, **kwargs)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py", line 92, in invoke_model_streaming
+[worker]     async for event in _stream(model, input):
+[worker]         events.append(event)
+[worker]         topic.publish(event)
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py", line 318, in stream
+[worker]     async for chunk in super().stream(*args, **kwargs):
+[worker]     ...<3 lines>...
+[worker]         yield chunk
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/models/openai_responses.py", line 334, in stream
+[worker]     async for event in response:
+[worker]     ...<114 lines>...
+[worker]                 break
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 158, in __aiter__
+[worker]     async for item in self._iterator:
+[worker]         yield item
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 205, in __stream__
+[worker]     raise APIError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] openai.APIError: invalid request
+[web]  GET / 200 in 463ms (next.js: 102ms, application-code: 361ms)
+[web]  GET / 200 in 475ms (next.js: 314ms, application-code: 160ms)
+[web]  GET / 200 in 476ms (next.js: 331ms, application-code: 145ms)
+[web]  GET / 200 in 486ms (next.js: 301ms, application-code: 185ms)
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[api] INFO:     127.0.0.1:63334 - "GET /health HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:63337 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 692ms (next.js: 162ms, application-code: 529ms)
+[web]  GET /api/models 200 in 239ms (next.js: 8ms, application-code: 231ms)
+[api] INFO:     127.0.0.1:63335 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 805ms (next.js: 211ms, application-code: 594ms)
+[api] INFO:     127.0.0.1:63339 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 354ms (next.js: 7ms, application-code: 347ms)
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '3', 'activity_type': 'invoke_model_streaming', 'attempt': 7, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-79646ef2dd2cca72', 'workflow_run_id': '01a0a926-4840-7d46-8de7-1b746e98337b', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py", line 23, in wrapper
+[worker]     return await fn(*args, **kwargs)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py", line 92, in invoke_model_streaming
+[worker]     async for event in _stream(model, input):
+[worker]         events.append(event)
+[worker]         topic.publish(event)
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py", line 318, in stream
+[worker]     async for chunk in super().stream(*args, **kwargs):
+[worker]     ...<3 lines>...
+[worker]         yield chunk
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/models/openai_responses.py", line 334, in stream
+[worker]     async for event in response:
+[worker]     ...<114 lines>...
+[worker]                 break
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 158, in __aiter__
+[worker]     async for item in self._iterator:
+[worker]         yield item
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 205, in __stream__
+[worker]     raise APIError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] openai.APIError: invalid request
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '3', 'activity_type': 'invoke_model_streaming', 'attempt': 7, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-745341b5acd6ff14', 'workflow_run_id': '01a0a926-5dee-7493-9944-729afb74466e', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_heartbeat_decorator.py", line 23, in wrapper
+[worker]     return await fn(*args, **kwargs)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_model_activity.py", line 92, in invoke_model_streaming
+[worker]     async for event in _stream(model, input):
+[worker]         events.append(event)
+[worker]         topic.publish(event)
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/perplexity_model.py", line 318, in stream
+[worker]     async for chunk in super().stream(*args, **kwargs):
+[worker]     ...<3 lines>...
+[worker]         yield chunk
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/models/openai_responses.py", line 334, in stream
+[worker]     async for event in response:
+[worker]     ...<114 lines>...
+[worker]                 break
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 158, in __aiter__
+[worker]     async for item in self._iterator:
+[worker]         yield item
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/openai/_streaming.py", line 205, in __stream__
+[worker]     raise APIError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] openai.APIError: invalid request
+[api] INFO:     127.0.0.1:63457 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 166ms (next.js: 9ms, application-code: 157ms)
+[api] INFO:     127.0.0.1:63467 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 6ms (next.js: 2ms, application-code: 4ms)
+[api] INFO:     127.0.0.1:63486 - "POST /sessions HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:63488 - "POST /sessions/chat-ad58dbfdea88d4fc/turns/stream HTTP/1.1" 200 OK
+[worker] INFO:httpx:HTTP Request: GET https://api.perplexity.ai/v1/models "HTTP/1.1 200 OK"
+[worker] 2026-09-16T07:39:36.172748Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=752291 limit=524288
+[api] INFO:     127.0.0.1:63486 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 7ms (next.js: 1537µs, application-code: 5ms)
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #1: think
+[worker] 2026-09-16T07:39:49.918973Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1183380 limit=524288
+[api] INFO:     127.0.0.1:63559 - "POST /sessions/chat-ad58dbfdea88d4fc/end HTTP/1.1" 204 No Content
+[web]  POST /api/orchestrator/end 204 in 100ms (next.js: 39ms, application-code: 60ms)
+[worker] [worker-supervisor] child pid=7175 exited code=-15 after 276.1s; restarting in 1.0s
+[worker] [worker-supervisor] child started pid=40860
+[web] ✓ Finished writing to filesystem cache in 50s
+[web] ✓ Finished filesystem cache database compaction in 8.6min
+[worker] INFO:httpx:HTTP Request: GET https://api.perplexity.ai/v1/models "HTTP/1.1 200 OK"
+[worker] INFO:__main__:Registered Agent API connectors: ['github', 'linear']
+[worker] INFO:__main__:Provider-declaring model catalog: 57 entries
+[worker] INFO:__main__:Connected stdio MCP server 'shell' (/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/bin/strands-shell)
+[worker] INFO:__main__:Validated 27 outbound tool definitions
+[web] ✓ Finished filesystem cache database compaction in 18.6s
+[worker] INFO:agentskills.discovery:Discovered 697 skills in /Users/tims-stuff/Desktop/strands-tools/src/skills
+[worker] INFO:skills_config:Resolved 170 duplicate skill entries to canonical paths
+[worker] INFO:skills_config:discovered 527 skills in /Users/tims-stuff/Desktop/strands-tools/src/skills
+[worker] INFO:__main__:Worker up on 'perplexity-orchestrator' agent=Orchestrator default_model=preset:high models=57 skills=527 skills_dir=/Users/tims-stuff/Desktop/strands-tools/src/skills mcp_servers=['shell']
+[worker] INFO:strands.telemetry.metrics:Creating Strands MetricsClient
+[worker] 
+[worker] Tool #1: think
+[worker] 2026-09-16T07:51:27.820416Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1189302 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #1: think
+[worker] 2026-09-16T07:51:35.088986Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1181983 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[api] INFO:     127.0.0.1:64916 - "POST /sessions/chat-745341b5acd6ff14/end HTTP/1.1" 204 No Content
+[web]  POST /api/orchestrator/end 204 in 4.2s (next.js: 4.1s, application-code: 104ms)
+[web] 
+[web] -----
+[web] [1m[31mFATAL[39m[0m: An unexpected Turbopack error occurred. A panic log has been written to /var/folders/c8/y41r0sp91172dqm_0jk3wcww0000gn/T/next-panic-f0759369737d4e820e0b900ce417ae5.log.
+[web] 
+[web] To help make Turbopack better, report this error by ]8;;https://bugs.nextjs.org/search?category=turbopack-error-report&title=Turbopack%20Error%3A%20%5Bproject%5D%2Fapp%2Fglobals.css%20%5Bapp-client%5D%20%28css%29&body=Turbopack%20version%3A%20%60v16.2.12%60%0ANext.js%20version%3A%20%600.0.0%60%0A%0AError%20message%3A%0A%60%60%60%0A%5Bproject%5D%2Fapp%2Fglobals.css%20%5Bapp-client%5D%20%28css%29%0A%0ACaused%20by%3A%0A-%20failed%20to%20receive%20message%0A-%20reading%20packet%20length%0A-%20timeout%20while%20receiving%20message%20from%20process%0A-%20deadline%20has%20elapsed%0A%0ADebug%20info%3A%0A-%20Execution%20of%20subscribe_issues_and_diags_operation%20failed%0A-%20Execution%20of%20%3CAppEndpoint%20as%20Endpoint%3E%3A%3Aserver_changed%20failed%0A-%20Execution%20of%20%2AProject%3A%3Aserver_changed%20failed%0A-%20Execution%20of%20%2AAppEndpointOutput%3A%3Aserver_assets%20failed%0A-%20Execution%20of%20AppEndpoint%3A%3Aoutput%20failed%0A-%20Execution%20of%20AppProject%3A%3Aapp_module_graphs%20failed%0A-%20Execution%20of%20%2A%3CAppEndpoint%20as%20Endpoint%3E%3A%3Aadditional_entries%20failed%0A-%20Execution%20of%20ModuleGraph%3A%3Afrom_graphs%20failed%0A-%20Execution%20of%20ModuleGraph%3A%3Acreate%20failed%0A-%20Execution%20of%20SingleModuleGraph%3A%3Anew_with_entries_visited_intern%20failed%0A-%20%5Bproject%5D%2Fapp%2Fglobals.css%20%5Bapp-client%5D%20%28css%29%0A-%20Execution%20of%20primary_chunkable_referenced_modules%20failed%0A-%20Execution%20of%20%3CCssModule%20as%20Module%3E%3A%3Areferences%20failed%0A-%20Execution%20of%20parse_css%20failed%0A-%20Execution%20of%20%3CPostCssTransformedAsset%20as%20Asset%3E%3A%3Acontent%20failed%0A-%20Execution%20of%20PostCssTransformedAsset%3A%3Aprocess%20failed%0A-%20Execution%20of%20evaluate_webpack_loader%20failed%0A-%20failed%20to%20receive%20message%0A-%20reading%20packet%20length%0A-%20timeout%20while%20receiving%20message%20from%20process%0A-%20deadline%20has%20elapsed%0A%60%60%60&labels=Turbopack,Turbopack%20Panic%20Backtrace\clicking here.]8;;\
+[web] -----
+[web] 
+[web] 
+[web] -----
+[web] [1m[31mFATAL[39m[0m: An unexpected Turbopack error occurred. A panic log has been written to /var/folders/c8/y41r0sp91172dqm_0jk3wcww0000gn/T/next-panic-f0759369737d4e820e0b900ce417ae5.log.
+[web] 
+[web] To help make Turbopack better, report this error by ]8;;https://bugs.nextjs.org/search?category=turbopack-error-report&title=Turbopack%20Error%3A%20Failed%20to%20write%20app%20endpoint%20%2Fpage&body=Turbopack%20version%3A%20%60v16.2.12%60%0ANext.js%20version%3A%20%600.0.0%60%0A%0AError%20message%3A%0A%60%60%60%0AFailed%20to%20write%20app%20endpoint%20%2Fpage%0A%0ACaused%20by%3A%0A-%20%5Bproject%5D%2Fapp%2Fglobals.css%20%5Bapp-client%5D%20%28css%29%0A-%20failed%20to%20receive%20message%0A-%20reading%20packet%20length%0A-%20timeout%20while%20receiving%20message%20from%20process%0A-%20deadline%20has%20elapsed%0A%0ADebug%20info%3A%0A-%20Execution%20of%20get_written_endpoint_with_issues_operation%20failed%0A-%20Execution%20of%20endpoint_write_to_disk%20failed%0A-%20Execution%20of%20%3CAppEndpoint%20as%20Endpoint%3E%3A%3Aoutput%20failed%0A-%20Failed%20to%20write%20app%20endpoint%20%2Fpage%0A-%20Execution%20of%20%2Aall_asset_paths%20failed%0A-%20Execution%20of%20%2AAppEndpointOutput%3A%3Aoutput_assets%20failed%0A-%20Execution%20of%20AppEndpoint%3A%3Aoutput%20failed%0A-%20Execution%20of%20AppProject%3A%3Aapp_module_graphs%20failed%0A-%20Execution%20of%20%2A%3CAppEndpoint%20as%20Endpoint%3E%3A%3Aadditional_entries%20failed%0A-%20Execution%20of%20ModuleGraph%3A%3Afrom_graphs%20failed%0A-%20Execution%20of%20ModuleGraph%3A%3Acreate%20failed%0A-%20Execution%20of%20SingleModuleGraph%3A%3Anew_with_entries_visited_intern%20failed%0A-%20%5Bproject%5D%2Fapp%2Fglobals.css%20%5Bapp-client%5D%20%28css%29%0A-%20Execution%20of%20primary_chunkable_referenced_modules%20failed%0A-%20Execution%20of%20%3CCssModule%20as%20Module%3E%3A%3Areferences%20failed%0A-%20Execution%20of%20parse_css%20failed%0A-%20Execution%20of%20%3CPostCssTransformedAsset%20as%20Asset%3E%3A%3Acontent%20failed%0A-%20Execution%20of%20PostCssTransformedAsset%3A%3Aprocess%20failed%0A-%20Execution%20of%20evaluate_webpack_loader%20failed%0A-%20failed%20to%20receive%20message%0A-%20reading%20packet%20length%0A-%20timeout%20while%20receiving%20message%20from%20process%0A-%20deadline%20has%20elapsed%0A%60%60%60&labels=Turbopack,Turbopack%20Panic%20Backtrace\clicking here.]8;;\
+[web] -----
+[web] 
+[web] 
+[web] -----
+[web] [1m[31mFATAL[39m[0m: An unexpected Turbopack error occurred. A panic log has been written to /var/folders/c8/y41r0sp91172dqm_0jk3wcww0000gn/T/next-panic-f0759369737d4e820e0b900ce417ae5.log.
+[web] 
+[web] To help make Turbopack better, report this error by ]8;;https://bugs.nextjs.org/search?category=turbopack-error-report&title=Turbopack%20Error%3A%20Failed%20to%20write%20app%20endpoint%20%2Fpage&body=Turbopack%20version%3A%20%60v16.2.12%60%0ANext.js%20version%3A%20%600.0.0%60%0A%0AError%20message%3A%0A%60%60%60%0AFailed%20to%20write%20app%20endpoint%20%2Fpage%0A%0ACaused%20by%3A%0A-%20%5Bproject%5D%2Fapp%2Fglobals.css%20%5Bapp-client%5D%20%28css%29%0A-%20failed%20to%20receive%20message%0A-%20reading%20packet%20length%0A-%20timeout%20while%20receiving%20message%20from%20process%0A-%20deadline%20has%20elapsed%0A%0ADebug%20info%3A%0A-%20Execution%20of%20get_written_endpoint_with_issues_operation%20failed%0A-%20Execution%20of%20endpoint_write_to_disk%20failed%0A-%20Execution%20of%20%3CAppEndpoint%20as%20Endpoint%3E%3A%3Aoutput%20failed%0A-%20Failed%20to%20write%20app%20endpoint%20%2Fpage%0A-%20Execution%20of%20%2Aall_asset_paths%20failed%0A-%20Execution%20of%20%2AAppEndpointOutput%3A%3Aoutput_assets%20failed%0A-%20Execution%20of%20AppEndpoint%3A%3Aoutput%20failed%0A-%20Execution%20of%20AppProject%3A%3Aapp_module_graphs%20failed%0A-%20Execution%20of%20%2A%3CAppEndpoint%20as%20Endpoint%3E%3A%3Aadditional_entries%20failed%0A-%20Execution%20of%20ModuleGraph%3A%3Afrom_graphs%20failed%0A-%20Execution%20of%20ModuleGraph%3A%3Acreate%20failed%0A-%20Execution%20of%20SingleModuleGraph%3A%3Anew_with_entries_visited_intern%20failed%0A-%20%5Bproject%5D%2Fapp%2Fglobals.css%20%5Bapp-client%5D%20%28css%29%0A-%20Execution%20of%20primary_chunkable_referenced_modules%20failed%0A-%20Execution%20of%20%3CCssModule%20as%20Module%3E%3A%3Areferences%20failed%0A-%20Execution%20of%20parse_css%20failed%0A-%20Execution%20of%20%3CPostCssTransformedAsset%20as%20Asset%3E%3A%3Acontent%20failed%0A-%20Execution%20of%20PostCssTransformedAsset%3A%3Aprocess%20failed%0A-%20Execution%20of%20evaluate_webpack_loader%20failed%0A-%20failed%20to%20receive%20message%0A-%20reading%20packet%20length%0A-%20timeout%20while%20receiving%20message%20from%20process%0A-%20deadline%20has%20elapsed%0A%60%60%60&labels=Turbopack,Turbopack%20Panic%20Backtrace\clicking here.]8;;\
+[web] -----
+[web] 
+[web]  GET / 500 in 3.5s (next.js: 1904ms, application-code: 1571ms)
+[web]  GET / 500 in 3.6s (next.js: 2.6s, application-code: 921ms)
+[web]  GET / 500 in 3.6s (next.js: 2.7s, application-code: 891ms)
+[web]  GET / 500 in 3.6s (next.js: 2.7s, application-code: 861ms)
+[web]  GET / 500 in 3.6s (next.js: 3.2s, application-code: 374ms)
+[web]  GET / 500 in 3.6s (next.js: 3.4s, application-code: 212ms)
+[web]  GET / 500 in 19.1s (next.js: 18.9s, application-code: 147ms)
+[web]  POST /api/orchestrator 200 in 14.1min (next.js: 9ms, application-code: 14.1min)
+[web] 
+[web] -----
+[web] [1m[31mFATAL[39m[0m: An unexpected Turbopack error occurred. A panic log has been written to /var/folders/c8/y41r0sp91172dqm_0jk3wcww0000gn/T/next-panic-f0759369737d4e820e0b900ce417ae5.log.
+[web] 
+[web] To help make Turbopack better, report this error by ]8;;https://bugs.nextjs.org/search?category=turbopack-error-report&title=Turbopack%20Error%3A%20Failed%20to%20write%20app%20endpoint%20%2Fpage&body=Turbopack%20version%3A%20%60v16.2.12%60%0ANext.js%20version%3A%20%600.0.0%60%0A%0AError%20message%3A%0A%60%60%60%0AFailed%20to%20write%20app%20endpoint%20%2Fpage%0A%0ACaused%20by%3A%0A-%20%5Bproject%5D%2Fapp%2Fglobals.css%20%5Bapp-client%5D%20%28css%29%0A-%20failed%20to%20receive%20message%0A-%20reading%20packet%20length%0A-%20timeout%20while%20receiving%20message%20from%20process%0A-%20deadline%20has%20elapsed%0A%0ADebug%20info%3A%0A-%20Execution%20of%20get_written_endpoint_with_issues_operation%20failed%0A-%20Execution%20of%20endpoint_write_to_disk%20failed%0A-%20Execution%20of%20%3CAppEndpoint%20as%20Endpoint%3E%3A%3Aoutput%20failed%0A-%20Failed%20to%20write%20app%20endpoint%20%2Fpage%0A-%20Execution%20of%20%2Aall_asset_paths%20failed%0A-%20Execution%20of%20%2AAppEndpointOutput%3A%3Aoutput_assets%20failed%0A-%20Execution%20of%20AppEndpoint%3A%3Aoutput%20failed%0A-%20Execution%20of%20AppProject%3A%3Aapp_module_graphs%20failed%0A-%20Execution%20of%20%2A%3CAppEndpoint%20as%20Endpoint%3E%3A%3Aadditional_entries%20failed%0A-%20Execution%20of%20ModuleGraph%3A%3Afrom_graphs%20failed%0A-%20Execution%20of%20ModuleGraph%3A%3Acreate%20failed%0A-%20Execution%20of%20SingleModuleGraph%3A%3Anew_with_entries_visited_intern%20failed%0A-%20%5Bproject%5D%2Fapp%2Fglobals.css%20%5Bapp-client%5D%20%28css%29%0A-%20Execution%20of%20primary_chunkable_referenced_modules%20failed%0A-%20Execution%20of%20%3CCssModule%20as%20Module%3E%3A%3Areferences%20failed%0A-%20Execution%20of%20parse_css%20failed%0A-%20Execution%20of%20%3CPostCssTransformedAsset%20as%20Asset%3E%3A%3Acontent%20failed%0A-%20Execution%20of%20PostCssTransformedAsset%3A%3Aprocess%20failed%0A-%20Execution%20of%20evaluate_webpack_loader%20failed%0A-%20failed%20to%20receive%20message%0A-%20reading%20packet%20length%0A-%20timeout%20while%20receiving%20message%20from%20process%0A-%20deadline%20has%20elapsed%0A%60%60%60&labels=Turbopack,Turbopack%20Panic%20Backtrace\clicking here.]8;;\
+[web] -----
+[web] 
+[worker] 2026-09-16T07:51:44.920339Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1181178 limit=524288
+[web]  GET / 500 in 547ms (next.js: 251ms, application-code: 297ms)
+[web]  GET / 500 in 525ms (next.js: 276ms, application-code: 249ms)
+[web]  GET / 500 in 531ms (next.js: 331ms, application-code: 200ms)
+[web]  GET / 500 in 532ms (next.js: 425ms, application-code: 107ms)
+[web]  GET / 500 in 545ms (next.js: 377ms, application-code: 167ms)
+[web]  GET / 500 in 544ms (next.js: 463ms, application-code: 81ms)
+[web]  GET / 500 in 544ms (next.js: 479ms, application-code: 65ms)
+[web]  POST /api/orchestrator 200 in 14.2min (next.js: 8ms, application-code: 14.2min)
+[web]  GET / 500 in 598ms (next.js: 534ms, application-code: 64ms)
+[web]  GET / 500 in 596ms (next.js: 559ms, application-code: 37ms)
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[api] INFO:     127.0.0.1:64992 - "POST /sessions/chat-79646ef2dd2cca72/end HTTP/1.1" 204 No Content
+[web] [browser] Uncaught Error: An unexpected Turbopack error occurred. Please see the output of `next dev` for more details.
+[web] [browser] Uncaught Error: An unexpected Turbopack error occurred. Please see the output of `next dev` for more details.
+[web] [browser] Uncaught Error: An unexpected Turbopack error occurred. Please see the output of `next dev` for more details.
+[web] [browser] Uncaught Error: An unexpected Turbopack error occurred. Please see the output of `next dev` for more details.
+[web]  POST /api/orchestrator/end 204 in 375ms (next.js: 23ms, application-code: 352ms)
+[web] [browser] Uncaught Error: An unexpected Turbopack error occurred. Please see the output of `next dev` for more details.
+[web] [browser] Uncaught Error: An unexpected Turbopack error occurred. Please see the output of `next dev` for more details.
+[worker] 
+[worker] Tool #1: think
+[worker] 2026-09-16T07:51:47.481536Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1183605 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[web] [browser] Uncaught TypeError: Cannot read properties of undefined (reading 'split')
+[web]     at createRawTokens (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_ai-elements_11v3inu._.js:859:22)
+[web]     at CodeBlockContent.useMemo[rawTokens] (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_ai-elements_11v3inu._.js:1016:52)
+[web]     at mountMemo (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:5393:25)
+[web]     at Object.useMemo (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:15213:24)
+[web]     at exports.useMemo (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_18mebsk._.js:1742:36)
+[web]     at CodeBlockContent (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_ai-elements_11v3inu._.js:1015:396)
+[web]     at CodeBlock (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_ai-elements_11v3inu._.js:1090:419)
+[web]     at ToolInput (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_ai-elements_11v3inu._.js:2880:429)
+[web]     at renderDynamicTool (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_v0_0gzmixy._.js?id=%255Bproject%255D%252Fcomponents%252Fv0%252Fagent-activity.tsx+%255Bapp-client%255D+%2528ecmascript%2529:2580:439)
+[web]     at eval (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_v0_0gzmixy._.js?id=%255Bproject%255D%252Fcomponents%252Fv0%252Fagent-activity.tsx+%255Bapp-client%255D+%2528ecmascript%2529:2514:39)
+[web]     at Array.map (<anonymous>)
+[web]     at AgentActivity (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_v0_0gzmixy._.js?id=%255Bproject%255D%252Fcomponents%252Fv0%252Fagent-activity.tsx+%255Bapp-client%255D+%2528ecmascript%2529:2414:36)
+[web]     at <unknown> (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_v0_0gzmixy._.js:11397:507)
+[web]     at Array.map (<anonymous>)
+[web]     at AgentChat (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_v0_0gzmixy._.js:11390:62)
+[web]     at Page (app/page.tsx:8:7)
+[web]    6 |     <main className="relative flex h-dvh flex-col overflow-hidden">
+[web]    7 |       <SiteHeader />
+[web] >  8 |       <AgentChat />
+[web]      |       ^
+[web]    9 |     </main>
+[web]   10 |   )
+[web]   11 | }
+[web] [browser] Uncaught TypeError: Cannot read properties of undefined (reading 'split')
+[web]     at createRawTokens (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_ai-elements_11v3inu._.js:859:22)
+[web]     at CodeBlockContent.useMemo[rawTokens] (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_ai-elements_11v3inu._.js:1016:52)
+[web]     at mountMemo (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:5393:25)
+[web]     at Object.useMemo (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:15213:24)
+[web]     at exports.useMemo (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_18mebsk._.js:1742:36)
+[web]     at CodeBlockContent (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_ai-elements_11v3inu._.js:1015:396)
+[web]     at Object.react_stack_bottom_frame (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:15037:24)
+[web]     at renderWithHooks (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:4620:24)
+[web]     at updateFunctionComponent (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:6081:21)
+[web]     at beginWork (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:6691:24)
+[web]     at runWithFiberInDEV (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:965:74)
+[web]     at performUnitOfWork (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:9555:97)
+[web]     at workLoopSync (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:9449:40)
+[web]     at renderRootSync (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:9433:13)
+[web]     at performWorkOnRoot (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:9098:47)
+[web]     at performSyncWorkOnRoot (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:10263:9)
+[web]     at flushSyncWorkAcrossRoots_impl (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:10179:316)
+[web]     at processRootScheduleInMicrotask (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:10200:106)
+[web]     at <unknown> (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/12e1_next_dist_compiled_react-dom_0achz24._.js:10274:158)
+[web]     at CodeBlock (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_ai-elements_11v3inu._.js:1090:419)
+[web]     at ToolInput (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_ai-elements_11v3inu._.js:2880:429)
+[web]     at renderDynamicTool (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_v0_0gzmixy._.js?id=%255Bproject%255D%252Fcomponents%252Fv0%252Fagent-activity.tsx+%255Bapp-client%255D+%2528ecmascript%2529:2580:439)
+[web]     at eval (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_v0_0gzmixy._.js?id=%255Bproject%255D%252Fcomponents%252Fv0%252Fagent-activity.tsx+%255Bapp-client%255D+%2528ecmascript%2529:2514:39)
+[web]     at Array.map (<anonymous>)
+[web]     at AgentActivity (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_v0_0gzmixy._.js?id=%255Bproject%255D%252Fcomponents%252Fv0%252Fagent-activity.tsx+%255Bapp-client%255D+%2528ecmascript%2529:2414:36)
+[web]     at <unknown> (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_v0_0gzmixy._.js:11397:507)
+[web]     at Array.map (<anonymous>)
+[web]     at AgentChat (file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/static/chunks/components_v0_0gzmixy._.js:11390:62)
+[web]     at Page (about://React/Server/file:///Users/tims-stuff/Desktop/v0-clone-blurple/.next/dev/server/chunks/ssr/%5Broot-of-the-server%5D__0hzgkxu._.js?5:102:464)
+[web] ✓ Compiled in 718.2s
+[web] ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+[web] ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+[web] ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+[web] ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+[web] ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+[web] 
+[web] -----
+[web] [1m[31mFATAL[39m[0m: An unexpected Turbopack error occurred. A panic log has been written to /var/folders/c8/y41r0sp91172dqm_0jk3wcww0000gn/T/next-panic-f0759369737d4e820e0b900ce417ae5.log.
+[web] 
+[web] To help make Turbopack better, report this error by ]8;;https://bugs.nextjs.org/search?category=turbopack-error-report&title=Turbopack%20Error%3A%20Failed%20to%20write%20app%20endpoint%20%2Fpage&body=Turbopack%20version%3A%20%60v16.2.12%60%0ANext.js%20version%3A%20%600.0.0%60%0A%0AError%20message%3A%0A%60%60%60%0AFailed%20to%20write%20app%20endpoint%20%2Fpage%0A%0ACaused%20by%3A%0A-%20%5Bproject%5D%2Fapp%2Fglobals.css%20%5Bapp-client%5D%20%28css%29%0A-%20failed%20to%20receive%20message%0A-%20reading%20packet%20length%0A-%20timeout%20while%20receiving%20message%20from%20process%0A-%20deadline%20has%20elapsed%0A%0ADebug%20info%3A%0A-%20Execution%20of%20get_written_endpoint_with_issues_operation%20failed%0A-%20Execution%20of%20endpoint_write_to_disk%20failed%0A-%20Execution%20of%20%3CAppEndpoint%20as%20Endpoint%3E%3A%3Aoutput%20failed%0A-%20Failed%20to%20write%20app%20endpoint%20%2Fpage%0A-%20Execution%20of%20%2Aall_asset_paths%20failed%0A-%20Execution%20of%20%2AAppEndpointOutput%3A%3Aoutput_assets%20failed%0A-%20Execution%20of%20AppEndpoint%3A%3Aoutput%20failed%0A-%20Execution%20of%20AppProject%3A%3Aapp_module_graphs%20failed%0A-%20Execution%20of%20%2A%3CAppEndpoint%20as%20Endpoint%3E%3A%3Aadditional_entries%20failed%0A-%20Execution%20of%20ModuleGraph%3A%3Afrom_graphs%20failed%0A-%20Execution%20of%20ModuleGraph%3A%3Acreate%20failed%0A-%20Execution%20of%20SingleModuleGraph%3A%3Anew_with_entries_visited_intern%20failed%0A-%20%5Bproject%5D%2Fapp%2Fglobals.css%20%5Bapp-client%5D%20%28css%29%0A-%20Execution%20of%20primary_chunkable_referenced_modules%20failed%0A-%20Execution%20of%20%3CCssModule%20as%20Module%3E%3A%3Areferences%20failed%0A-%20Execution%20of%20parse_css%20failed%0A-%20Execution%20of%20%3CPostCssTransformedAsset%20as%20Asset%3E%3A%3Acontent%20failed%0A-%20Execution%20of%20PostCssTransformedAsset%3A%3Aprocess%20failed%0A-%20Execution%20of%20evaluate_webpack_loader%20failed%0A-%20failed%20to%20receive%20message%0A-%20reading%20packet%20length%0A-%20timeout%20while%20receiving%20message%20from%20process%0A-%20deadline%20has%20elapsed%0A%60%60%60&labels=Turbopack,Turbopack%20Panic%20Backtrace\clicking here.]8;;\
+[web] -----
+[web] 
+[web]  GET / 500 in 34ms (next.js: 23ms, application-code: 11ms)
+[web]  GET / 500 in 32ms (next.js: 28ms, application-code: 5ms)
+[web]  GET / 500 in 19ms (next.js: 11ms, application-code: 7ms)
+[web] [browser] Uncaught Error: An unexpected Turbopack error occurred. Please see the output of `next dev` for more details.
+[web]  GET / 500 in 23ms (next.js: 15ms, application-code: 8ms)
+[web] [browser] Uncaught Error: An unexpected Turbopack error occurred. Please see the output of `next dev` for more details.
+[web] [browser] Uncaught Error: An unexpected Turbopack error occurred. Please see the output of `next dev` for more details.
+[web]  GET / 500 in 21ms (next.js: 12ms, application-code: 9ms)
+[web]  GET / 500 in 11ms (next.js: 4ms, application-code: 6ms)
+[web]  GET / 500 in 15ms (next.js: 9ms, application-code: 6ms)
+[web]  GET / 500 in 11ms (next.js: 5ms, application-code: 6ms)
+[web]  GET / 500 in 9ms (next.js: 4ms, application-code: 5ms)
+[web]  GET / 500 in 6ms (next.js: 3ms, application-code: 4ms)
+[web] [browser] Uncaught Error: An unexpected Turbopack error occurred. Please see the output of `next dev` for more details.
+[web] [browser] Uncaught Error: An unexpected Turbopack error occurred. Please see the output of `next dev` for more details.
+[worker] Got it — I'll remember the phrase **amber kite** for this conversation.
+[worker] Tool #1: think
+[worker] Got it — I'll remember the phrase **amber kite** for this conversation.2026-09-16T07:51:52.198026Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1186141 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 2026-09-16T07:51:57.730241Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1188011 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] An exhaustive, granular breakdown covers all available tools, the hot-reloading/dynamic discovery mechanisms, and desktop/browser capabilities:
+[worker] 
+[worker] ---
+[worker] 
+[worker] ## 1. Complete Inventory of Available Tools
+[worker] 
+[worker] The environment exposes tools categorized across several architectural layers:
+[worker] 
+[worker] ### A. Core Platform & Multi-Agent Orchestration Tools
+[worker] * **`graph`**: Builds and executes multi-agent formations and pipelines in a single streaming call. Supports topological formations including `agent` (specialist nodes), `skill_agent` (isolated skill runs), `swarm` (autonomous dynamic handoffs across 2–5 agents), `workflow` (DAG checklist with dependency resolution), `parallel` (fan-out nodes), and nested `graph` nodes.
+[worker] * **`use_agent`**: Spawns an isolated single-turn sub-agent with a dedicated system prompt, persona, and scoped toolset, streaming its output directly.
+[worker] * **`use_skill`**: Pattern-3 meta-tool executing a registered skill inside an isolated sub-agent where the skill's `SKILL.md` acts as the system prompt.
+[worker] * **`load_skill`**: Progressively loads full instruction references and recipes for core skills into context (e.g., `pplx_sdk`, `sandbox`, `finance_sandbox`, `office`, `office/docx`, `office/pdf`, `office/pptx`, `office/xlsx`).
+[worker] * **`load_tool`**: Hot-loads Python tool definitions dynamically at runtime (from `/tmp/...` or bare modules in `strands_tools`).
+[worker] * **`think`**: Asynchronous multi-cycle reasoning engine powered by GPT-6-Astra with tool execution and reflection capabilities.
+[worker] 
+[worker] ### B. Perplexity Agent API Sub-Agent Tools
+[worker] Preset sub-agents that run research, data retrieval, and complex tasks in background streaming mode:
+[worker] * **`create_fast_agent_response`**: Minimal-latency quick lookups and verifications.
+[worker] * **`create_low_agent_response`**: Lightweight targeted research queries.
+[worker] * **`create_medium_agent_response`**: Standard substantive research.
+[worker] * **`create_high_agent_response`**: Deep multi-step analytical and empirical research.
+[worker] * **`create_xhigh_agent_response`**: Maximum-depth reasoning and synthesis.
+[worker] * **`create_wide_research_agent_response`**: Parallelized fan-out across diverse sources and sub-questions.
+[worker] * **Supporting Agent Management**:
+[worker]   * `list_agent_models`: Authoritative live model catalog discovery (`GET /v1/models`).
+[worker]   * `retrieve_agent_response`: Fetches status, outputs, and usage for stored Agent API runs.
+[worker]   * `cancel_agent_response`: Cancels an active/running Agent API task.
+[worker]   * `list_agent_response_files`: Lists files generated by an Agent API run.
+[worker]   * `download_agent_response_file`: Streams generated files into local disk storage.
+[worker] 
+[worker] ### C. Workspace Filesystem & Execution Sandbox Tools
+[worker] * **`bash`**: Executes terminal commands within the isolated `/home/user/workspace` sandbox directory. Pre-loaded with CLI tools including `ffmpeg`, `yt-dlp`, `mat2`, `gh`, and `pplx`. Supports credential injection presets (e.g. `api_credentials=["github"]`).
+[worker] * **`run_py`**: Runs Python code directly via `python3` in the workspace sandbox, returning stdout, stderr, and exit codes.
+[worker] * **`read` / `read_file`**: Reads workspace text files (with line offset/limit pagination) or extracts binary resource representations.
+[worker] * **`write` / `write_file`**: Creates or completely overwrites workspace files.
+[worker] * **`edit`**: Applies exact sequential string replacements to files.
+[worker] * **`apply_patch`**: Applies unified patches in ASI patch format (`*** Begin Patch`, `+`/`-`).
+[worker] * **`list_dir`**: Directory listing in the virtual filesystem.
+[worker] * **`glob`**: High-performance pattern matching for paths/files.
+[worker] * **`grep`**: Regex pattern matching across files and directories.
+[worker] * **`share_file`**: Generates a user-accessible download link for any workspace deliverable.
+[worker] * **`view_images`**: Multi-image factual visual QA inspector for checking rendering defects (clipping, overlap, fonts, contrast) in generated PDFs, DOCX, or images.
+[worker] 
+[worker] ### D. Shell MCP Client
+[worker] * **`mcp_client`**: Native Model Context Protocol client configured to communicate with local or remote MCP servers (including the pre-connected worker `shell` MCP server providing `shell`, `read_file`, `write_file`, and `list_dir`).
+[worker] * **`shell`**: Direct execution primitive inside the strands-shell virtual shell.
+[worker] 
+[worker] ### E. Financial & Market Data Tools (Populated via S&P/Market Data Feeds)
+[worker] * **`finance_tickers_lookup`**: Resolves company, ETF, index, crypto, or commodity names to canonical ticker symbols.
+[worker] * **`finance_quotes`**: Real-time and latest quote data (price, change, market cap, P/E, EPS, volume, ranges).
+[worker] * **`finance_company_profile`**: Corporate profiles, sectors, executive data, employee counts, and descriptions.
+[worker] * **`finance_company_financials`**: Income statement, balance sheet, and cash flow line items (annual, quarterly, TTM).
+[worker] * **`finance_earnings_history`**: Historical consensus estimates vs. actuals, EPS/revenue surprise, and price moves.
+[worker] * **`finance_earnings_transcript`**: Quartr-backed earnings call transcripts, management remarks, guidance, and Q&A.
+[worker] * **`finance_segments`**: Business line / geographic revenue breakdowns, ARPU, GMV, and operational KPIs.
+[worker] * **`finance_etf_holdings`**: Constituent weightings and holdings for ETFs.
+[worker] 
+[worker] ### F. Public Health Surveillance (PopHIVE) & Data Commons Tools
+[worker] * **PopHIVE**: `pophive__get_current_status`, `pophive__get_trend`, `pophive__get_map`, `pophive__compare`, `pophive__get_coverage`, `pophive__get_overview`, `pophive__get_data`.
+[worker] * **Data Commons**: `datacommons__search_indicators`, `datacommons__search_child_indicators`, `datacommons__get_variable_metadata`, `datacommons__get_observations`, `datacommons__get_child_observations`.
+[worker] 
+[worker] ### G. External Tool / Connector Gateway
+[worker] * **`search_external_tools`**: Searches connected third-party integrations (configured namespace: `linear`).
+[worker] * **`describe_external_tools`**: Retrieves schema definitions for tools discovered in external namespaces.
+[worker] * **`call_external_tool`**: Executes an external integration tool.
+[worker] 
+[worker] ---
+[worker] 
+[worker] ## 2. Tools Discoverable for Hot Reload
+[worker] 
+[worker] Two primary mechanisms enable dynamically discovering, authoring, and hot-reloading tools without restarting the session:
+[worker] 
+[worker] ### A. Community Tool Modules (`strands_tools`)
+[worker] Community tools packaged inside the pre-installed `strands_tools` library are loaded via bare module names:
+[worker] * **Mechanism**:
+[worker]   ```python
+[worker]   load_tool(path="<module_name>", name="<tool_name>")
+[worker]   ```
+[worker]   *(e.g., `load_tool(path="calculator", name="calculator")`)*
+[worker] * **Discovery of Skills & Skills Loader**:
+[worker]   `orchestrator/skills_loader.py` provides progressive discovery tools:
+[worker]   * `load_tool(path="orchestrator/skills_loader.py", name="list_skills")` $\rightarrow$ exposes `list_skills(query=...)` to discover available skills.
+[worker]   * `load_tool(path="orchestrator/skills_loader.py", name="skill")` $\rightarrow$ exposes `skill(skill_name=...)` to inspect the full specification.
+[worker] 
+[worker] ### B. Dynamic Custom Tool Creation & Hot-Loading (Meta-Tooling)
+[worker] Custom tools can be written to disk on demand and immediately registered into the active runtime:
+[worker] 1. **Creation**: The tool code is written to scratch space following the Strands tool specification:
+[worker]    ```python
+[worker]    from typing import Any
+[worker]    from strands.types.tools import ToolResult, ToolUse
+[worker] 
+[worker]    TOOL_SPEC = {
+[worker]        "name": "custom_utility",
+[worker]        "description": "Performs specialized domain processing",
+[worker]        "inputSchema": {
+[worker]            "json": {
+[worker]                "type": "object",
+[worker]                "properties": {
+[worker]                    "target_param": {"type": "string"},
+[worker]                },
+[worker]                "required": ["target_param"],
+[worker]            }
+[worker]        },
+[worker]    }
+[worker] 
+[worker] 
+[worker]    def custom_utility(tool_use: ToolUse, **kwargs: Any) -> ToolResult:
+[worker]      tool_use_id = tool_use["toolUseId"]
+[worker]      param = tool_use["input"]["target_param"]
+[worker]      # Execute logic...
+[worker]      return {
+[worker]          "toolUseId": tool_use_id,
+[worker]          "status": "success",
+[worker]          "content": [{"text": f"Output for {param}"}],
+[worker]      }
+[worker] ```
+[worker] 2. **Registration & Hot Reload**:
+[worker]    ```python
+[worker]    load_tool(path="/tmp/custom_utility.py", name="custom_utility")
+[worker]    ```
+[worker]    The tool registers immediately with the agent and wraps as an activity for the remaining workflow turns and continue-as-new cycles.
+[worker] 
+[worker] ---
+[worker] 
+[worker] ## 3. Browser and Remote Desktop Tooling Capabilities
+[worker] 
+[worker] **Both a web browser and desktop/remote desktop automation systems are available**, operating across multiple complementary tiers:
+[worker] 
+[worker] ### A. Browser Automation Capabilities
+[worker] Browser interaction is supported through direct primitives as well as higher-level agentic skill frameworks:
+[worker] 
+[worker] 1. **Direct Headed Browser Automation Tool (`browser`)**:
+[worker]    Full programmatic control over the system's shared Linux browser with operations including:
+[worker]    * Session & Tab Management: `init_session`, `new_tab`, `switch_tab`, `list_tabs`, `close_tab`, `close`.
+[worker]    * Navigation: `navigate`, `refresh`, `back`, `forward`.
+[worker]    * DOM Interaction: `click`, `type`, `press_key`, `get_text`, `get_html`.
+[worker]    * State & Network: `screenshot`, `get_cookies`, `set_cookies`, `network_intercept`.
+[worker]    * Advanced Engine Control: `execute_cdp` (Chrome DevTools Protocol directly) and `evaluate` (in-page JavaScript execution).
+[worker] 
+[worker] 2. **Specialized Browser Skills / CLIs**:
+[worker]    * **`agent-browser`**: Autonomous browser CLI for multi-step navigation, form completion, web QA, dogfooding, and Electron app control.
+[worker]    * **`browser-use`**: Web automation framework for complex task-driven web interactions.
+[worker]    * **`firecrawl` suite**: Comprehensive scraping, search, deep research, and interaction toolchain (`firecrawl-scrape`, `firecrawl-interact`, `firecrawl-search`, `firecrawl-crawl`).
+[worker]    * **Chrome DevTools MCP (`chrome-devtools`, `a11y-debugging`)**: Deep network inspection, DOM profiling, performance analysis, and accessibility audits.
+[worker] 
+[worker] ---
+[worker] 
+[worker] ### B. Desktop & Remote Desktop Computer Capabilities
+[worker] Desktop GUI control is supported for both the local host environment and remote machines via RDP:
+[worker] 
+[worker] 1. **Direct Desktop Input & Observation Primitives**:
+[worker]    Coordinates (0–999 normalized space) and OS-level input events allow direct interaction with the GUI:
+[worker]    * **Vision / Observation**: `take_screenshot` (full desktop capture including OS chrome, panels, and native windows).
+[worker]    * **Mouse Actions**: `click`, `click_at`, `double_click`, `triple_click`, `right_click`, `middle_click`, `mouse_down`, `mouse_up`, `move`, `hover_at`, `drag_and_drop`, `scroll`, `scroll_at`, `scroll_document`.
+[worker]    * **Keyboard Input**: `type`, `type_text_at`, `press_key`, `key_down`, `key_up`, `hotkey`, `key_combination`.
+[worker]    * **Timing / Sync**: `wait`, `wait_5_seconds`.
+[worker] 
+[worker] 2. **Remote Desktop (RDP) & Native OS Automation Frameworks**:
+[worker]    * **Midscene Desktop (`computer-automation`)**:
+[worker]      * **Local Desktop**: Vision-driven GUI automation for native Linux/macOS/Windows applications without requiring DOM or accessibility labels.
+[worker]      * **Remote Windows Desktop over RDP**: Connects to and drives remote Windows servers/hosts over RDP using screenshots and natural language instructions.
+[worker]    * **Native OS Accessibility Tree Automation (`agent-desktop` & `computer-use`)**:
+[worker]      * Interacts directly with the OS Accessibility Tree (AX UI hierarchy), enabling inspection and manipulation of native applications (Electron apps like Slack, VS Code, Discord, Spotify, as well as native system menus and dialogs).
+[worker]    * **Diagnostic & Support Skills**:
+[worker]      * `windows-desktop-e2e`: End-to-end testing of Windows native apps (WPF, WinForms, Win32, Qt) via `pywinauto` and UI Automation.
+[worker]      * `windows-remote-desktop-connection-doctor`: Diagnostics for Windows App / Azure Virtual Desktop / RDP Shortpath UDP vs. WebSocket connections.
+[worker] Tool #1: think
+[worker] An exhaustive, granular breakdown covers all available tools, the hot-reloading/dynamic discovery mechanisms, and desktop/browser capabilities:
+[worker] 
+[worker] ---
+[worker] 
+[worker] ## 1. Complete Inventory of Available Tools
+[worker] 
+[worker] The environment exposes tools categorized across several architectural layers:
+[worker] 
+[worker] ### A. Core Platform & Multi-Agent Orchestration Tools
+[worker] * **`graph`**: Builds and executes multi-agent formations and pipelines in a single streaming call. Supports topological formations including `agent` (specialist nodes), `skill_agent` (isolated skill runs), `swarm` (autonomous dynamic handoffs across 2–5 agents), `workflow` (DAG checklist with dependency resolution), `parallel` (fan-out nodes), and nested `graph` nodes.
+[worker] * **`use_agent`**: Spawns an isolated single-turn sub-agent with a dedicated system prompt, persona, and scoped toolset, streaming its output directly.
+[worker] * **`use_skill`**: Pattern-3 meta-tool executing a registered skill inside an isolated sub-agent where the skill's `SKILL.md` acts as the system prompt.
+[worker] * **`load_skill`**: Progressively loads full instruction references and recipes for core skills into context (e.g., `pplx_sdk`, `sandbox`, `finance_sandbox`, `office`, `office/docx`, `office/pdf`, `office/pptx`, `office/xlsx`).
+[worker] * **`load_tool`**: Hot-loads Python tool definitions dynamically at runtime (from `/tmp/...` or bare modules in `strands_tools`).
+[worker] * **`think`**: Asynchronous multi-cycle reasoning engine powered by GPT-6-Astra with tool execution and reflection capabilities.
+[worker] 
+[worker] ### B. Perplexity Agent API Sub-Agent Tools
+[worker] Preset sub-agents that run research, data retrieval, and complex tasks in background streaming mode:
+[worker] * **`create_fast_agent_response`**: Minimal-latency quick lookups and verifications.
+[worker] * **`create_low_agent_response`**: Lightweight targeted research queries.
+[worker] * **`create_medium_agent_response`**: Standard substantive research.
+[worker] * **`create_high_agent_response`**: Deep multi-step analytical and empirical research.
+[worker] * **`create_xhigh_agent_response`**: Maximum-depth reasoning and synthesis.
+[worker] * **`create_wide_research_agent_response`**: Parallelized fan-out across diverse sources and sub-questions.
+[worker] * **Supporting Agent Management**:
+[worker]   * `list_agent_models`: Authoritative live model catalog discovery (`GET /v1/models`).
+[worker]   * `retrieve_agent_response`: Fetches status, outputs, and usage for stored Agent API runs.
+[worker]   * `cancel_agent_response`: Cancels an active/running Agent API task.
+[worker]   * `list_agent_response_files`: Lists files generated by an Agent API run.
+[worker]   * `download_agent_response_file`: Streams generated files into local disk storage.
+[worker] 
+[worker] ### C. Workspace Filesystem & Execution Sandbox Tools
+[worker] * **`bash`**: Executes terminal commands within the isolated `/home/user/workspace` sandbox directory. Pre-loaded with CLI tools including `ffmpeg`, `yt-dlp`, `mat2`, `gh`, and `pplx`. Supports credential injection presets (e.g. `api_credentials=["github"]`).
+[worker] * **`run_py`**: Runs Python code directly via `python3` in the workspace sandbox, returning stdout, stderr, and exit codes.
+[worker] * **`read` / `read_file`**: Reads workspace text files (with line offset/limit pagination) or extracts binary resource representations.
+[worker] * **`write` / `write_file`**: Creates or completely overwrites workspace files.
+[worker] * **`edit`**: Applies exact sequential string replacements to files.
+[worker] * **`apply_patch`**: Applies unified patches in ASI patch format (`*** Begin Patch`, `+`/`-`).
+[worker] * **`list_dir`**: Directory listing in the virtual filesystem.
+[worker] * **`glob`**: High-performance pattern matching for paths/files.
+[worker] * **`grep`**: Regex pattern matching across files and directories.
+[worker] * **`share_file`**: Generates a user-accessible download link for any workspace deliverable.
+[worker] * **`view_images`**: Multi-image factual visual QA inspector for checking rendering defects (clipping, overlap, fonts, contrast) in generated PDFs, DOCX, or images.
+[worker] 
+[worker] ### D. Shell MCP Client
+[worker] * **`mcp_client`**: Native Model Context Protocol client configured to communicate with local or remote MCP servers (including the pre-connected worker `shell` MCP server providing `shell`, `read_file`, `write_file`, and `list_dir`).
+[worker] * **`shell`**: Direct execution primitive inside the strands-shell virtual shell.
+[worker] 
+[worker] ### E. Financial & Market Data Tools (Populated via S&P/Market Data Feeds)
+[worker] * **`finance_tickers_lookup`**: Resolves company, ETF, index, crypto, or commodity names to canonical ticker symbols.
+[worker] * **`finance_quotes`**: Real-time and latest quote data (price, change, market cap, P/E, EPS, volume, ranges).
+[worker] * **`finance_company_profile`**: Corporate profiles, sectors, executive data, employee counts, and descriptions.
+[worker] * **`finance_company_financials`**: Income statement, balance sheet, and cash flow line items (annual, quarterly, TTM).
+[worker] * **`finance_earnings_history`**: Historical consensus estimates vs. actuals, EPS/revenue surprise, and price moves.
+[worker] * **`finance_earnings_transcript`**: Quartr-backed earnings call transcripts, management remarks, guidance, and Q&A.
+[worker] * **`finance_segments`**: Business line / geographic revenue breakdowns, ARPU, GMV, and operational KPIs.
+[worker] * **`finance_etf_holdings`**: Constituent weightings and holdings for ETFs.
+[worker] 
+[worker] ### F. Public Health Surveillance (PopHIVE) & Data Commons Tools
+[worker] * **PopHIVE**: `pophive__get_current_status`, `pophive__get_trend`, `pophive__get_map`, `pophive__compare`, `pophive__get_coverage`, `pophive__get_overview`, `pophive__get_data`.
+[worker] * **Data Commons**: `datacommons__search_indicators`, `datacommons__search_child_indicators`, `datacommons__get_variable_metadata`, `datacommons__get_observations`, `datacommons__get_child_observations`.
+[worker] 
+[worker] ### G. External Tool / Connector Gateway
+[worker] * **`search_external_tools`**: Searches connected third-party integrations (configured namespace: `linear`).
+[worker] * **`describe_external_tools`**: Retrieves schema definitions for tools discovered in external namespaces.
+[worker] * **`call_external_tool`**: Executes an external integration tool.
+[worker] 
+[worker] ---
+[worker] 
+[worker] ## 2. Tools Discoverable for Hot Reload
+[worker] 
+[worker] Two primary mechanisms enable dynamically discovering, authoring, and hot-reloading tools without restarting the session:
+[worker] 
+[worker] ### A. Community Tool Modules (`strands_tools`)
+[worker] Community tools packaged inside the pre-installed `strands_tools` library are loaded via bare module names:
+[worker] * **Mechanism**:
+[worker]   ```python
+[worker]   load_tool(path="<module_name>", name="<tool_name>")
+[worker]   ```
+[worker]   *(e.g., `load_tool(path="calculator", name="calculator")`)*
+[worker] * **Discovery of Skills & Skills Loader**:
+[worker]   `orchestrator/skills_loader.py` provides progressive discovery tools:
+[worker]   * `load_tool(path="orchestrator/skills_loader.py", name="list_skills")` $\rightarrow$ exposes `list_skills(query=...)` to discover available skills.
+[worker]   * `load_tool(path="orchestrator/skills_loader.py", name="skill")` $\rightarrow$ exposes `skill(skill_name=...)` to inspect the full specification.
+[worker] 
+[worker] ### B. Dynamic Custom Tool Creation & Hot-Loading (Meta-Tooling)
+[worker] Custom tools can be written to disk on demand and immediately registered into the active runtime:
+[worker] 1. **Creation**: The tool code is written to scratch space following the Strands tool specification:
+[worker]    ```python
+[worker]    from typing import Any
+[worker]    from strands.types.tools import ToolResult, ToolUse
+[worker] 
+[worker]    TOOL_SPEC = {
+[worker]        "name": "custom_utility",
+[worker]        "description": "Performs specialized domain processing",
+[worker]        "inputSchema": {
+[worker]            "json": {
+[worker]                "type": "object",
+[worker]                "properties": {
+[worker]                    "target_param": {"type": "string"},
+[worker]                },
+[worker]                "required": ["target_param"],
+[worker]            }
+[worker]        },
+[worker]    }
+[worker] 
+[worker] 
+[worker]    def custom_utility(tool_use: ToolUse, **kwargs: Any) -> ToolResult:
+[worker]      tool_use_id = tool_use["toolUseId"]
+[worker]      param = tool_use["input"]["target_param"]
+[worker]      # Execute logic...
+[worker]      return {
+[worker]          "toolUseId": tool_use_id,
+[worker]          "status": "success",
+[worker]          "content": [{"text": f"Output for {param}"}],
+[worker]      }
+[worker] ```
+[worker] 2. **Registration & Hot Reload**:
+[worker]    ```python
+[worker]    load_tool(path="/tmp/custom_utility.py", name="custom_utility")
+[worker]    ```
+[worker]    The tool registers immediately with the agent and wraps as an activity for the remaining workflow turns and continue-as-new cycles.
+[worker] 
+[worker] ---
+[worker] 
+[worker] ## 3. Browser and Remote Desktop Tooling Capabilities
+[worker] 
+[worker] **Both a web browser and desktop/remote desktop automation systems are available**, operating across multiple complementary tiers:
+[worker] 
+[worker] ### A. Browser Automation Capabilities
+[worker] Browser interaction is supported through direct primitives as well as higher-level agentic skill frameworks:
+[worker] 
+[worker] 1. **Direct Headed Browser Automation Tool (`browser`)**:
+[worker]    Full programmatic control over the system's shared Linux browser with operations including:
+[worker]    * Session & Tab Management: `init_session`, `new_tab`, `switch_tab`, `list_tabs`, `close_tab`, `close`.
+[worker]    * Navigation: `navigate`, `refresh`, `back`, `forward`.
+[worker]    * DOM Interaction: `click`, `type`, `press_key`, `get_text`, `get_html`.
+[worker]    * State & Network: `screenshot`, `get_cookies`, `set_cookies`, `network_intercept`.
+[worker]    * Advanced Engine Control: `execute_cdp` (Chrome DevTools Protocol directly) and `evaluate` (in-page JavaScript execution).
+[worker] 
+[worker] 2. **Specialized Browser Skills / CLIs**:
+[worker]    * **`agent-browser`**: Autonomous browser CLI for multi-step navigation, form completion, web QA, dogfooding, and Electron app control.
+[worker]    * **`browser-use`**: Web automation framework for complex task-driven web interactions.
+[worker]    * **`firecrawl` suite**: Comprehensive scraping, search, deep research, and interaction toolchain (`firecrawl-scrape`, `firecrawl-interact`, `firecrawl-search`, `firecrawl-crawl`).
+[worker]    * **Chrome DevTools MCP (`chrome-devtools`, `a11y-debugging`)**: Deep network inspection, DOM profiling, performance analysis, and accessibility audits.
+[worker] 
+[worker] ---
+[worker] 
+[worker] ### B. Desktop & Remote Desktop Computer Capabilities
+[worker] Desktop GUI control is supported for both the local host environment and remote machines via RDP:
+[worker] 
+[worker] 1. **Direct Desktop Input & Observation Primitives**:
+[worker]    Coordinates (0–999 normalized space) and OS-level input events allow direct interaction with the GUI:
+[worker]    * **Vision / Observation**: `take_screenshot` (full desktop capture including OS chrome, panels, and native windows).
+[worker]    * **Mouse Actions**: `click`, `click_at`, `double_click`, `triple_click`, `right_click`, `middle_click`, `mouse_down`, `mouse_up`, `move`, `hover_at`, `drag_and_drop`, `scroll`, `scroll_at`, `scroll_document`.
+[worker]    * **Keyboard Input**: `type`, `type_text_at`, `press_key`, `key_down`, `key_up`, `hotkey`, `key_combination`.
+[worker]    * **Timing / Sync**: `wait`, `wait_5_seconds`.
+[worker] 
+[worker] 2. **Remote Desktop (RDP) & Native OS Automation Frameworks**:
+[worker]    * **Midscene Desktop (`computer-automation`)**:
+[worker]      * **Local Desktop**: Vision-driven GUI automation for native Linux/macOS/Windows applications without requiring DOM or accessibility labels.
+[worker]      * **Remote Windows Desktop over RDP**: Connects to and drives remote Windows servers/hosts over RDP using screenshots and natural language instructions.
+[worker]    * **Native OS Accessibility Tree Automation (`agent-desktop` & `computer-use`)**:
+[worker]      * Interacts directly with the OS Accessibility Tree (AX UI hierarchy), enabling inspection and manipulation of native applications (Electron apps like Slack, VS Code, Discord, Spotify, as well as native system menus and dialogs).
+[worker]    * **Diagnostic & Support Skills**:
+[worker]      * `windows-desktop-e2e`: End-to-end testing of Windows native apps (WPF, WinForms, Win32, Qt) via `pywinauto` and UI Automation.
+[worker]      * `windows-remote-desktop-connection-doctor`: Diagnostics for Windows App / Azure Virtual Desktop / RDP Shortpath UDP vs. WebSocket connections.
+[web]  POST /api/orchestrator 200 in 12.4min (next.js: 4ms, application-code: 12.4min)
+[worker] 2026-09-16T07:52:04.047843Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1387795 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 2026-09-16T07:52:13.793187Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1394504 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[web] ⚠ Found a change in next.config.mjs. Restarting the server to apply the changes...
+[web] ▲ Next.js 16.2.12 (Turbopack)
+[web] - Local:         http://localhost:3000
+[web] - Network:       http://10.11.7.65:3000
+[web] - Environments: .env.local
+[web] ✓ Ready in 272ms
+[web] 
+[web] ○ Compiling / ...
+[web]  GET / 200 in 6.2s (next.js: 5.2s, application-code: 988ms)
+[web]  GET / 200 in 6.2s (next.js: 5.3s, application-code: 842ms)
+[web]  GET / 200 in 6.2s (next.js: 5.2s, application-code: 945ms)
+[web]  GET / 200 in 6.2s (next.js: 5.3s, application-code: 899ms)
+[web]  GET / 200 in 6.2s (next.js: 5.4s, application-code: 836ms)
+[web]  GET / 200 in 188ms (next.js: 11ms, application-code: 176ms)
+[api] INFO:     127.0.0.1:65377 - "GET /health HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:65385 - "GET /health HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:65379 - "GET /health HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:65387 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 805ms (next.js: 406ms, application-code: 399ms)
+[web]  GET /api/models 200 in 88ms (next.js: 5ms, application-code: 84ms)
+[web]  GET /api/models 200 in 865ms (next.js: 478ms, application-code: 386ms)
+[web]  GET /api/models 200 in 52ms (next.js: 3ms, application-code: 49ms)
+[api] INFO:     127.0.0.1:65378 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 996ms (next.js: 517ms, application-code: 479ms)
+[api] INFO:     127.0.0.1:65377 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 19ms (next.js: 1665µs, application-code: 18ms)
+[api] INFO:     127.0.0.1:65486 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 298ms (next.js: 32ms, application-code: 267ms)
+[api] INFO:     127.0.0.1:49220 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 391ms (next.js: 25ms, application-code: 365ms)
+[worker] 2026-09-16T07:54:16.051109Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1522466 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[api] INFO:     127.0.0.1:49288 - "POST /sessions HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:49288 - "GET /health HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:49290 - "POST /sessions/chat-7c3fcc30c4919406/turns/stream HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 20ms (next.js: 6ms, application-code: 14ms)
+[worker] INFO:httpx:HTTP Request: GET https://api.perplexity.ai/v1/models "HTTP/1.1 200 OK"
+[worker] 2026-09-16T07:54:26.356070Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=752261 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #1: think
+[worker] 2026-09-16T07:54:32.587665Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1181967 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #2: shell
+[worker] 2026-09-16T07:54:37.040285Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1530257 limit=524288
+[worker] 2026-09-16T07:54:37.934691Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1181162 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] Got it — I'll remember the phrase **amber kite** for this conversation.2026-09-16T07:54:43.746201Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=640259 limit=524288
+[web]  POST /api/orchestrator 200 in 18.4s (next.js: 265ms, application-code: 18.1s)
+[worker] 
+[worker] Tool #3: list_dir
+[worker] 2026-09-16T07:54:58.239609Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1531801 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #4: load_tool
+[worker] 2026-09-16T07:55:07.031505Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1534162 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #5: take_screenshot
+[worker] 2026-09-16T07:55:28.295692Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1537463 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[api] INFO:     127.0.0.1:49533 - "POST /sessions/chat-7c3fcc30c4919406/turns/stream HTTP/1.1" 200 OK
+[worker] INFO:httpx:HTTP Request: GET https://api.perplexity.ai/v1/models "HTTP/1.1 200 OK"
+[worker] 2026-09-16T07:56:13.172138Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=752975 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #1: think
+[worker] 2026-09-16T07:56:19.985225Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1183928 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 2026-09-16T07:56:24.577417Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1183037 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] amber kite2026-09-16T07:56:30.311407Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=639934 limit=524288
+[web]  POST /api/orchestrator 200 in 18.7s (next.js: 107ms, application-code: 18.6s)
+[worker] ERROR:temporalio.worker._workflow:Failed handling activation on workflow with run ID 01a0a926-4840-7d46-8de7-1b746e98337b
+[worker] Traceback (most recent call last):
+[worker]   File "<string>", line 2, in __init__
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow_instance.py", line 2585, in _process_signal_job
+[worker]     input = HandleSignalInput(
+[worker]         signal=job.signal_name, args=args, headers=job.headers
+[worker]     )
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow_instance.py", line 1118, in _apply_signal_workflow
+[worker]     self._process_signal_job(signal_defn, job)
+[worker]     ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow_instance.py", line 640, in _apply
+[worker]     self._apply_signal_workflow(job.signal_workflow)
+[worker]     ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow_instance.py", line 517, in activate
+[worker]     self._apply(job)
+[worker]     ~~~~~~~~~~~^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow.py", line 925, in activate
+[worker]     return self.instance.activate(act)
+[worker]            ~~~~~~~~~~~~~~~~~~~~~~^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/opentelemetry/instrumentation/threading/__init__.py", line 161, in wrapped_func
+[worker]     return original_func(*func_args, **func_kwargs)
+[worker]   File "/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/concurrent/futures/thread.py", line 59, in run
+[worker]     result = self.fn(*self.args, **self.kwargs)
+[worker]   File "/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/concurrent/futures/thread.py", line 93, in _worker
+[worker]     work_item.run()
+[worker]     ~~~~~~~~~~~~~^^
+[worker]   File "/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/threading.py", line 995, in run
+[worker]     self._target(*self._args, **self._kwargs)
+[worker]     ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/opentelemetry/instrumentation/threading/__init__.py", line 141, in __wrap_threading_run
+[worker]     return call_wrapped(*args, **kwargs)
+[worker]   File "/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/threading.py", line 1044, in _bootstrap_inner
+[worker]     self.run()
+[worker]     ~~~~~~~~^^
+[worker]   File "/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/threading.py", line 1015, in _bootstrap
+[worker]     self._bootstrap_inner()
+[worker]     ~~~~~~~~~~~~~~~~~~~~~^^
+[worker] temporalio.worker._workflow._DeadlockError: [TMPRL1101] Potential deadlock detected: workflow didn't yield within 2 second(s).
+[worker] 2026-09-16T07:56:44.856720Z  WARN temporalio_sdk_core::worker::workflow: Failing workflow task run_id=01a0a926-4840-7d46-8de7-1b746e98337b failure=Failure { failure: Some(Failure { message: "[TMPRL1101] Potential deadlock detected: workflow didn't yield within 2 second(s).", source: "", stack_trace: "  File \"<string>\", line 2, in __init__\n\n  File \"/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow_instance.py\", line 2585, in _process_signal_job\n    input = HandleSignalInput(\n        signal=job.signal_name, args=args, headers=job.headers\n    )\n\n  File \"/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow_instance.py\", line 1118, in _apply_signal_workflow\n    self._process_signal_job(signal_defn, job)\n    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\n\n  File \"/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow_instance.py\", line 640, in _apply\n    self._apply_signal_workflow(job.signal_workflow)\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\n\n  File \"/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow_instance.py\", line 517, in activate\n    self._apply(job)\n    ~~~~~~~~~~~^^^^^\n\n  File \"/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow.py\", line 925, in activate\n    return self.instance.activate(act)\n           ~~~~~~~~~~~~~~~~~~~~~~^^^^^\n\n  File \"/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/opentelemetry/instrumentation/threading/__init__.py\", line 161, in wrapped_func\n    return original_func(*func_args, **func_kwargs)\n\n  File \"/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/concurrent/futures/thread.py\", line 59, in run\n    result = self.fn(*self.args, **self.kwargs)\n\n  File \"/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/concurrent/futures/thread.py\", line 93, in _worker\n    work_item.run()\n    ~~~~~~~~~~~~~^^\n\n  File \"/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/threading.py\", line 995, in run\n    self._target(*self._args, **self._kwargs)\n    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n  File \"/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/opentelemetry/instrumentation/threading/__init__.py\", line 141, in __wrap_threading_run\n    return call_wrapped(*args, **kwargs)\n\n  File \"/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/threading.py\", line 1044, in _bootstrap_inner\n    self.run()\n    ~~~~~~~~^^\n\n  File \"/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/threading.py\", line 1015, in _bootstrap\n    self._bootstrap_inner()\n    ~~~~~~~~~~~~~~~~~~~~~^^\n", encoded_attributes: None, cause: None, failure_info: Some(ApplicationFailureInfo(ApplicationFailureInfo { r#type: "_DeadlockError", non_retryable: false, details: None, next_retry_delay: None, category: Unspecified })) }), force_cause: Unspecified }
+[worker] 2026-09-16T07:56:45.190738Z  WARN temporalio_sdk_core::worker::workflow: Task not found when completing error=code: 'Some requested entity was not found', message: "Workflow task not found." run_id="01a0a926-4840-7d46-8de7-1b746e98337b"
+[worker] WARNING:temporalio.worker._workflow:[TMPRL1104] 01a0a926-4840-7d46-8de7-1b746e98337b:1051:1 Workflow task exceeded 10 seconds ({'attempt': 1, 'namespace': 'default', 'run_id': '01a0a926-4840-7d46-8de7-1b746e98337b', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-79646ef2dd2cca72', 'workflow_type': 'ChatWorkflow', 'event_id': 1051, 'workflow_task_duration': '13.344s', 'workflow_history_size': 18450862})
+[web] ✓ Finished filesystem cache database compaction in 25.1s
+[worker] 
+[worker] Tool #1: think
+[worker] 
+[worker] Tool #2: shell
+[worker] 
+[worker] Tool #3: list_dir
+[worker] 
+[worker] Tool #4: load_tool
+[worker] 
+[worker] Tool #5: take_screenshot
+[worker] The screenshot confirms the desktop is live: an XFCE Linux session, 1440×900, with a top panel (Applications menu, workspace switcher, clock showing 2026‑09‑16 07:55), desktop icons for **File System** and **Home**, and a bottom dock with a terminal, file manager, web browser, settings, and a folder launcher. Nothing else is running yet.
+[worker] 
+[worker] Here is the full, exhaustive answer to your three questions.
+[worker] 
+[worker] ---
+[worker] 
+[worker] # 1. What tools I have (directly callable right now)
+[worker] 
+[worker] I've grouped them by function. Everything below is a callable function in my tool list this turn — not a skill description or a capability I'm inferring.
+[worker] 
+[worker] ## A. Code execution & shell (three separate execution surfaces)
+[worker] 
+[worker] | Tool | What it is | Notes |
+[worker] |---|---|---|
+[worker] | `bash` | Shell in the **sandbox** (`/home/user/workspace` is cwd) | Preinstalled: `ffmpeg`, `yt-dlp`, `mat2`. Accepts `api_credentials` presets — the only one available is `github` (injects creds for `gh`/`git`). |
+[worker] | `run_py` | Runs a Python program in the same sandbox | Stdlib + whatever's in the image; `pip install` via `bash` persists within a response. |
+[worker] | `shell` | The **strands‑shell** virtual shell (MCP `connection_id="shell"`) | Returns stdout/stderr/exit code. **This is a different machine/filesystem than the sandbox** — I verified this turn: cwd is `/home/lash`, `python3` is not on its PATH, and it cannot see the orchestrator venv. |
+[worker] 
+[worker] ## B. Filesystem tools (two parallel families, backed by different filesystems)
+[worker] 
+[worker] Sandbox‑workspace family: `read`, `write`, `edit` (exact‑string replace, atomic multi‑edit), `apply_patch` (Add/Update/Delete File patch format), `glob`, `grep`, `share_file` (the **only** way a file becomes visible to you), `view_images` (visual QA on 1–8 rendered PNGs — clipping, overlap, contrast, etc.).
+[worker] 
+[worker] Virtual‑filesystem family (strands‑shell MCP): `read_file` (returns text, images as image content, binaries as blobs), `write_file`, `list_dir`.
+[worker] 
+[worker] ## C. Computation
+[worker] 
+[worker] `calculator` — SymPy: evaluate, solve (incl. systems), derive, integrate, limit, series, matrix ops; precision/scientific‑notation control.
+[worker] 
+[worker] ## D. Browser automation — `browser` (one tool, 22 action types)
+[worker] 
+[worker] A stock Chromium‑class browser **running on the shared Linux desktop** (the one in the screenshot), driven via a Playwright/CDP‑style API:
+[worker] 
+[worker] - **Sessions:** `init_session`, `list_local_sessions`, `close`
+[worker] - **Navigation:** `navigate`, `refresh`, `back`, `forward`
+[worker] - **DOM interaction (CSS selectors):** `click`, `type`, `press_key`
+[worker] - **Extraction:** `get_text`, `get_html`, `evaluate` (arbitrary JS), `screenshot`
+[worker] - **Tabs:** `new_tab`, `switch_tab`, `close_tab`, `list_tabs`
+[worker] - **Cookies:** `get_cookies`, `set_cookies`
+[worker] - **Low level:** `network_intercept` (URL‑pattern request monitoring), `execute_cdp` (raw Chrome DevTools Protocol)
+[worker] 
+[worker] ## E. Desktop (computer‑use) control — 30 functions
+[worker] 
+[worker] Operate on the full Linux display, coordinates **0–999 normalized across the screenshot**:
+[worker] 
+[worker] - **Observe:** `take_screenshot`, `wait`, `wait_5_seconds`
+[worker] - **Mouse:** `click`, `click_at`, `double_click`, `triple_click`, `right_click`, `middle_click`, `move`, `hover_at`, `mouse_down`, `mouse_up`, `drag_and_drop`
+[worker] - **Scroll:** `scroll`, `scroll_at`, `scroll_document`
+[worker] - **Keyboard:** `press_key`, `hotkey`, `key_combination`, `key_down`, `key_up`, `type`, `type_text_at` (with `focus=true` to click‑and‑replace a field)
+[worker] - **Browser convenience via the desktop:** `navigate`, `open_web_browser`, `go_back`, `go_forward`
+[worker] 
+[worker] Several of these are aliases of one another (`click`/`click_at`, `move`/`hover_at`, `hotkey`/`key_combination`, `scroll`/`scroll_at`/`scroll_document`, `wait`/`wait_5_seconds`, `navigate`/`open_web_browser`).
+[worker] 
+[worker] ## F. Meta‑tooling, skills, MCP
+[worker] 
+[worker] - `load_tool` — hot‑loads a Python tool (see §2).
+[worker] - `list_skills`, `skill` — enumerate/load the **527 registered agentskills.io skills** (verified count this turn).
+[worker] - `load_skill` — loads the 8 builtin sandbox skills: `finance_sandbox`, `sandbox`, `pplx_sdk`, `office`, `office/docx`, `office/pdf`, `office/pptx`, `office/xlsx`.
+[worker] - `use_skill` — runs a skill as an isolated sub‑agent (SKILL.md becomes its system prompt).
+[worker] - `mcp_client` — connect to / call tools on arbitrary MCP servers (stdio, SSE, HTTP). The `shell` connection is pre‑connected.
+[worker] 
+[worker] ## G. External connectors
+[worker] 
+[worker] - `search_external_tools` → `describe_external_tools` → `call_external_tool`. One namespace is configured this request: **`linear`** (issues, projects, teams, project updates). I have not enumerated its tool names yet this turn; I'd call `search_external_tools` before using it.
+[worker] - **GitHub**: via `gh`/`git` in `bash` with `api_credentials=["github"]`.
+[worker] - Google Drive: **not connected**.
+[worker] 
+[worker] ## H. Multi‑agent orchestration
+[worker] 
+[worker] - `use_agent` — one isolated sub‑agent turn with its own system prompt, optional `model_id` and tool list.
+[worker] - `graph` — Strands formations: `agent`, `skill_agent`, `swarm`, `parallel`, `workflow` (dependency‑ordered tasks), and nested `graph` nodes; streams live.
+[worker] - `think` — GPT‑6‑Astra reasoning cycles with access to my tools (auto‑run once per message; I can call it more).
+[worker] 
+[worker] ## I. Perplexity Agent API sub‑agents
+[worker] 
+[worker] `create_fast_agent_response`, `create_low_...`, `create_medium_...`, `create_high_...`, `create_xhigh_...`, `create_wide_research_agent_response`; plus `list_agent_models`, `retrieve_agent_response`, `cancel_agent_response`, `list_agent_response_files`, `download_agent_response_file`. Support images, structured JSON output, native tools (web_search, fetch_url, finance_search, sandbox, mcp, connector, function), skills, and conversation continuation. Web search itself is done via `pplx search web ...` inside `bash` (no native `search_web` bound this request).
+[worker] 
+[worker] ## J. Finance (8)
+[worker] 
+[worker] `finance_tickers_lookup`, `finance_quotes`, `finance_company_profile`, `finance_company_financials`, `finance_earnings_history`, `finance_earnings_transcript` (Quartr), `finance_segments`, `finance_etf_holdings`. Most materialize CSVs into the sandbox.
+[worker] 
+[worker] ## K. Data Commons (5)
+[worker] 
+[worker] `datacommons__search_indicators`, `datacommons__search_child_indicators`, `datacommons__get_variable_metadata`, `datacommons__get_observations`, `datacommons__get_child_observations`.
+[worker] 
+[worker] ## L. PopHIVE US public‑health surveillance (7)
+[worker] 
+[worker] `pophive__get_current_status`, `get_trend`, `get_map`, `compare`, `get_coverage`, `get_overview`, `get_data`.
+[worker] 
+[worker] ## M. Misc
+[worker] 
+[worker] `current_time` (timezone‑aware ISO timestamp).
+[worker] 
+[worker] **Total: roughly 110 top‑level callable functions**, plus 22 `browser` sub‑actions.
+[worker] 
+[worker] ---
+[worker] 
+[worker] # 2. What's discoverable for hot reload (`load_tool`)
+[worker] 
+[worker] `load_tool(path, name)` uses the public `strands_tools.load_tool` on the worker; a `_HotLoadHook` then records it on workflow state and wraps it as a Temporal activity so it survives future turns and continue‑as‑new. Three resolution routes:
+[worker] 
+[worker] ### Route 1 — Bare module name → installed `strands_tools` package (verified)
+[worker] This turn I hot‑loaded and got success for:
+[worker] - `calculator` → `.../site-packages/strands_tools/calculator.py`
+[worker] - `current_time` → `.../site-packages/strands_tools/current_time.py`
+[worker] 
+[worker] Both resolved to `/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands_tools/`. **Caveat:** I could not enumerate that directory — `shell` runs on a different host (`/home/lash`, no `python3`) and `list_dir` couldn't see the macOS path either. So the loader can see the venv but none of my filesystem tools can. That means I can't give you a *verified* complete list; the modules I'd expect in the upstream `strands-agents-tools` package (unverified here) are:
+[worker] 
+[worker] `a2a_client`, `agent_core_memory`, `agent_graph`, `batch`, `browser`, `calculator`, `code_interpreter`, `cron`, `current_time`, `diagram`, `editor`, `environment`, `file_read`, `file_write`, `generate_image`, `generate_image_stability`, `graph`, `handoff_to_user`, `http_request`, `image_reader`, `journal`, `load_tool`, `mcp_client`, `mem0_memory`, `memory`, `nova_reels`, `python_repl`, `retrieve`, `rss`, `shell`, `slack`, `sleep`, `speak`, `stop`, `swarm`, `tavily`, `think`, `use_agent`, `use_aws`, `use_computer`, `use_llm`, `workflow`, plus newer ones like `exa`, `bright_data`, `elevenlabs`. Any of these that is actually installed will load by bare name; many (e.g. `slack`, `use_aws`, `tavily`) also need credentials to *work*.
+[worker] 
+[worker] ### Route 2 — Orchestrator helper modules (verified)
+[worker] - `orchestrator/skills_loader.py` → `list_skills` (loaded this turn; returned 527 skills) and `skill`.
+[worker] - `orchestrator/tools/` is documented as the home of community modules for `use_agent`/`graph` tool lists, but is not enumerable from my shells.
+[worker] 
+[worker] ### Route 3 — Custom tool files I write (documented, not exercised this turn)
+[worker] Write a `TOOL_SPEC` + matching function to a `.py` via the shell MCP (`write_file`/`shell` heredoc), then `load_tool(path=..., name=...)`. The name/function/`TOOL_SPEC["name"]` must match. Practical wrinkle: the file must be reachable by the **worker's** filesystem (the macOS venv side), not the sandbox's or strands‑shell's — so the path choice matters, and I'd test a small tool first.
+[worker] 
+[worker] ### Not `load_tool`, but also runtime‑discoverable
+[worker] - **527 skills** via `list_skills`/`skill`/`use_skill` (instructions, not executables).
+[worker] - **Linear connector tools** via `search_external_tools`.
+[worker] - **Any MCP server** via `mcp_client`.
+[worker] - **Graph/use_agent tool names**: `use_skill`, `file_read`, `file_write`, plus community modules.
+[worker] 
+[worker] ---
+[worker] 
+[worker] # 3. Do I have both a browser *and* a remote desktop computer?
+[worker] 
+[worker] **Yes — and they are two interfaces onto the same remote machine, plus a third, separate execution sandbox.**
+[worker] 
+[worker] 1. **Remote desktop computer:** verified live by the screenshot above — an XFCE Linux session at 1440×900 with a terminal, file manager, browser, and settings in the dock. I can see it (`take_screenshot`), click/drag/scroll/type anywhere on it, and launch native applications. It is not your Mac and not an RDP host; it's a headed Linux box provisioned for me.
+[worker] 
+[worker] 2. **Browser:** the `browser` tool's description says it is "a stock browser on the shared Linux desktop" — i.e., it runs *on that same display*. So I get the best of both: structured DOM/CDP control (selectors, JS eval, cookies, network interception) through `browser`, and pixel‑level fallback (native dialogs, file pickers, browser chrome, non‑DOM widgets) through the desktop tools — and they can be interleaved on one page.
+[worker] 
+[worker] 3. **Sandbox** (`bash`/`run_py`, `/home/user/workspace`): a separate headless environment for code, data, and file deliverables. It is *not* the desktop's filesystem, and the `shell` MCP is a third environment again (`/home/lash`). Moving files between them requires `share_file`, HTTP, or git.
+[worker] 
+[worker] Practical implications: desktop actions must be serialized (one shared screen, one focus), coordinates are normalized 0–999, and anything I want you to actually receive must go through `share_file` from the sandbox.
+[worker] 
+[worker] **Summary of what I did this turn:** ran a `think` cycle to plan; attempted to enumerate the `strands_tools` package from `shell` and `list_dir` (both failed — different filesystems); hot‑loaded `calculator`, `current_time`, and `list_skills` via `load_tool` to verify the hot‑reload path; listed the 527‑skill registry; and took a desktop screenshot to confirm the remote Linux desktop is live.
+[api] INFO:     127.0.0.1:49911 - "GET /health HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:51376 - "POST /sessions HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:51376 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 29ms (next.js: 5ms, application-code: 24ms)
+[api] INFO:     127.0.0.1:51382 - "POST /sessions/chat-0c56b0eee0670976/turns/stream HTTP/1.1" 200 OK
+[worker] INFO:httpx:HTTP Request: GET https://api.perplexity.ai/v1/models "HTTP/1.1 200 OK"
+[worker] 2026-09-16T08:10:11.997036Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=752061 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #1: think
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 2026-09-16T08:10:26.283998Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1180983 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] Hi! How can I help?
+[web]  POST /api/orchestrator 200 in 23.6s (next.js: 52ms, application-code: 23.6s)
+[web] ✓ Compiled in 16s
+[web] ✓ Compiled in 1880ms
+[web] ✓ Finished filesystem cache database compaction in 14.3s
+[api] INFO:     127.0.0.1:52488 - "GET /health HTTP/1.1" 200 OK
+[web]  GET / 200 in 2.4s (next.js: 2.0s, application-code: 376ms)
+[api] INFO:     127.0.0.1:52575 - "POST /sessions/chat-7c3fcc30c4919406/end HTTP/1.1" 204 No Content
+[web]  POST /api/orchestrator/end 204 in 721ms (next.js: 437ms, application-code: 284ms)
+[api] INFO:     127.0.0.1:52575 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 249ms (next.js: 10ms, application-code: 239ms)
+[api] INFO:     127.0.0.1:52653 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 364ms (next.js: 45ms, application-code: 319ms)
+[web] ✓ Finished filesystem cache database compaction in 15.1s
+[api] INFO:     127.0.0.1:53013 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 278ms (next.js: 18ms, application-code: 260ms)
+[api] INFO:     127.0.0.1:53096 - "POST /sessions HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:53099 - "POST /sessions/chat-7a2ab346565d499e/turns/stream HTTP/1.1" 200 OK
+[worker] INFO:httpx:HTTP Request: GET https://api.perplexity.ai/v1/models "HTTP/1.1 200 OK"
+[worker] 2026-09-16T08:20:06.732560Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=752246 limit=524288
+[api] INFO:     127.0.0.1:53096 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 18ms (next.js: 3ms, application-code: 15ms)
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #1: think
+[worker] 2026-09-16T08:20:18.178199Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1077815 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 2026-09-16T08:20:24.303117Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1081224 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 2026-09-16T08:20:31.373040Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1183153 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] A **queue** is FIFO (first in, first out): items are added at the back with enqueue and removed from the front with dequeue, so they're processed in arrival order — think task scheduling or breadth-first search.
+[worker] 
+[worker] A **stack** is LIFO (last in, first out): items are pushed onto and popped from the same end (the top), so the newest item is handled first — think function call stacks, undo history, or depth-first search.
+[worker] 
+[worker] Both typically offer a peek operation to inspect the next item without removing it; the only real difference is which end you remove from.2026-09-16T08:20:40.539170Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=781717 limit=524288
+[web]  POST /api/orchestrator 200 in 34.8s (next.js: 13ms, application-code: 34.8s)
+[web] ✓ Compiled in 1548ms
+[web]  GET / 200 in 207ms (next.js: 78ms, application-code: 129ms)
+[api] INFO:     127.0.0.1:53320 - "POST /sessions/chat-7a2ab346565d499e/end HTTP/1.1" 204 No Content
+[web]  POST /api/orchestrator/end 204 in 115ms (next.js: 3ms, application-code: 112ms)
+[api] INFO:     127.0.0.1:53320 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 256ms (next.js: 3ms, application-code: 253ms)
+[api] INFO:     127.0.0.1:53320 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 50ms (next.js: 24ms, application-code: 26ms)
+[api] INFO:     127.0.0.1:53320 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 12ms (next.js: 3ms, application-code: 9ms)
+[api] INFO:     127.0.0.1:53320 - "POST /sessions HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:53339 - "POST /sessions/chat-b64c769cc44ad45c/turns/stream HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:53320 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 11ms (next.js: 3ms, application-code: 9ms)
+[worker] INFO:httpx:HTTP Request: GET https://api.perplexity.ai/v1/models "HTTP/1.1 200 OK"
+[worker] 2026-09-16T08:21:28.730093Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=752246 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #1: think
+[worker] 2026-09-16T08:21:40.403787Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1077997 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 2026-09-16T08:21:46.936050Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1081436 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 2026-09-16T08:21:53.861874Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1183463 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] A **queue** is FIFO (first in, first out): items are added at the back with *enqueue* and removed from the front with *dequeue*, so elements leave in arrival order — good for scheduling, buffering, and breadth-first search.
+[worker] 
+[worker] A **stack** is LIFO (last in, first out): items are added and removed from the same end with *push* and *pop*, so the most recently added element leaves first — good for function call tracking, undo history, and depth-first search.
+[worker] 
+[worker] Example: insert A, B, C — a queue returns A first; a stack returns C first. Pick a queue when order of arrival matters, a stack when most-recent-first matters.2026-09-16T08:22:02.398777Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=786041 limit=524288
+[web]  POST /api/orchestrator 200 in 34.5s (next.js: 4ms, application-code: 34.5s)
+[web]  GET / 200 in 296ms (next.js: 111ms, application-code: 185ms)
+[web]  GET / 200 in 182ms (next.js: 49ms, application-code: 133ms)
+[api] INFO:     127.0.0.1:60043 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 1664ms (next.js: 34ms, application-code: 1630ms)
+[web]  GET / 200 in 340ms (next.js: 121ms, application-code: 219ms)
+[web]  GET / 200 in 103ms (next.js: 18ms, application-code: 84ms)
+[web]  GET / 200 in 77ms (next.js: 8ms, application-code: 69ms)
+[api] INFO:     127.0.0.1:49354 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 301ms (next.js: 2ms, application-code: 299ms)
+[api] INFO:     127.0.0.1:50265 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 269ms (next.js: 22ms, application-code: 247ms)
+[api] INFO:     127.0.0.1:50282 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 448ms (next.js: 86ms, application-code: 362ms)
+[api] INFO:     127.0.0.1:50282 - "POST /sessions HTTP/1.1" 200 OK
+[api] INFO:     127.0.0.1:50294 - "GET /health HTTP/1.1" 200 OK
+[web]  GET /api/models 200 in 347ms (next.js: 27ms, application-code: 320ms)
+[api] INFO:     127.0.0.1:50295 - "POST /sessions/chat-ed3e26d046a2d509/turns/stream HTTP/1.1" 200 OK
+[worker] INFO:httpx:HTTP Request: GET https://api.perplexity.ai/v1/models "HTTP/1.1 200 OK"
+[worker] 2026-09-16T09:47:06.925251Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=752104 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #1: think
+[worker] 2026-09-16T09:47:15.991202Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1180688 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] Hi! What can I help you with today?
+[worker] 
+[worker] I can help with things like coding and engineering tasks, research, data analysis, creating documents or spreadsheets, or working with your Linear issues and projects. Just let me know what you're working on.
+[web]  POST /api/orchestrator 200 in 18.1s (next.js: 21ms, application-code: 18.1s)
+[api] INFO:     127.0.0.1:51208 - "POST /sessions/chat-ed3e26d046a2d509/turns/stream HTTP/1.1" 200 OK
+[worker] INFO:httpx:HTTP Request: GET https://api.perplexity.ai/v1/models "HTTP/1.1 200 OK"
+[worker] 2026-09-16T09:53:06.655783Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=753191 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[web] [browser] Uncaught Error: An unexpected Turbopack error occurred. Please see the output of `next dev` for more details.
+[worker] 
+[worker] Tool #2: think
+[worker] 2026-09-16T09:53:22.900402Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1184102 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #3: mcp_client
+[worker] 
+[worker] Tool #4: shell
+[worker] 
+[worker] Tool #5: load_tool
+[worker] 2026-09-16T09:53:32.285409Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1188097 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] The strands-shell virtual shell has no python; I'll try the sandbox bash and the shell's own python path.
+[worker] Tool #6: shell
+[worker] 
+[worker] Tool #7: shell
+[worker] 
+[worker] Tool #8: list_skills
+[worker] 2026-09-16T09:53:40.083536Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1390024 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #9: write_file
+[worker] 2026-09-16T09:54:00.543981Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1396189 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #10: shell
+[worker] 2026-09-16T09:54:07.984310Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1397570 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #11: shell
+[worker] 2026-09-16T09:54:13.659403Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1399183 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #12: write_file
+[worker] 2026-09-16T09:54:26.303771Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1404063 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #13: load_tool
+[worker] ERROR:strands_tools.load_tool:❌ Failed to load tool: Tool file not found: /home/lash/list_loadable_tools.py
+[worker] WARNING:temporalio.activity:Completing activity as failed ({'activity_id': '24', 'activity_type': 'load_tool', 'attempt': 1, 'namespace': 'default', 'task_queue': 'perplexity-orchestrator', 'workflow_id': 'chat-ed3e26d046a2d509', 'workflow_run_id': '01a0a99c-dcbd-7ec1-8c3d-4874cc2bde63', 'workflow_type': 'ChatWorkflow'})
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 351, in _handle_start_activity_task
+[worker]     result = await self._execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         start, running_activity, task_token, data_converter
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 681, in _execute_activity
+[worker]     return await impl.execute_activity(input)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_activity.py", line 890, in execute_activity
+[worker]     return await input.fn(*input.args)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/load_tool.py", line 281, in load_tool_activity
+[worker]     raise ApplicationError(
+[worker]     ...<3 lines>...
+[worker]     )
+[worker] temporalio.exceptions.ApplicationError: LoadToolFailed: ❌ ❌ Failed to load tool: Tool file not found: /home/lash/list_loadable_tools.py
+[worker] 
+[worker] Traceback:
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands_tools/load_tool.py", line 204, in load_tool
+[worker]     raise FileNotFoundError(f"Tool file not found: {path}")
+[worker] FileNotFoundError: Tool file not found: /home/lash/list_loadable_tools.py
+[worker] 
+[worker] ERROR:strands.tools.executors._executor:tool_name=<load_tool> | tool execution failed
+[worker] temporalio.exceptions.ApplicationError: LoadToolFailed: ❌ ❌ Failed to load tool: Tool file not found: /home/lash/list_loadable_tools.py
+[worker] 
+[worker] Traceback:
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands_tools/load_tool.py", line 204, in load_tool
+[worker]     raise FileNotFoundError(f"Tool file not found: {path}")
+[worker] FileNotFoundError: Tool file not found: /home/lash/list_loadable_tools.py
+[worker] 
+[worker] 
+[worker] The above exception was the direct cause of the following exception:
+[worker] 
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/tools/executors/_executor.py", line 461, in terminal
+[worker]     async for event in ctx.tool.stream(tool_use, ctx.invocation_state, **extra_kwargs):
+[worker]     ...<14 lines>...
+[worker]         last_raw_event = event
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_temporal_activity_tool.py", line 68, in stream
+[worker]     result = await workflow.execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         self._activity_name, args=positional, **self._options
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/workflow/_activities.py", line 483, in execute_activity
+[worker]     return await _Runtime.current().workflow_start_activity(
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     ...<14 lines>...
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow_instance.py", line 1994, in run_activity
+[worker]     return await self._await_temporal_operation(
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     ...<3 lines>...
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow_instance.py", line 2218, in _await_temporal_operation
+[worker]     return await _shield_await(fut)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow_instance.py", line 97, in _shield_await
+[worker]     return fut.result()
+[worker]            ~~~~~~~~~~^^
+[worker] temporalio.exceptions.ActivityError: Activity task failed
+[worker] 2026-09-16T09:54:32.283717Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1405881 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #14: load_tool
+[worker] 2026-09-16T09:54:54.993992Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1408768 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] 
+[worker] Tool #15: python_repl
+[worker] 2026-09-16T09:55:35.331508Z  WARN temporalio_sdk_core::worker::workflow: Task not found when completing error=code: 'Some requested entity was not found', message: "Workflow task not found." run_id="01a0a99c-dcbd-7ec1-8c3d-4874cc2bde63"
+[worker] ERROR:strands.tools.executors._executor:tool_name=<load_tool> | tool execution failed
+[worker] temporalio.exceptions.ApplicationError: LoadToolFailed: ❌ ❌ Failed to load tool: Tool file not found: /home/lash/list_loadable_tools.py
+[worker] 
+[worker] Traceback:
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands_tools/load_tool.py", line 204, in load_tool
+[worker]     raise FileNotFoundError(f"Tool file not found: {path}")
+[worker] FileNotFoundError: Tool file not found: /home/lash/list_loadable_tools.py
+[worker] 
+[worker] 
+[worker] The above exception was the direct cause of the following exception:
+[worker] 
+[worker] Traceback (most recent call last):
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/tools/executors/_executor.py", line 461, in terminal
+[worker]     async for event in ctx.tool.stream(tool_use, ctx.invocation_state, **extra_kwargs):
+[worker]     ...<14 lines>...
+[worker]         last_raw_event = event
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/contrib/strands/_temporal_activity_tool.py", line 68, in stream
+[worker]     result = await workflow.execute_activity(
+[worker]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]         self._activity_name, args=positional, **self._options
+[worker]         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/workflow/_activities.py", line 483, in execute_activity
+[worker]     return await _Runtime.current().workflow_start_activity(
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     ...<14 lines>...
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow_instance.py", line 1994, in run_activity
+[worker]     return await self._await_temporal_operation(
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]     ...<3 lines>...
+[worker]     )
+[worker]     ^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow_instance.py", line 2218, in _await_temporal_operation
+[worker]     return await _shield_await(fut)
+[worker]            ^^^^^^^^^^^^^^^^^^^^^^^^
+[worker]   File "/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/temporalio/worker/_workflow_instance.py", line 97, in _shield_await
+[worker]     return fut.result()
+[worker]            ~~~~~~~~~~^^
+[worker] temporalio.exceptions.ActivityError: Activity task failed
+[worker] 2026-09-16T09:55:41.523508Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1425315 limit=524288
+[worker] INFO:httpx:HTTP Request: POST https://api.perplexity.ai/v1/responses "HTTP/1.1 200 OK"
+[worker] Here's the full, transparent inventory. I verified everything below by actually calling tools rather than reciting my system prompt — and I'll flag where I hit dead ends.
+[worker] 
+[worker] ---
+[worker] 
+[worker] ## 1. Tools registered to me right now
+[worker] 
+[worker] ### A. Permanent Strands orchestrator tools (bound at worker startup)
+[worker] 
+[worker] | Tool | Purpose |
+[worker] |---|---|
+[worker] | `think` | Auto-runs before each of your messages; I can also invoke it manually |
+[worker] | `graph` | Multi-agent formations (sequential / parallel / swarm / workflow / nested) |
+[worker] | `use_agent` | One-shot isolated sub-agent |
+[worker] | `use_skill` | Runs a registered skill as an isolated sub-agent |
+[worker] | `load_tool` | Hot-loads Python tool files or `strands_tools` modules at runtime |
+[worker] | `mcp_client` | Connect to / list / call MCP servers |
+[worker] | `skill`, `list_skills` | Progressive-disclosure skill loading (`list_skills` I hot-loaded this turn — see §2) |
+[worker] | `python_repl` | I hot-loaded this from `strands_tools` this turn (see §2) |
+[worker] 
+[worker] ### B. Sandbox / filesystem tools
+[worker] 
+[worker] `bash`, `run_py`, `read`, `write`, `edit`, `apply_patch`, `glob`, `grep`, `list_dir`, `read_file`, `write_file`, `shell`, `share_file`, `view_images`, `load_skill` (for `finance_sandbox`, `sandbox`, `pplx_sdk`, `office/*`)
+[worker] 
+[worker] > **Transparency note on filesystems:** there are actually *three* separate filesystems in play, which tripped me up during this turn:
+[worker] > - **`bash` / `run_py`** → Linux sandbox at `/home/user/workspace`
+[worker] > - **`shell` / `read_file` / `write_file` / `list_dir`** → the `strands-shell` MCP virtual shell, cwd `/home/lash`, no `python3`, no access to your Mac paths
+[worker] > - **`load_tool` / `python_repl`** → run **on the worker process itself** on your Mac (`/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/`)
+[worker] >
+[worker] > This is why my attempt to write a tool file via `write_file` and then `load_tool` it failed — the file landed in the virtual shell, not on your Mac. The `_scratch`/`_output` directories from the file-operations policy also don't exist yet (`mkdir` was denied in the virtual shell).
+[worker] 
+[worker] ### C. Desktop / browser control (headed Linux desktop)
+[worker] 
+[worker] `browser` (full session API), `navigate`, `open_web_browser`, `click`, `click_at`, `double_click`, `triple_click`, `right_click`, `middle_click`, `hover_at`, `move`, `drag_and_drop`, `mouse_down`, `mouse_up`, `scroll`, `scroll_at`, `scroll_document`, `type`, `type_text_at`, `press_key`, `hotkey`, `key_combination`, `key_down`, `key_up`, `go_back`, `go_forward`, `take_screenshot`, `wait`, `wait_5_seconds`
+[worker] 
+[worker] ### D. Perplexity Agent API sub-agents
+[worker] 
+[worker] `create_fast_agent_response`, `create_low_agent_response`, `create_medium_agent_response`, `create_high_agent_response`, `create_xhigh_agent_response`, `create_wide_research_agent_response`, `retrieve_agent_response`, `cancel_agent_response`, `list_agent_models`, `list_agent_response_files`, `download_agent_response_file`
+[worker] 
+[worker] ### E. Finance
+[worker] 
+[worker] `finance_tickers_lookup`, `finance_quotes`, `finance_company_profile`, `finance_company_financials`, `finance_earnings_history`, `finance_earnings_transcript`, `finance_segments`, `finance_etf_holdings`
+[worker] 
+[worker] ### F. Data Commons
+[worker] 
+[worker] `datacommons__search_indicators`, `datacommons__search_child_indicators`, `datacommons__get_observations`, `datacommons__get_child_observations`, `datacommons__get_variable_metadata`
+[worker] 
+[worker] ### G. PopHIVE (US public-health surveillance)
+[worker] 
+[worker] `pophive__get_current_status`, `pophive__get_trend`, `pophive__get_map`, `pophive__compare`, `pophive__get_coverage`, `pophive__get_overview`, `pophive__get_data`
+[worker] 
+[worker] ### H. External-tool bridge
+[worker] 
+[worker] `search_external_tools`, `describe_external_tools`, `call_external_tool`
+[worker] 
+[worker] ---
+[worker] 
+[worker] ### MCP servers
+[worker] 
+[worker] **Verified via `mcp_client(action="list_connections")`:**
+[worker] 
+[worker] | connection_id | transport | command | active |
+[worker] |---|---|---|---|
+[worker] | `shell` | stdio | `/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/bin/strands-shell --mcp` | ✅ (registered at startup, 0 errors) |
+[worker] 
+[worker] That is the **only** MCP server currently connected through `mcp_client`. It exposes 4 tools: `shell`, `read_file`, `write_file`, `list_dir`.
+[worker] 
+[worker] **MCP-like services that are *not* wired through `mcp_client`** but are reachable another way:
+[worker] 
+[worker] - **Linear** — exposed via `search_external_tools` / `call_external_tool` in namespace `linear` (status: `CONNECTED`). I enumerated **48 tools**: `list_issues`, `get_issue`, `save_comment`, `list_comments`, `delete_comment`, `list_projects`, `get_project`, `list_teams`, `get_team`, `list_users`, `get_user`, `list_cycles`, `list_milestones`, `save_milestone`, `list_documents`, `list_templates`, `get_template`, `list_issue_statuses`, `get_issue_status`, `list_issue_labels`, `save_issue_label`, `create_issue_label` (deprecated), `retire_issue_label`, `restore_issue_label`, `list_project_labels`, `save_project_label`, `retire_project_label`, `restore_project_label`, `save_release`, `get_status_updates`, `save_status_update`, `delete_status_update`, `get_notifications`, `share_issue`, `unshare_issue`, `get_attachment`, `prepare_attachment_upload`, `create_attachment_from_upload`, `extract_images`, `list_agent_skills`, `list_diffs`, `get_diff_threads`, `resolve_diff_thread`, `delete_diff_comment`, `submit_diff_review`, `update_diff`. (Note: the search surfaced no `save_issue`/`create_issue` — it may exist under a keyword I didn't query; I only searched 8 keywords.)
+[worker] - **GitHub** — not an MCP server; it's credential injection into `bash` via `api_credentials=["github"]` for `gh`/`git`.
+[worker] - **Data Commons and PopHIVE** — the `datacommons__*` / `pophive__*` prefixes strongly suggest they're MCP-backed, but they're bound directly as native tools, not through `mcp_client`, so I can't introspect their server config.
+[worker] 
+[worker] ---
+[worker] 
+[worker] ## 2. Exhaustive list of hot-loadable tools (via `load_tool`)
+[worker] 
+[worker] `load_tool` accepts two path forms: (a) an absolute path to a `.py` file on **your Mac** (the worker's filesystem), or (b) a bare module name resolved inside the installed `strands_tools` package. I hot-loaded `python_repl` and ran an introspection script on the worker to enumerate everything. Here is the complete result.
+[worker] 
+[worker] **`strands_tools` package location:** `/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands_tools/` — **74 modules** total.
+[worker] 
+[worker] ### ✅ Loadable — `TOOL_SPEC`-style modules (16)
+[worker] 
+[worker] | Module | Description |
+[worker] |---|---|
+[worker] | `agent_graph` | Create and manage graphs of agents with different topologies |
+[worker] | `batch` | Invoke multiple other tool calls simultaneously |
+[worker] | `environment` | Runtime environment variable management |
+[worker] | `file_read` | File reading with search, multiple modes, document mode |
+[worker] | `file_write` | Write content to a file with validation |
+[worker] | `generate_image` | Stable Diffusion image generation |
+[worker] | `generate_image_stability` | Stability AI image generation |
+[worker] | `handoff_to_user` | Hand control to user for confirmation/input |
+[worker] | `http_request` | HTTP requests with Bearer/Basic/JWT/AWS SigV4 auth |
+[worker] | `image_reader` | Read image file into Converse API format |
+[worker] | `journal` | Daily journal entries with tasks and notes |
+[worker] | `mem0_memory` | Mem0 memory store/retrieve |
+[worker] | `python_repl` | Python REPL with PTY + persistent state *(loaded this turn)* |
+[worker] | `retrieve` | Amazon Bedrock Knowledge Base retrieval |
+[worker] | `speak` | TTS via macOS `say` or Amazon Polly |
+[worker] | `stop` | Stop the current event loop cycle |
+[worker] | `use_aws` | boto3 client calls |
+[worker] | `use_llm` | Start a nested AI event loop |
+[worker] 
+[worker] ### ✅ Loadable — `@tool`-decorated modules (44)
+[worker] 
+[worker] `asciimatics_ui`, `bluetooth`, `bright_data`, `calculator`, `clipboard`, `cron`, `current_time`, `cursor`, `diagram`, `dialog`, `dicom` (6 tools: `dicom_read_metadata`, `dicom_read_pixel_data`, `dicom_to_png`, `dicom_query_orthanc`, `dicom_store_orthanc`, `dicom_qido_search`), `dynamic_package`, `editor`, `exa` (`exa_search`, `exa_get_contents`), `face_recognition`, `gmail_helpers` (`gmail_send`, `gmail_reply`), `google_auth`, `graph`, `human_typer`, `listen`, `load_tool`, `mcp_client`, `memory`, `nova_reels`, `npm`, `perplexity_deep_research`, `perplexity_search_api`, `perplexity_sonar_pro`, `rss`, `shell`, `slack` (`slack`, `slack_send_message`), `sleep`, `swarm`, `take_photo`, `tavily` (`tavily_search`, `tavily_extract`, `tavily_crawl`, `tavily_map`), `think`, `use_agent`, `use_computer`, `workflow`, `yolo_vision`, `agent_core_memory`
+[worker] 
+[worker] ### ⚠️ Present but **not loadable** right now — missing optional dependencies (6)
+[worker] 
+[worker] | Module | Error |
+[worker] |---|---|
+[worker] | `a2a_client` | `ImportError: cannot import name 'PushNotificationConfig' from 'a2a.types'` (version mismatch) |
+[worker] | `chat_video` | `No module named 'twelvelabs'` |
+[worker] | `search_video` | `No module named 'twelvelabs'` |
+[worker] | `elasticsearch_memory` | `No module named 'elasticsearch'` |
+[worker] | `mongodb_memory` | `No module named 'pymongo'` |
+[worker] | `strands_google` | `No module named 'strands_google'` |
+[worker] 
+[worker] These would load after a `pip install` of the missing package into the orchestrator venv.
+[worker] 
+[worker] ### ℹ️ Present but not tools (helper/support modules, 10)
+[worker] 
+[worker] `FDA`, `PerplexitySearch`, `aws_virtual_desktop`, `browser`, `code_interpreter`, `errors`, `forge`, `perplexity_reasoning_pro`, `pubmed`, `utils` — these import fine but expose no `TOOL_SPEC` or `@tool` at module level (several are class-based tool providers like `browser`/`code_interpreter` that need instantiation rather than `load_tool`).
+[worker] 
+[worker] ### ✅ Orchestrator-local Python files loadable by absolute path
+[worker] 
+[worker] Found in `/Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/` (no `tools/` subdirectory exists):
+[worker] 
+[worker] `agent_api_tools.py`, `browser_activity.py`, `catalog_workflow.py`, `compare_workflow.py`, `computer_use_activity.py`, `config.py`, `desktop_observation.py`, `desktop_worker.py`, `gemini_model.py`, `graph_activity.py`, `graph_tool.py`, `load_tool.py`, `perplexity_model.py`, `perplexity_operations.py`, `run_worker.py`, `server.py`, `skills_config.py`, **`skills_loader.py`** *(confirmed loadable — I loaded `list_skills` from it this turn; it also exports `skill`)*, `subagent_support.py`, `telemetry.py`, `think_activity.py`, `use_agent_activity.py`, `use_skill_activity.py`, `workflow.py`, `workspace_api.py`, `workspace_files.py`, `workspace_registry.py`, `workspace_service.py`, `workspace_state.py`
+[worker] 
+[worker] Most of these are Temporal activities / infrastructure, not tools — only `skills_loader.py` (and probably `graph_tool.py`, `load_tool.py`) are meant for `load_tool`.
+[worker] 
+[worker] ### Skills (via `list_skills`)
+[worker] 
+[worker] **527 skills registered** — the full list is in the tool output above. Each is invocable via `skill(skill_name=...)` (inline) or `use_skill(...)` (isolated sub-agent), and usable as `skill_agent` nodes in `graph`.
+[worker] 
+[worker] ---
+[worker] 
+[worker] ## Caveats on "unloaded at any time"
+[worker] 
+[worker] `load_tool` **adds** to the registry; I have no `unload_tool`. Per the system description, hot-loaded tools are recorded on workflow state and persist across turns / continue-as-new. So the accurate statement is: **74 `strands_tools` modules are discoverable, 60 load cleanly, 6 need deps, and once loaded they stay loaded for the session.** Two were loaded during this turn (`list_skills`, `python_repl`) and are now part of my active tool set.2026-09-16T09:56:41.200034Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1888045 limit=524288
+[worker] /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands_tools/load_tool.py:222: DeprecationWarning: load_tool_from_filepath is deprecated and will be removed in Strands SDK 2.0. `process_tools` automatically handles loading tools from a filepath.
+[worker]   current_agent.tool_registry.load_tool_from_filepath(tool_name=name, tool_path=path)
+[worker] /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/tools/registry.py:186: DeprecationWarning: ToolLoader.load_tools is deprecated and will be removed in Strands SDK 2.0. Use the `load_tools_from_string` or `load_tools_from_module` methods instead.
+[worker]   loaded_tools = ToolLoader.load_tools(tool_path, tool_name)
+[worker] /Users/tims-stuff/Desktop/v0-clone-blurple/orchestrator/.venv/lib/python3.13/site-packages/strands/tools/loader.py:346: DeprecationWarning: ToolLoader.load_python_tool is deprecated and will be removed in Strands SDK 2.0. Use the `load_tools_from_string` or `load_tools_from_module` methods instead.
+[worker]   return cls.load_python_tools(abs_path, tool_name)
+[worker] 2026-09-16T09:56:41.764749Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=992786 limit=524288
+[worker] 2026-09-16T09:56:41.925839Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=992786 limit=524288
+[web]  POST /api/orchestrator 200 in 3.9min (next.js: 5.7s, application-code: 3.8min)
+[web] [browser] Base UI: A component is changing the default open state of an uncontrolled Collapsible after being initialized. To suppress this warning opt to use a controlled Collapsible. 
+[web]  GET / 200 in 564ms (next.js: 117ms, application-code: 447ms)
+[api] INFO:     127.0.0.1:55807 - "POST /sessions/chat-ed3e26d046a2d509/turns/stream HTTP/1.1" 200 OK
+[worker] 2026-09-16T10:20:02.618031Z  WARN temporalio_common::payload_limits: [TMPRL1103] Attempted to upload payloads with size that exceeded the warning limit. size=1886945 limit=524288
+[web]  POST /api/orchestrator 200 in 674ms (next.js: 24ms, application-code: 650ms)
+[worker] [worker-supervisor] shutdown (signal 15); child reaped, exiting
+[api] INFO:     Shutting down
+[api] INFO:     Waiting for application shutdown.
+[api] INFO:     Application shutdown complete.
+[api] INFO:     Finished server process [7173]
+[api] sh: line 1:  7173 Terminated: 15          .venv/bin/python -u -m uvicorn server:app --port 8787
+[web] [?25h
+[worker] [ELIFECYCLE] Command failed with exit code 143.
+[web] pnpm dev:web exited with code 0
+--> Sending SIGTERM to other processes..
+[api] [ELIFECYCLE] Command failed with exit code 143.
+[api] pnpm dev:api exited with code SIGTERM
+--> Sending SIGTERM to other processes..
+[worker] pnpm dev:worker exited with code 143
+--> Sending SIGTERM to other processes..
+[temporal] pnpm dev:temporal exited with code SIGTERM

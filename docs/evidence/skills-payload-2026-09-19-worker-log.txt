@@ -1,0 +1,1 @@
+INFO:__main__:Worker up on 'perplexity-orchestrator' agent=Orchestrator default_model=preset:high models=55 skills=527 skills_dir=/Users/tims-stuff/Desktop/strands-tools/src/skills mcp_servers=['shell']

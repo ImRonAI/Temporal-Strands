@@ -1,0 +1,3 @@
+{"event": "initialized", "server_name": "Calendar Integration Server", "server_version": "1.29.1", "protocol": "2025-06-18", "ts": "2026-09-07T06:58:05.453490+00:00"}
+{"event": "tools", "count": 7, "names": ["get_current_datetime", "weekday_to_date", "add_event", "list_events", "check_conflicts", "find_available_slots", "delete_event"], "ts": "2026-09-07T06:58:05.465416+00:00"}
+{"event": "call", "tool": "get_current_datetime", "args": {}, "is_error": false, "content": ["\ud83d\udcc5 Current date and time: Sunday, September 06, 2026 at 11:58 PM\n\ud83d\udccd Today is 2026-09-06"], "ts": "2026-09-07T06:58:05.472734+00:00"}

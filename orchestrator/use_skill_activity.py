@@ -1,84 +1,64 @@
 """Pattern 3: ``use_skill`` as a durable Temporal activity with stream publish.
 
-Mirrors ``graph_activity.py``: async-generator tool runs inside the activity;
-each stream frame is published on ``THINKING_TOPIC`` for the SSE bridge.
+The async-generator skill tool runs inside the activity; each stream frame is
+sanitized and published on ``THINKING_TOPIC`` for the SSE bridge. Model and
+publish plumbing is shared with ``graph_activity`` / ``use_agent_activity``
+via ``subagent_support``.
 Reference: aws-samples/sample-strands-agents-agentskills ``create_skill_agent_tool``.
 """
 
 from __future__ import annotations
 
-import json
-import traceback
-from collections.abc import Callable, Mapping
+from contextlib import aclosing
 from typing import Any, cast
 
-from strands import Agent
 from strands.types._events import ToolResultEvent, ToolStreamEvent
-from strands.types.tools import ToolUse
+from strands.types.tools import ToolResult, ToolUse
 from temporalio import activity
 from temporalio.contrib.workflow_streams import WorkflowStreamClient
 from temporalio.exceptions import ApplicationError
 
-from config import THINK_STREAM_BATCH_INTERVAL
+from config import SUBAGENT_STREAM_BATCH_INTERVAL
 from skills_config import create_use_skill_tool
-
-_MODEL_FACTORIES: dict[str, Callable[[], Any]] = {}
-
-
-def configure(model_factories: Mapping[str, Callable[[], Any]]) -> None:
-    _MODEL_FACTORIES.clear()
-    _MODEL_FACTORIES.update(model_factories)
-
-
-async def _session_model() -> Any:
-    info = activity.info()
-    if not info.workflow_id:
-        raise ApplicationError(
-            "use_skill must be scheduled by a workflow",
-            type="UseSkillActivityError",
-            non_retryable=True,
-        )
-    handle = activity.client().get_workflow_handle(info.workflow_id)
-    model_id = await handle.query("model_id")
-    factory = _MODEL_FACTORIES.get(model_id)
-    if factory is None:
-        raise ApplicationError(
-            f"use_skill: no registered model factory for {model_id!r}",
-            type="UseSkillActivityError",
-            non_retryable=True,
-        )
-    return factory()
-
-
-def _json_safe(value: Any) -> Any:
-    try:
-        json.dumps(value)
-        return value
-    except (TypeError, ValueError):
-        return str(value)
-
-
-def _sanitize_stream_payload(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        return {"payload": _json_safe(raw)}
-    skill_name = raw.get("skill_name")
-    inner = raw.get("event")
-    if isinstance(inner, dict):
-        # Strands stream events: surface text deltas when present.
-        delta = inner.get("data")
-        if isinstance(delta, str):
-            return {"skill_name": skill_name, "text": delta, "event": inner}
-    return {
-        "skill_name": skill_name,
-        "event": _json_safe(inner),
-        "text": raw.get("text"),
-    }
+from graph_tool import _select_tools, _tool_name
+from subagent_support import (
+    heartbeat,
+    in_process_model,
+    parent_agent,
+    publishable,
+    sanitize_stream_payload,
+    session_model,
+    workspace_task_prefix,
+)
+import subagent_support
 
 
 @activity.defn(name="use_skill")
-async def use_skill_activity(skill_name: str, request: str) -> dict[str, Any]:
-    """Execute a registered skill in an isolated sub-agent (Agent-as-Tool meta-tool)."""
+async def use_skill_activity(
+    skill_name: str,
+    request: str,
+    skills: list[str] | None = None,
+    tools: list[str] | None = None,
+) -> ToolResult:
+    """Execute a registered skill in an isolated sub-agent (Agent-as-Tool meta-tool).
+
+    Args:
+        skill_name: Registered skill that BECOMES the sub-agent (its SKILL.md
+            is the sub-agent's system prompt).
+        request: The task for the skill sub-agent.
+        skills: Optional registered skill names to assign to the sub-agent as
+            inline tools: it gets a ``skill(skill_name)`` tool scoped to
+            exactly these names and loads their instructions into its own
+            context (Pattern 2) — traditional skill use, never a nested
+            sub-agent. Unknown names fail the call with the available list.
+        tools: Registry names to assign on top of file_read, file_write,
+            shell, and python_repl. Omit this and the sub-agent also receives
+            every community tool loaded on this session. Name the tools this
+            skill needs to give it that set instead. Unknown names are skipped.
+    """
     from workflow import THINKING_TOPIC
+
+    request = workspace_task_prefix(activity.info().workflow_id) + request
 
     tool_use: ToolUse = {
         "toolUseId": activity.info().activity_id,
@@ -87,48 +67,95 @@ async def use_skill_activity(skill_name: str, request: str) -> dict[str, Any]:
     }
 
     try:
-        model = await _session_model()
-        parent = Agent(model=model, tools=[], system_prompt="", callback_handler=None)
-        use_skill_tool = create_use_skill_tool(model)
+        model = in_process_model(await session_model("use_skill"))
+        parent = await parent_agent(await session_model("use_skill"))
+        assigned_tools = _select_tools(parent, tools)
+        use_skill_tool = create_use_skill_tool(
+            model, assigned_skills=skills, tools=assigned_tools
+        )
+        if skills:
+            # The sub-agent's system prompt is the skill's own SKILL.md
+            # (reference _create_skill_agent), so the assigned-skills catalog
+            # rides with the request: the scoped <available_skills> block
+            # tells the sub-agent what its skill(skill_name) tool can load.
+            from skills_config import skills_prompt
+
+            catalog = skills_prompt(skills)
+            if catalog:
+                request = f"{request}\n\n{catalog}"
+        from skills_config import skill_resource_note
+
+        resources = skill_resource_note(skill_name)
+        if resources:
+            request = f"{request}\n\n{resources}"
+        tool_use["input"]["request"] = request
         invocation_state: dict[str, Any] = {"agent": parent, "model": model}
 
         stream_client = WorkflowStreamClient.from_within_activity(
-            batch_interval=THINK_STREAM_BATCH_INTERVAL,
+            batch_interval=SUBAGENT_STREAM_BATCH_INTERVAL,
         )
         topic = stream_client.topic(THINKING_TOPIC)
-        result: dict[str, Any] = {}
+        result: ToolResult | None = None
+        configuration_sent = False
 
-        async with stream_client:
-            async for event in use_skill_tool.stream(tool_use, invocation_state):
+        async with stream_client, aclosing(use_skill_tool.stream(tool_use, invocation_state)) as stream:
+            topic.publish({
+                "tool_use": {"name": "use_skill", "toolUseId": tool_use["toolUseId"]},
+                "data": {"skill_name": skill_name, "type": "skill_start",
+                         "attempt": activity.info().attempt, "request": request,
+                         "skills": skills or [],
+                         "assigned_tools": [_tool_name(tool) for tool in assigned_tools]},
+            })
+            async for event in stream:
+                heartbeat()
                 if isinstance(event, ToolStreamEvent):
                     envelope = cast(dict[str, Any], event["tool_stream_event"])
                     data = envelope.get("data")
+                    # The reference tool exposes the actual sub-agent on each
+                    # frame. Publish only its display configuration, never the
+                    # model client, credentials, or runtime handles.
+                    agent = data.get("agent") if isinstance(data, dict) else None
+                    if not configuration_sent and isinstance(getattr(agent, "system_prompt", None), str):
+                        topic.publish({
+                            "tool_use": {"name": "use_skill", "toolUseId": tool_use["toolUseId"]},
+                            "data": {"skill_name": skill_name, "configuration": {
+                                "systemPrompt": agent.system_prompt,
+                                "userPrompt": request,
+                                "model": await subagent_support.session_model_id(),
+                                "tools": publishable([tool.tool_spec for tool in agent.tool_registry.registry.values()]),
+                                "skills": skills or [],
+                            }},
+                        })
+                        configuration_sent = True
                     topic.publish(
                         {
                             "tool_use": {
                                 "name": "use_skill",
                                 "toolUseId": tool_use["toolUseId"],
                             },
-                            "data": _sanitize_stream_payload(data),
+                            "data": sanitize_stream_payload(data, name_key="skill_name"),
                         }
                     )
                 elif isinstance(event, ToolResultEvent):
-                    result = cast(dict[str, Any], event.tool_result)
+                    result = event.tool_result
+            if result is None:
+                raise ApplicationError("use_skill produced no tool result", non_retryable=True)
+            topic.publish({
+                "tool_use": {"name": "use_skill", "toolUseId": tool_use["toolUseId"]},
+                "data": {"skill_name": skill_name, "type": "skill_complete",
+                         "status": result.get("status", "success"), "result": publishable(result)},
+            })
 
-        if not result:
-            result = {
-                "status": "success",
-                "content": [{"text": f"Skill {skill_name!r} completed."}],
-                "toolUseId": tool_use["toolUseId"],
-            }
         return result
     except ApplicationError:
         raise
     except Exception as error:
-        message = f"Error in use_skill: {error}\n{traceback.format_exc()}"
+        # Raising (not returning) is the framework contract: ``activity_as_tool``
+        # turns a returned value into a success tool result, so an error dict
+        # would reach the model as a successful call (graph_activity._fail).
         activity.logger.error("use_skill activity failed: %s", error)
-        return {
-            "status": "error",
-            "content": [{"text": message}],
-            "toolUseId": tool_use["toolUseId"],
-        }
+        raise ApplicationError(
+            f"Error in use_skill: {error}",
+            type="UseSkillActivityError",
+            non_retryable=True,
+        ) from error

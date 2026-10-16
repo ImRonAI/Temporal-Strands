@@ -1,0 +1,10 @@
+# Git archive applies these rules; standalone bundle validation remains required.
+fair-expanse-493212-h8-138622c839d2.json export-ignore
+**/fair-expanse-493212-h8-138622c839d2.json export-ignore
+.env* export-ignore
+**/.env* export-ignore
+compute.json export-ignore
+.kilo export-ignore
+.omo export-ignore
+.worktrees export-ignore
+orchestrator/.runtime export-ignore

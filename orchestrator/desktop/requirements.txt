@@ -1,0 +1,7 @@
+# Match the installed native tool/worker contracts, without host-only tools.
+temporalio[pydantic]==1.31.0
+strands-agents==1.50.2
+strands-agents-tools[local-chromium-browser]==0.8.5
+playwright==1.61.0
+pydantic==2.13.4
+PyAutoGUI==0.9.54

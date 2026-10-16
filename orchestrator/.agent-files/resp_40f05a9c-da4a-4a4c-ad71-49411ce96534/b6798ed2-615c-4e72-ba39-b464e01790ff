@@ -1,0 +1,767 @@
+# The Future of Case Management Across Health, Enterprise, Law and Government
+
+**Research cut-off:** 27 September 2026  
+**Scope:** “Case management” is treated here as a cross-domain paradigm: goal-directed, knowledge-intensive coordination of people, information, decisions and services around an individual case—a patient or family, legal matter, benefits claim, investigation, customer problem or similar unit of accountability.
+
+## Executive synthesis
+
+The durable future is **not “AI replaces the case manager.”** It is a hybrid operating model in which:
+
+1. **The case remains the unit of accountability, but ceases to be the only data unit.** Enterprise systems are moving from one linear workflow and one case ID toward object-centric records that connect people, providers, claims, documents, events and obligations.
+2. **Routine coordination becomes machine-assisted; consequential discretion stays attributable to people.** Summarization, outreach, coding, document intake, scheduling and evidence retrieval are automating first. Eligibility, clinical necessity, liberty, safety and benefit-denial decisions face growing human-review, explanation and appeal requirements.
+3. **Payment and regulation are becoming design specifications.** Medicare’s APCM/CCM/PCM/TCM/CHI/PIN codes, CMS-0057-F APIs, HTI-1 transparency, 42 CFR Part 2, California SB 1120, the EU AI Act and court AI rules increasingly determine workflow architecture.
+4. **Interoperability—not model intelligence—is the binding constraint.** FHIR/Da Vinci, TEFCA, X-Road, e-filing and digital public infrastructure can make a case longitudinal. Poor identity matching, fragmented authority and unstructured legacy data still block “agentic” execution.
+5. **The evidence supports bounded augmentation, not blanket autonomy.** Case-management effects are heterogeneous; they are strongest for carefully targeted, intensive, relationship-based models. Human–AI studies likewise show large gains inside a model’s competence frontier and losses outside it.
+6. **Markets will grow, but published market sizes are not comparable.** “Case management” may mean a narrow application, professional services, population-health analytics, CRM, BPM/low-code, or an entire care-delivery program. Forecasts should be treated as scenarios, not audited totals.
+
+### Bottom-line outlook to 2030–2035
+
+By 2030, leading systems will combine a **persistent case record, governed rules/decisions, deterministic orchestration, probabilistic AI and an explicit human authority map**. By 2035, the differentiator is unlikely to be the presence of an LLM; it will be whether an organization can prove that its human–AI case process is lawful, equitable, interoperable, resilient and outcome-producing. The main failure mode is “automation without redesign”: adding an agent to fragmented processes, weak data and unmanageable caseloads.
+
+---
+
+# 1. Health and human-services case management
+
+## A. Current state and hard numbers
+
+### Professional standards and workforce
+
+* **Latest CMSA standard.** The latest full *CMSA Standards of Practice for Case Management* remains the **2022 revision**. It reorganized 15 standards around execution of the case-management process. In October 2024 CMSA added **Standard Q: Diversity, Equity, Inclusion and Belonging and Health Equity**; it is an addendum, not a new full edition [H1].
+* **Certification scale.** CCMC/The Commission reported **49,789 active CCM certificants** across the April, August and December 2025 cycles; its public wording is “more than 50,000” active CCMs and more than 71,000 certified since 1993. The 2025 exam-cycle total was **5,041 candidates with a 74% pass rate**. Because certification is optional and titles vary, this is not the total US case-management workforce [H2].
+* **Aging pipeline.** CCMC’s 2024 Job Task Analysis obtained **2,145 usable responses**. Thirty-six percent held a master’s and 3% a doctorate; 41% said employers required certification; nearly 29% had more than 20 years in case management; only 4% were under 35; almost 15% were 65 or older, up from 7% in 2019. The survey was purposive and had roughly a 3.2% usable response rate, so it describes respondents, not a probability sample [H3].
+* **Adherence guidance.** CMSA’s current *Case Management Adherence Guide* is **CMAG 2020**. It combines health-literacy, readiness, medication-knowledge, social-support and motivational tools. The instruments have validation histories, but the guide itself should not be mistaken for an RCT showing that the complete bundle improves hard outcomes [H4].
+
+### Medicare care-management architecture
+
+Medicare now pays for a layered set of longitudinal coordination services:
+
+* **CCM:** CPT 99490/99439 for clinical-staff time, and 99487/99489 for complex CCM; eligibility generally requires at least two chronic conditions expected to last 12 months or until death. The base non-complex service starts at 20 minutes/month. CPT 99491 covers personally delivered physician/QHP time [H5].
+* **PCM:** CPT 99424–99427 supports management of one serious, high-risk chronic condition, using 30-minute base increments depending on whether the physician/QHP or clinical staff performs the work.
+* **TCM:** CPT 99495 requires contact within two business days, at least moderate-complexity decision-making and a face-to-face visit within 14 days; 99496 requires high complexity and a visit within seven days [H6].
+* **CHI and PIN:** Since 2024, HCPCS G0019/G0022 (Community Health Integration) and G0023/G0024, with peer-support variants, pay trained auxiliary personnel—including community health workers—for navigation around non-medical barriers and serious illness. CMS’s 2026 rule replaced some “social determinants” wording with broader **“upstream drivers,”** expanded eligible initiating encounters and clarified participation by behavioral-health professionals [H7].
+* **APCM:** Effective 1 January 2025, HCPCS **G0556, G0557 and G0558** pay a monthly bundle according to medical and social complexity. APCM absorbs elements of CCM, PCM, TCM, interprofessional consultation and communications technology, reducing minute-by-minute billing. It points toward prospective, relationship-based primary-care payment rather than a stack of narrowly timed tasks [H8].
+* **2026 PFS:** The CY 2026 final rule created separate conversion factors for qualifying APM participants and others, retained/expanded advanced primary-care policy, added behavioral-health integration options around APCM and refined CHI/PIN language. These are payment rules, not evidence that every billed service improves outcomes [H9].
+
+### What does the effectiveness evidence show?
+
+The answer is **targeting- and model-dependent**, not a universal positive effect.
+
+* A 2015 systematic review/meta-analysis of **36 studies** (28 RCTs) of primary-care case management for people at risk of hospitalization found no significant difference in total cost, mortality, primary-care use or secondary-care use; patient satisfaction improved slightly [H10]. A 2020 review of reviews similarly found strong evidence for better guideline adherence and satisfaction, but no survival effect and no consistent reduction in hospital use.
+* For severe mental illness, the 2017 Cochrane review found intensive case management reduced hospital use versus standard care by **0.86 inpatient days per month** (95% CI −1.37 to −0.34; 3,595 participants, 24 RCTs; low-certainty evidence), improved retention and some social outcomes, but differed little from other non-intensive case-management programs [H11].
+* For homelessness, Ponka et al. screened 13,811 citations and included **56 primary studies**. Standard case management had limited, short-lived effects; intensive case management, assertive community treatment and critical-time intervention produced better housing and selected health outcomes. Housing itself, income and service availability confound any attempt to attribute results to “case management” alone [H12].
+* For community-dwelling older adults, Mieda et al.’s 2026 review included **15 trials and 7,995 participants**. Very-low-certainty pooled evidence showed little or no difference in institutionalization, mortality or admission; physical quality of life improved only slightly (**SMD 0.08, 95% CI 0.00–0.15**, moderate certainty) [H13].
+* Transitional-care evidence is stronger when the intervention is intensive and protocolized. In Naylor’s older-adult trial, intervention patients had **104 versus 162 readmissions** and mean total costs of **$7,636 versus $12,481**. Replication and implementation studies support benefit, but “TCM billing” is not automatically equivalent to the nurse-led Transitional Care Model [H14].
+* Hospital-at-home evidence is promising but mixed. A Cochrane admission-avoidance review found little or no six-month mortality difference (RR 0.88, 95% CI 0.68–1.13; five trials, 1,502 participants) or clear readmission reduction. CMS’s observational waiver study found generally lower 30-day mortality than matched facility care, but selection remains a major threat to causal inference [H15].
+
+### Scale of value-based and home-based coordination
+
+* ACO REACH had **103 ACOs, about 2.5 million aligned beneficiaries and 160,837 providers** in PY2025. CMS’s independent evaluation estimated that PY2024 reduced gross spending **2.2% ($309 per beneficiary-year; $706.1 million)**, yet after incentives and spillovers net spending rose a statistically uncertain **0.2% ($55.3 million)**. Separate benchmark reconciliation reported $2.511 billion gross savings and $988.3 million retained by CMS. Those figures answer different questions and should not be blended [H16].
+* Medicare Advantage enrolled roughly **34 million people—about 54% of eligible Medicare beneficiaries—in 2025**. MA can finance navigation and supplemental benefits more flexibly than fee-for-service Medicare, but prior authorization, favorable selection, coding intensity and weak public reporting complicate claims that coordination alone causes savings.
+* As of 24 July 2026, CMS listed **364 approved hospital CCNs across 136 systems in 37 states** for Acute Hospital Care at Home. A February 2026 federal package extended the waiver through **30 September 2030**, changing the outlook from repeated short extensions to a medium-term implementation runway [H17].
+
+## B. Key trends, 2024–2026
+
+1. **From discrete codes to longitudinal bundles.** APCM is the clearest signal: pay for the relationship, access, planning and coordination package rather than every minute separately.
+2. **Social care becomes billable infrastructure.** CHI/PIN and Medicaid state-plan pathways legitimize CHWs and navigators, but reimbursement varies and community organizations still carry uncompensated referral work.
+3. **Risk-bearing organizations internalize case management.** ACO REACH, MA and Medicaid managed care make avoidable utilization financially salient. The danger is that “high risk” becomes synonymous with “high cost,” reproducing the Obermeyer bias discussed in §2.
+4. **Home becomes a care setting.** Hospital-at-home, remote monitoring and post-acute transition programs turn the case manager into a logistics and safety orchestrator across home, pharmacy, transport, caregivers and escalation pathways.
+5. **Person-centred planning gains regulatory weight.** Medicaid HCBS rules require goals, preferences, informed choice and conflict-of-interest safeguards—not simply an administratively complete care plan [H18].
+
+## C. Trajectory to 2030–2035
+
+* **Most likely:** tiered models—automated low-intensity outreach; CHW/navigation for social and access barriers; licensed case managers for multimorbidity, transitions and contested decisions; specialist teams for the highest-risk cases.
+* **Payment:** APCM-like bundles and value-based contracts will expand faster than pure fee-for-service case-management codes. ACO REACH ends after 2026, but its accountable-care logic and successor models will continue.
+* **Work location:** the home and community will absorb more acute/post-acute activity through 2030, backed by the AHCAH extension.
+* **Measurement:** purchasers will demand patient-goal attainment, days at home, burden, equity and total cost—not just contacts completed and admissions avoided.
+* **Named forecasts:** HRSA’s 2023–2038 projections anticipate a national RN shortfall of 108,960 FTEs and an 11% nonmetropolitan shortfall by 2038 (§6); BLS projects rapid CHW growth. These workforce forecasts make delegation plus digital augmentation structurally likely.
+
+## D. Controversies and evidence gaps
+
+* **Intervention heterogeneity:** “case management” ranges from a few telephone calls to 24/7 multidisciplinary ACT. Pooled nulls may conceal effective submodels; positive vendor studies may select the highest-opportunity patients.
+* **Regression to the mean and avoidable-use claims:** high-cost patients often become cheaper without intervention. Evaluations need concurrent controls and transparent attribution.
+* **Equity versus savings:** social-needs screening without available resources can document deprivation without resolving it. Cost-based risk scores may under-identify underserved groups.
+* **Workforce substitution:** CHWs extend cultural and community reach but should not become low-cost substitutes for licensed judgment or unpaid emotional labor.
+* **Home safety and caregiver burden:** hospital-at-home studies under-measure housing suitability, caregiver work, digital exclusion and failed escalation.
+* **Certification denominator:** active CCMs are measurable; the total multidisciplinary case-management workforce is not. Occupational codes fragment nurses, social workers, navigators and utilization staff.
+
+## E. Selected citable sources (health and human services)
+
+1. **[H1]** Case Management Society of America. *CMSA Standards of Practice for Case Management, Revised 2022; Standard Q Addendum.* CMSA, 2022/2024. https://cmsa.org/about/standards-of-case-management-practice/
+2. **[H2]** Commission for Case Manager Certification. *Board-Certified Case Manager—FAQs and Annual Exam Results.* The Commission, updated 2026. https://yourcommission.org/certification/board-certified-case-manager/faqs
+3. **[H3]** Tahan, Hussein A., et al. *The Continued Evolution of the Professional Case Manager Role: A National Study from the Commission for Case Manager Certification.* Professional Case Management, 2025. https://nursing.ceconnection.com/files/TheContinuedEvolutionoftheProfessionalCaseManagerRoleANationalStudyfromtheCommissionforCaseManagerCertification-1750954758151.pdf
+4. **[H4]** Case Management Society of America. *Case Management Adherence Guide 2020.* CMSA/Cognella, 2020. https://cmsa.org/cmag/
+5. **[H5]** Centers for Medicare & Medicaid Services. *Chronic Care Management Services (MLN909188).* CMS, updated 2026. https://www.cms.gov/files/document/chroniccaremanagement.pdf
+6. **[H6]** Centers for Medicare & Medicaid Services. *Transitional Care Management Services (MLN908628).* CMS, updated 2026. https://www.cms.gov/files/document/mln908628-transitional-care-management-services.pdf
+7. **[H7]** Centers for Medicare & Medicaid Services. *Health-Related Social Needs Services FAQs.* CMS, 2025/2026. https://www.cms.gov/files/document/health-related-social-needs-faq.pdf
+8. **[H8]** Centers for Medicare & Medicaid Services. *Advanced Primary Care Management Services.* CMS, 2026. https://www.cms.gov/medicare/payment/fee-schedules/physician-fee-schedule/advanced-primary-care-management-services
+9. **[H9]** Centers for Medicare & Medicaid Services. *CY 2026 Medicare Physician Fee Schedule Final Rule, CMS-1832-F.* CMS, 2025. https://www.cms.gov/newsroom/fact-sheets/calendar-year-cy-2026-medicare-physician-fee-schedule-final-rule-cms-1832-f
+10. **[H10]** Stokes, Jonathan, et al. “Effectiveness of Case Management for ‘At Risk’ Patients in Primary Care: A Systematic Review and Meta-Analysis.” *PLOS ONE* 10(7), 2015, e0132340. https://pmc.ncbi.nlm.nih.gov/articles/PMC4505905/
+11. **[H11]** Dieterich, Marina, et al. “Intensive Case Management for Severe Mental Illness.” *Cochrane Database of Systematic Reviews*, 2017, CD007906. https://www.cochrane.org/evidence/CD007906_intensive-case-management-people-severe-mental-illness
+12. **[H12]** Ponka, David, et al. “The Effectiveness of Case Management Interventions for the Homeless, Vulnerably Housed and Persons with Lived Experience: A Systematic Review.” *PLOS ONE* 15(4), 2020, e0230896. https://pmc.ncbi.nlm.nih.gov/articles/PMC7313544/
+13. **[H13]** Mieda, Katsuma, et al. “Effectiveness of Nurse-Led Case Management in Community Settings Among Older Adults: A Systematic Review and Meta-Analysis.” *International Journal of Older People Nursing* 21(5), 2026, e70100. https://pubmed.ncbi.nlm.nih.gov/42675567/
+14. **[H14]** Naylor, Mary D., et al. “Transitional Care of Older Adults Hospitalized with Heart Failure: A Randomized, Controlled Trial.” *Journal of the American Geriatrics Society* 52(5), 2004, 675–684. https://pubmed.ncbi.nlm.nih.gov/15086645/
+15. **[H15]** Edgar, Kelli, et al. “Admission Avoidance Hospital at Home.” *Cochrane Database of Systematic Reviews*, updated 2024, CD007491. https://www.cochranelibrary.com/cdsr/doi/10.1002/14651858.CD007491.pub3/full
+16. **[H16]** CMS Innovation Center. *ACO REACH Model PY2023 Evaluation Report and Preliminary PY2024 Results—CMS Perspective.* CMS, July 2026. https://www.cms.gov/priorities/innovation/data-and-reports/2026/aco-reach-3rd-eval-persp
+17. **[H17]** Centers for Medicare & Medicaid Services. *Acute Hospital Care at Home—Approved Facilities and Systems.* QualityNet, updated 24 July 2026. https://qualitynet.cms.gov/acute-hospital-care-at-home/resources
+18. **[H18]** Centers for Medicare & Medicaid Services. *Person-Centered Service Planning in HCBS: Requirements and Best Practices.* CMS/Medicaid. https://www.medicaid.gov/medicaid/home-community-based-services/downloads/person-centrd-servc-plan-hcbs-req-best-pract.pdf
+
+# 2. AI and agentic AI in healthcare case management
+
+## A. Current state and hard numbers
+
+### Risk stratification and care-management platforms
+
+Epic, Optum, Innovaccer, Arcadia and Lightbeam sell overlapping population-health capabilities: patient identity resolution, risk scoring, care gaps, registries, attribution, work queues and care-plan documentation. Their public evidence is uneven.
+
+* **Epic** publishes HTI-1 “predictive DSI” source attributes and model-risk practices, but performance depends on the local population, outcome definition and implementation. EHR-integrated models should be revalidated locally, not treated as transportable medical facts [AI1].
+* **Optum** reports that a customer reduced heart-failure readmissions about 27% in one year using Optum Analytics. This is a vendor case study without randomized attribution [AI2].
+* **Innovaccer** claimed in 2025 that new care-management copilots reduced documentation time 28% and increased engagement 20%; **Lightbeam** and **Arcadia** publish similarly favorable savings and admission claims. These are useful implementation signals but generally lack independent controls, preregistered endpoints and full denominators. Product selection should separate platform usability from causal clinical efficacy.
+
+The decisive historical warning remains Obermeyer et al. The commercial algorithm they studied used **future cost as a proxy for health need**. At the same score Black patients were sicker; correcting the proxy would have increased Black patients selected for extra help from **17.7% to 46.5%** [AI3]. “Race-blind” inputs therefore did not produce race-neutral access.
+
+### Ambient documentation and case-work copilots
+
+Ambient AI moved from pilot to infrastructure in 2024–2026. Vanderbilt made an EHR-integrated ambient scribe available to more than **2,400 ambulatory clinicians** in January 2025 [AI4]. A 2026 national study reported that nearly two-thirds of US hospitals using Epic had adopted an ambient product, with substantial organizational disparities. Pre/post and early randomized studies generally find less documentation time and cognitive load, but evidence on note accuracy, downstream coding, patient disclosure and long-term burnout is thinner.
+
+For case managers, the analogous uses are call summaries, problem-list extraction, draft care plans, handoff notes, referral letters and appeal packets. These are lower-risk when the source record is retained and the user must verify the draft. They become high-risk when generated text silently becomes the factual record or triggers eligibility/coverage action.
+
+### Prior authorization and utilization management
+
+LLM and multi-agent vendors now automate chart retrieval, criteria matching, form completion, status checks and appeal drafting. A 2026 systematic review found only **16 eligible studies**: 62.5% addressed payer review/decision-making, 18.8% post-denial appeals, 12.5% initial submission and 6.3% early initiation; patient participation was rarely studied [AI5]. Accuracy claims of 75–95% from Plenful, RISA Labs and similar firms are usually vendor-defined task metrics, not independent measures of wrongful denial or patient harm.
+
+CMS-0057-F creates a more important near-term baseline than any one model [AI6]:
+
+* Beginning primarily **1 January 2026**, covered payers must decide urgent medical-item/service requests within **72 hours** and standard requests within **seven calendar days**, give a specific denial reason and publicly report prior-authorization metrics. Federally facilitated exchange QHPs are excluded from some timing provisions.
+* Beginning primarily **1 January 2027**, impacted payers must implement FHIR-based Prior Authorization, Provider Access, Payer-to-Payer and expanded Patient Access APIs. Providers may request data and send authorization information electronically.
+* The rule applies to MA, Medicaid and CHIP FFS/managed care, and specified exchange plans; it does not initially create an identical regime for every commercial plan or drug authorization.
+
+The implementation stack is HL7 FHIR R4 plus Da Vinci implementation guides—Coverage Requirements Discovery (CRD), Documentation Templates and Rules (DTR), and Prior Authorization Support (PAS). PAS 2.1.0 remained a published **trial-use, maturity-level-3** guide in late 2024; a 2.2.1 continuous build existed in August 2026. “Standards-based” therefore still involves versioning and operational testing [AI7].
+
+### Interoperability and algorithm transparency
+
+* **TEFCA:** national exchange went live with five QHINs in December 2023. By August 2025, ASTP reported **10 QHINs and more than 9,200 participating organizations**; Oracle became the eleventh QHIN in November 2025 [AI8]. TEFCA improves discovery and exchange but does not itself normalize social-service data, fix consent segmentation or guarantee closed-loop referrals.
+* **HTI-1:** effective February 2024, with the revised Decision Support Intervention criterion replacing the old CDS criterion in the Base EHR definition on **1 January 2025**. Certified modules must expose source attributes for predictive DSIs—developer, purpose, intended population, inputs, validation, performance, fairness and risk-management information—and support feedback [AI9]. It is transparency, not FDA-style premarket approval.
+* **FDA:** the January 2025 lifecycle guidance for AI-enabled device software remained **draft**. FDA emphasizes total-product-lifecycle risk management and predetermined change-control plans. Many administrative care-management and payer algorithms are not medical devices, leaving a regulatory gap [AI10].
+* **EU AI Act:** healthcare AI may be high-risk when it is a safety component of a regulated product or falls in an Annex III rights-sensitive use. As amended by Regulation (EU) 2026/1744, most obligations for stand-alone Annex III high-risk systems move to **2 December 2027**, and product-embedded Annex I systems to **2 August 2028**. Required controls include risk management, data governance, technical documentation, logging, transparency to deployers, human oversight, accuracy, robustness and cybersecurity [AI11]. This supersedes older summaries that still cite August 2026/2027.
+
+### Litigation and state regulation
+
+* **UnitedHealth/naviHealth nH Predict:** *Estate of Lokken v. UnitedHealth Group* alleges that the model drove premature termination of post-acute coverage and that many appealed denials were reversed. In February 2025 the court allowed core claims to proceed while dismissing others; in March 2026 a magistrate ordered broad discovery. As of 27 September 2026, no merits judgment had established the alleged “90% error rate”; it remains a complaint allegation [AI12].
+* **Cigna PxDx:** the complaint alleged more than 300,000 claims were denied in two months after very brief physician review. On 31 March 2025, the Eastern District of California granted in part and denied in part Cigna’s motion to dismiss; standing and whether particular plaintiffs were actually subjected to PxDx narrowed the case. Again, allegations are not adjudicated facts [AI13].
+* **California SB 1120:** signed 28 September 2024 and effective 1 January 2025, it requires that AI/algorithmic tools in utilization management use clinical and other relevant information, apply consistently and without unlawful discrimination, and **not supplant a licensed professional’s decision** on medical necessity [AI14]. By 2026, KFF identified a widening set of state rules, including Texas legislation, but definitions and enforcement differ [AI15].
+
+## B. Key trends, 2024–2026
+
+1. **From prediction to action.** Platforms are moving from a risk score placed in a queue to an agent that assembles evidence, drafts a plan, contacts the member and opens tasks.
+2. **From proprietary interfaces to API-mediated authorization.** CMS-0057-F and Da Vinci make authorization a computable workflow, although clinical criteria remain partly proprietary.
+3. **Ambient capture becomes the case record’s front door.** Voice-to-structured-data can reduce clerical load but also scale subtle factual errors.
+4. **Governance shifts from “model accuracy” to lifecycle accountability.** HTI-1, FDA lifecycle guidance and the EU AI Act require intended-use documentation, subgroup validation, monitoring, change control and human authority.
+5. **Denial automation becomes a legal-reputational risk.** Payers increasingly distinguish decision support from final adverse action, preserve clinician sign-off and log rationales.
+
+## C. Trajectory to 2030–2035
+
+* By 2030, the common architecture will be a **FHIR-connected, retrieval-grounded case copilot** with constrained tools: retrieve records, check criteria, draft communications, schedule actions and escalate exceptions.
+* Fully autonomous approval of simple, rules-satisfied requests may become common; fully autonomous adverse determinations will remain contested and jurisdiction-dependent.
+* TEFCA plus payer APIs will reduce record chasing, but consent, identity, behavioral-health segmentation and social-service interoperability will remain bottlenecks.
+* High-risk systems will need continuous subgroup and drift monitoring. “Human in the loop” will mature from a click-through sign-off into defined review time, competence, override authority and audit sampling.
+* Gartner’s forecast that more than 40% of agentic projects will be cancelled by the end of 2027 (§3) is especially relevant: brittle integration, unclear value and inadequate controls—not raw model capability—will stop many health deployments.
+
+## D. Controversies and evidence gaps
+
+* **Proxy choice:** cost, utilization and documentation density encode unequal access.
+* **Automation bias:** a nominal reviewer may rubber-stamp a recommendation, particularly under productivity quotas.
+* **Opacity versus trade secrets:** patients need reasons and appealable evidence; vendors resist revealing models and criteria.
+* **No shared denominator for errors:** vendors report extraction accuracy or minutes saved, while patients care about delayed treatment, wrongful denial and uncorrected records.
+* **Regulatory perimeter:** administrative agents can materially affect health while falling outside FDA device authority.
+* **Model drift and local validity:** EHR models and LLM workflows change with population, documentation, benefits and practice patterns.
+* **Dual automation race:** providers automate submissions and appeals while payers automate review, potentially increasing volume without resolving low-value authorization requirements.
+
+## E. Selected citable sources (AI in healthcare case management)
+
+1. **[AI1]** Epic Systems. *Predictive DSI—Intervention Risk Management Practices.* Epic, updated 2026. https://www.epic.com/predictive/
+2. **[AI2]** Optum. *Premier Medical Associates Applies Optum Analytics to Improve Population Health Management.* Optum customer case study. https://www.optum.com/content/dam/optum3/optum/en/resources/articles-blog-posts/pr-pca-customer-showcase-premier-case-study.pdf
+3. **[AI3]** Obermeyer, Ziad, Brian Powers, Christine Vogeli and Sendhil Mullainathan. “Dissecting Racial Bias in an Algorithm Used to Manage the Health of Populations.” *Science* 366(6464), 2019, 447–453. https://pubmed.ncbi.nlm.nih.gov/31649194/
+4. **[AI4]** Wright, Aileen P., et al. “Enterprise-Wide Simultaneous Deployment of Ambient Scribe Technology.” *Journal of the American Medical Informatics Association* 33(2), 2026, 457–461. https://academic.oup.com/jamia/article/33/2/457/8307782
+5. **[AI5]** Mousavi, Taraneh, Fadia Tohme Shaya and Catherine E. Cooke. “Artificial Intelligence in Prior Authorization and Coverage Decisions: A Systematic Review of Methods, Evidence Gaps, and Future Implications for Patient Access.” *Journal of Managed Care & Specialty Pharmacy* 32(9), 2026, 1135–1153. https://pmc.ncbi.nlm.nih.gov/articles/PMC13505359/
+6. **[AI6]** Centers for Medicare & Medicaid Services. *CMS Interoperability and Prior Authorization Final Rule, CMS-0057-F.* 2024. https://www.cms.gov/newsroom/fact-sheets/cms-interoperability-prior-authorization-final-rule-cms-0057-f
+7. **[AI7]** HL7 International. *Da Vinci Prior Authorization Support (PAS) FHIR Implementation Guide, v2.1.0.* 2024. https://hl7.org/fhir/us/davinci-pas/
+8. **[AI8]** Assistant Secretary for Technology Policy/ONC. “TEFCA’s Growing—Take a Look at Who’s Participating.” *HealthIT.gov Blog*, 6 August 2025. https://healthit.gov/blog/tefca/take-a-look-at-whos-participating-in-tefca/
+9. **[AI9]** Office of the National Coordinator for Health IT. *HTI-1 Final Rule: Certification Program Updates, Algorithm Transparency, and Information Sharing.* 2024. https://healthit.gov/regulations/hti-rules/hti-1-final-rule/
+10. **[AI10]** US Food and Drug Administration. *Artificial Intelligence-Enabled Device Software Functions: Lifecycle Management and Marketing Submission Recommendations—Draft Guidance.* January 2025. https://www.fda.gov/regulatory-information/search-fda-guidance-documents/artificial-intelligence-enabled-device-software-functions-lifecycle-management-and-marketing
+11. **[AI11]** European Parliament and Council. *Regulation (EU) 2026/1744 Amending Regulation (EU) 2024/1689 (Digital Omnibus on AI).* *Official Journal of the European Union*, 24 July 2026. Official status summarized at https://digital-strategy.ec.europa.eu/en/faqs/navigating-ai-act
+12. **[AI12]** *Estate of Lokken et al. v. UnitedHealth Group et al.*, US District Court, District of Minnesota, filed 2023; order allowing core claims, 13 February 2025; discovery order, 9 March 2026. Procedural summary: https://www.dlapiper.com/en-us/insights/publications/ai-outlook/2025/lawsuit-over-ai-usage-by-medicare-advantage-plans-allowed-to-proceed
+13. **[AI13]** *Kisting-Leung et al. v. Cigna Corp. et al.*, 780 F. Supp. 3d 985 (E.D. Cal. 2025), order 31 March 2025. https://case-law.vlex.com/vid/kisting-leung-v-cigna-1075967704
+14. **[AI14]** California Legislature. *SB 1120, Health Care Coverage: Utilization Review.* Chapter 879, Statutes of 2024. https://leginfo.legislature.ca.gov/faces/billNavClient.xhtml?bill_id=202320240SB1120
+15. **[AI15]** KFF. “Regulation of AI in Prior Authorization and Claims Review: A Look at Federal and State Consumer Protections.” 6 May 2026. https://www.kff.org/patient-consumer-protections/regulation-of-ai-in-prior-authorization-and-claims-review-a-look-at-federal-and-state-consumer-protections/
+
+---
+
+# 3. Enterprise, adaptive and dynamic case management
+
+## A. Current state and hard numbers
+
+### Standards: CMMN did not become the universal executable language
+
+OMG’s current catalog still lists **CMMN 1.1, formal, December 2016**—unchanged through September 2026. By contrast, BPMN remains at 2.0.1 and DMN reached 1.6 in September 2026 [E1]. That version history is evidence of stagnation, though not formal withdrawal.
+
+The clean conceptual division remains useful:
+
+* **BPMN:** models repeatable flow, events, messages, service tasks and orchestration.
+* **CMMN:** models discretionary work around a case file—stages, tasks, milestones, sentries and planning tables.
+* **DMN:** models explicit decisions, inputs, decision requirements and tables.
+
+In implementation, the “triple crown” is uneven. Trisotech maintains complete CMMN modeling/execution support [E2]. Camunda 7 implemented CMMN 1.1 but stopped adding features; Camunda 8 explicitly does **not** support CMMN and recommends BPMN, including ad-hoc subprocesses, for future orchestration [E3]. Major suites—Pega, Appian, ServiceNow, Salesforce, Microsoft Dynamics, Hyland OnBase and OpenText AppWorks—support case work mainly through proprietary data/case objects, low-code rules and workflow rather than portable CMMN execution. Adoption is therefore better described as **the case-management pattern succeeding while CMMN interoperability remains niche**.
+
+### Market framing has shifted
+
+Forrester estimated the combined low-code and digital process automation market at **$13.2 billion in 2023**, up roughly 21% since 2019, and projected the broader low-code market could approach **$50 billion by 2028** [E4]. Gartner consolidated formerly separate BPM, RPA, low-code and integration categories into **Business Orchestration and Automation Technologies (BOAT)** in 2025, explicitly adding agentic automation [E5]. Pega, Appian and ServiceNow each reported Leader placement in the inaugural 2025 Magic Quadrant; these disclosures are vendor reproductions of a paywalled analyst assessment, not outcome studies.
+
+### Vendor direction, 2024–2026
+
+* **Pega Infinity ’25** embeds agents in governed case workflows; Smart Investigate applies them to payment exceptions and investigations [E6].
+* **Appian Agent Studio** entered beta in April 2025, embedding agents, document extraction and private data fabric into process applications [E7].
+* **ServiceNow** added AI Agent Orchestrator and agentic workforces for IT, customer support, security and CRM; its $2.85 billion Moveworks acquisition strengthened enterprise search and employee-service agents.
+* **Salesforce Agentforce** moved from $2 per conversation to additional credit/action and license models. Salesforce claims Engine reduced average handle time 15% and 1-800Accountant resolved 70% of selected administrative chats autonomously; these are customer/vendor claims without published counterfactuals [E8].
+* **Microsoft Dynamics 365** introduced Customer Intent and autonomous service agents; documentation still labeled parts of the 2026 capability prerelease.
+* **Camunda 8.7/8.8** combines BPMN durable execution with LLM agents, MCP/A2A connections and human tasks, arguing that an agent automates a task while orchestration governs the end-to-end process [E9].
+* **Hyland/OpenText** remain strong where content, records, imaging and regulated documents dominate the case. Their strategic challenge is to add agentic interaction without weakening retention, security and audit controls.
+
+### Research frontier
+
+Traditional process mining assumes one event belongs to one case ID. Real case work violates that assumption: one person has multiple claims; one document affects several matters; one provider participates in many episodes. **Object-centric process mining (OCPM)** represents events linked to multiple object types and is therefore better aligned with longitudinal case management [E10]. Van der Aalst, Reijers and Maruster’s 2024 “Process Mining Beyond Workflows” likewise argues for analysis beyond a single control-flow view.
+
+Two newer research programs matter:
+
+* **Large Process Models:** Kampik et al. propose foundation models trained or adapted for process knowledge, while warning that natural-language fluency is not conformance, correctness or executable control [E11].
+* **Agentic BPM:** a 2025 research agenda grounds agents in three decades of multi-agent systems and BPM rather than equating every chatbot with agency. It emphasizes uncertainty, delegated goals, coordination and governance [E12].
+
+## B. Key trends, 2024–2026
+
+1. **Workflow plus discretion, not workflow versus discretion.** Deterministic BPM handles deadlines, permissions and transactions; AI handles interpretation and option generation; people own exceptions and authority.
+2. **Case data becomes object-centric.** Platforms increasingly treat customer, contract, claim, document, asset and investigation as linked objects, reducing the distortions of one “primary case” ID.
+3. **Agentic process automation replaces DPA branding.** The functional shift is from recording and routing work to selecting and performing actions through tools.
+4. **Governance moves into orchestration.** Identity, tool permissions, budgets, model versions, human checkpoints, rollback and full traces become process requirements.
+5. **Customer service is the lead deployment domain.** High volume, measurable handle time and bounded knowledge make service cases attractive. Yet most published “autonomous resolution” numbers come from vendors.
+
+## C. Trajectory to 2030–2035
+
+* **Near term (2027): Gartner predicts more than 40% of agentic-AI projects will be cancelled** because of cost, unclear business value or inadequate controls [E13]. Gartner placed AI agents at the **Peak of Inflated Expectations** in its 2025 AI Hype Cycle [E14].
+* **By 2030:** successful platforms will expose cases as governed event/object graphs; use process mining to find variants; use DMN/policy-as-code for stable rules; and allow agents only approved tools and spending/decision limits.
+* **By 2035:** “case application” boundaries may blur into persistent organizational memory plus orchestration. Human case owners will supervise portfolios of machine-executed tasks and intervene on ambiguity, relationships and liability.
+* **Standards outlook:** BPMN/DMN and API/event standards are more likely to persist than a CMMN revival. CMMN remains valuable as a design vocabulary in specialized environments.
+
+## D. Controversies and evidence gaps
+
+* **Agent washing:** many “agents” are scripted chat/RPA with an LLM front end.
+* **Local task success versus case outcome:** lower handle time can increase repeat contacts or unresolved harm.
+* **Non-determinism and auditability:** replaying an agent’s prompt does not guarantee the same action. Durable state, tool logs and policy versions matter more than conversational transcripts alone.
+* **Security:** agents can be prompt-injected through case documents, over-permissioned, or induced to leak cross-case data.
+* **Process ossification versus uncontrolled adaptation:** rigid workflows suppress expert judgment; unconstrained agents undermine compliance. The design problem is the boundary.
+* **Thin independent evidence:** Brynjolfsson et al.’s 5,172-agent study found a 15% productivity increase for a generative assistant, especially for novices [E15], but this was decision support—not end-to-end autonomous case closure.
+
+## E. Selected citable sources (enterprise/ACM/DCM)
+
+1. **[E1]** Object Management Group. *Case Management Model and Notation (CMMN), Version 1.1.* December 2016; catalog current 2026. https://www.omg.org/spec/CMMN/1.1/About-CMMN/
+2. **[E2]** Trisotech. *Case Management Model and Notation (CMMN)—Complete Conformance and Automation.* Updated 2026. https://www.trisotech.com/cmmn/
+3. **[E3]** Camunda. “How CMMN Never Lived Up to Its Potential.” 20 August 2020; and *Camunda Platform 8 Webinar Recap*, 26 May 2022. https://camunda.com/blog/2020/08/how-cmmn-never-lived-up-to-its-potential/ ; https://camunda.com/blog/2022/05/camunda-platform-8-webinar-recap/
+4. **[E4]** Forrester Research. “The Low-Code Market Could Approach $50 Billion by 2028.” 29 January 2024. https://www.forrester.com/blogs/the-low-code-market-could-approach-50-billion-by-2028/
+5. **[E5]** Gartner. *Business Orchestration and Automation Technologies: Market Definition.* 2025. https://www.gartner.com/reviews/market/business-orchestration-and-automation-technologies
+6. **[E6]** Pegasystems. *Pega Infinity ’25 Agentic Enterprise Transformation Platform.* 24 September 2025. https://www.pega.com/about/news/press-releases/pega-launches-industrys-first-agentic-enterprise-transformation-platform
+7. **[E7]** Appian. “Appian Embeds Agentic AI into Business Processes.” 28 April 2025. https://appian.com/about/explore/press-releases/2025/appian-embeds-agentic-ai-into-business-processes-to-deliver-scal
+8. **[E8]** Salesforce. *Agentforce 3: Customer Results and Observability.* 23 June 2025. https://investor.salesforce.com/news/news-details/2025/Salesforce-Launches-Agentforce-3-to-Solve-the-Biggest-Blockers-to-Scaling-AI-Agents-Visibility-and-Control/default.aspx
+9. **[E9]** Camunda. “Camunda Releases Agentic Orchestration for the Enterprise.” 8 April 2025. https://camunda.com/blog/2025/04/camunda-87-agentic-orchestration-for-enterprise/
+10. **[E10]** van der Aalst, Wil M. P. *Object-Centric Process Mining: An Introduction.* Springer/process-mining research, 2022. https://www.vdaalst.com/publications/p1398.pdf
+11. **[E11]** Kampik, Timotheus, et al. “Large Process Models: A Vision for Business Process Management in the Age of Generative AI.” *KI—Künstliche Intelligenz* 39, 2025, 81–95. https://link.springer.com/article/10.1007/s13218-024-00863-8
+12. **[E12]** *Agentic Business Process Management: A Research Agenda Grounded in Agents and BPM.* arXiv:2504.03693, 2025. https://arxiv.org/abs/2504.03693
+13. **[E13]** Gartner, reported by Reuters. “Over 40% of Agentic AI Projects Will Be Scrapped by 2027.” 25 June 2025. https://www.reuters.com/business/over-40-agentic-ai-projects-will-be-scrapped-by-2027-gartner-says-2025-06-25/
+14. **[E14]** Gartner. “Hype Cycle Identifies Top AI Innovations in 2025.” 5 August 2025. https://www.gartner.com/en/newsroom/press-releases/2025-08-05-gartner-hype-cycle-identifies-top-ai-innovations-in-2025
+15. **[E15]** Brynjolfsson, Erik, Danielle Li and Lindsey R. Raymond. “Generative AI at Work.” *Quarterly Journal of Economics* 140(2), 2025, 889–942. https://academic.oup.com/qje/article/140/2/889/7990658
+
+# 4. Legal and judicial case management
+
+## A. Current state and hard numbers
+
+### Court workload and core systems
+
+The National Center for State Courts’ Court Statistics Project reports about **70 million state-court filings in 2024**, up 4% from 2023 but still 27% below 2012; traffic matters were about 46% of incoming cases [L1]. National totals conceal major differences in case categories, data definitions, pending inventory and age. A court can reduce filings yet retain a serious backlog; clearance rates and time-to-disposition are more meaningful than filings alone.
+
+Federal data show a mixed picture. In the year ending 30 September 2025, US Courts of Appeals received **41,824 filings, up 5.1%**, and terminated 40,411, up only 0.8%, so pending inventory rose [L2]. Immigration, multidistrict litigation, vacancies and local practice create court-specific bottlenecks.
+
+Two established court-CMS suppliers illustrate the market:
+
+* **Tyler Odyssey** integrates case records, calendaring, financials, public access, jury and e-filing. Tyler reported converting 33 million cases, 64 million parties and nearly $4 billion in payments during a 2014 migration wave; current jurisdiction counts are not independently standardized [L3].
+* **Thomson Reuters C-Track** is a configurable web platform spanning trial and appellate courts, e-filing, public portals and court analytics [L4]. Product descriptions establish capability, not comparative performance.
+
+E-filing is now basic infrastructure but not uniformly universal. Ohio’s Supreme Court, for example, received 908 of 1,716 new 2025 cases electronically and 7,666 total portal submissions. There is no clean, current national percentage covering every state, level and case type.
+
+### ODR and digital access
+
+Online dispute resolution combines electronic intake, asynchronous negotiation, mediation, document exchange and sometimes automated triage. NCSC promotes ODR as an access channel [L5], but causal evidence is thinner than adoption rhetoric. Greiner, Matthews and Owens’ field experiments show recruitment, take-up and implementation can break experimental designs; digital channels may reduce travel and default for some users while excluding people with limited connectivity, language access, disability accommodations or bargaining power [L6]. The next phase is therefore “online case resolution plus assisted digital service,” not online-only courts.
+
+### AI guidance for judges and courts
+
+* The **UK Judiciary** refreshed its guidance in April and again on **31 October 2025**. It warns judges not to enter private/confidential information, to verify outputs and citations, and to account for hallucination, bias and litigants’ use of AI [L7].
+* The **US Administrative Office of the Courts** created an AI Task Force in early 2025 and distributed interim guidance in July 2025. As of September 2026 the federal judiciary was developing broader guidance; a Reuters report said the task force had made around 30 recommendations, including that judges not delegate judicial decision-making [L8].
+* **NCSC’s September 2025 AI Readiness for the State Courts** provides governance, workforce, data, procurement and use-case assessment tools; its 2026 tracker maps state orders, rules and policies [L9].
+
+Across jurisdictions, guidance converges on confidentiality, verification, disclosure where required, competence, non-delegation of judicial authority and preserving the record. Local filing orders remain inconsistent.
+
+### Legal practice management and AI adoption
+
+Clio, Litify, Filevine, MyCase/8am, Smokeball and enterprise systems organize matter intake, deadlines, documents, time, billing and client communications. Litify is built on Salesforce and is moving toward multi-step matter agents. Clio’s 2025 acquisitions of ShareDo and vLex expanded it from small/midsize practice management toward enterprise matter management and legal intelligence.
+
+Adoption statistics vary because surveys ask different questions:
+
+* ILTA’s 2025 survey covered **580 firms, 152,000 attorneys and 303,000 users**; 80% of responding firms were using or exploring generative AI, but firm-wide deployment was much rarer. Resistance to change (57%) and security/risk (54%) were leading barriers [L10].
+* Thomson Reuters found **26% of professionals used GenAI at work in 2025**, almost double 14% in 2024 [L11].
+* Clio reported 79% of legal professionals using AI in its 2025 data and **93% of surveyed midsize firms** using AI, up from 19% a year earlier. Those figures are vendor studies of different samples and should not be generalized to every law office [L12].
+* An 8am 2026 survey reported 69% using general-purpose GenAI for work, while **54% of firms offered no AI training and 43% had no governance policy**. Again, sampling and wording drive the level.
+
+Harvey says it serves more than 1,500 global customers; Thomson Reuters said CoCounsel exceeded one million professionals in 107 countries/territories by June 2026. These are vendor adoption counts, not independent active-use statistics.
+
+Accuracy remains a constraint. Magesh et al. found leading legal RAG tools hallucinated or produced unsupported/incorrect information in roughly **17%–34%** of benchmark responses—better than general-purpose GPT-4 in the same test, but far from “hallucination-free” [L13]. The study tested a constructed query set and 2024 product versions; results should not be frozen in time, but they rebut categorical safety claims.
+
+## B. Key trends, 2024–2026
+
+1. **Matter systems and research systems converge.** Clio–vLex, CoCounsel/Westlaw and Litify agents bring authorities, matter facts and workflow into one surface.
+2. **Court modernization shifts from digitizing documents to managing flow.** Dashboards, differentiated case management, text reminders, e-service and ODR target age and nonappearance, not merely paper elimination.
+3. **Judicial AI policy becomes institutional.** Individual standing orders are giving way to judiciary-wide task forces, procurement standards and staff guidance.
+4. **AI use becomes substantive.** Drafting, due diligence, chronology, discovery and contract review are moving beyond back-office experimentation.
+5. **Audit and provenance become product requirements.** A legal answer must link to the authority and matter document it relies upon.
+
+## C. Trajectory to 2030–2035
+
+* By 2030, routine uncontested matters will be predominantly digital from filing through order, with human help available by design.
+* Courts will use AI mainly for translation, summarization, transcript/search, scheduling and staff assistance; adjudicative recommendations will face much higher legitimacy barriers.
+* Law firms will run “matter agents” inside permissioned workspaces, but lawyers will remain professionally responsible for filings, advice and client confidentiality.
+* The market for practice management is forecast to grow from **$2.68 billion in 2025 to $4.66 billion in 2030 (11.6% CAGR)** by one publisher, while another estimates $2.97 billion in 2025 to $6.96 billion in 2031 (15.8%). The range reflects inconsistent scope (§8).
+* By 2035, courts that fail to integrate assisted digital access may widen, rather than close, justice gaps.
+
+## D. Controversies and evidence gaps
+
+* **Backlog metrics are not standardized:** filings, pending cases, case age and weighted workload tell different stories.
+* **Digital divide and procedural justice:** speed is not fairness; an ODR settlement may reflect convenience or coercion.
+* **Confidentiality and privilege:** consumer GenAI, training retention and cross-matter retrieval can expose protected data.
+* **Citation verification:** grounding lowers but does not eliminate hallucinations.
+* **Unequal arms:** well-resourced repeat players can deploy sophisticated agents against self-represented litigants.
+* **Judicial legitimacy:** even an accurate recommendation can be unacceptable if parties cannot understand, contest or attribute it.
+* **Survey inflation:** “using,” “exploring,” licensed and routinely deployed are not equivalent.
+
+## E. Selected citable sources (legal/judicial)
+
+1. **[L1]** National Center for State Courts. *Court Statistics Project—2024 State Court Caseload Data.* NCSC, updated 2026. https://www.ncsc.org/resources-courts/data
+2. **[L2]** Administrative Office of the US Courts. *Judicial Caseload Indicators—Judicial Business 2025.* 2026. https://www.uscourts.gov/data-news/reports/statistical-reports/judicial-business-united-states-courts/judicial-business-2025/judicial-caseload-indicators-judicial-business-2025
+3. **[L3]** Tyler Technologies. *Odyssey Courts and Justice Solution—Implementation and Conversion Record.* Tyler, 2015. https://investors.tylertech.com/news/news-details/2015/Tyler-Technologies-Successfully-Implemented-Odyssey-at-More-Than-30-Jurisdictions-in-the-Past-18-Months/default.aspx
+4. **[L4]** Thomson Reuters. *C-Track Court Case Management System.* Updated September 2026. https://legal.thomsonreuters.com/en/products/c-track
+5. **[L5]** National Center for State Courts. *Online Dispute Resolution.* Updated 2026. https://www.ncsc.org/resources-courts/access-fairness/online-dispute-resolution
+6. **[L6]** Greiner, D. James, Andrea Matthews and Emily Owens. “Online Dispute Resolution of Low-Level Court Proceedings: Two Broken Field Experiments, One Unexpected Result.” SSRN 4375081, 2023. https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4375081
+7. **[L7]** Courts and Tribunals Judiciary of England and Wales. *Artificial Intelligence Guidance for Judicial Office Holders.* 31 October 2025. https://www.judiciary.uk/guidance-and-resources/artificial-intelligence-ai-judicial-guidance-october-2025/
+8. **[L8]** Administrative Office of the US Courts. *Court Operations—Annual Report 2025.* 2026. https://www.uscourts.gov/data-news/reports/annual-reports/directors-annual-report/annual-report-2025/court-operations-annual-report-2025
+9. **[L9]** Miller, A. L., et al. *AI Readiness for the State Courts.* National Center for State Courts, September 2025. https://www.ncsc.org/sites/default/files/media/document/AI%20Readiness-for-the-State-Courts-2025.pdf
+10. **[L10]** International Legal Technology Association. *2025 Technology Survey.* ILTA, September 2025. https://www.iltanet.org/resources/publications/surveys/ts25
+11. **[L11]** Thomson Reuters Institute. *Future of Professionals Report 2025: Mind the Gap.* 2025. https://www.thomsonreuters.com/en/institute/reports/future-of-professionals-2025
+12. **[L12]** Clio. *2025 Legal Trends Report.* 2025. https://www.clio.com/resources/legal-trends/
+13. **[L13]** Magesh, Varun, et al. “Hallucination-Free? Assessing the Reliability of Leading AI Legal Research Tools.” Stanford RegLab/arXiv:2405.20362, 2024. https://arxiv.org/abs/2405.20362
+14. **[L14]** European Commission. *2025 EU Justice Scoreboard.* 2025. https://commission.europa.eu/strategy-and-policy/policies/justice-and-fundamental-rights/upholding-rule-law/eu-justice-scoreboard_en
+15. **[L15]** Thomson Reuters. *CoCounsel Legal—Product and Adoption Update.* 25 June 2026. https://www.thomsonreuters.com/en-us/posts/innovation/cocounsel-legal-reimagined-fewer-steps-bigger-outcomes/
+
+---
+
+# 5. Public-sector and social-services casework
+
+## A. Current state and hard numbers
+
+### Core benefits and child-welfare systems
+
+The federal CCWIS rule replaced monolithic child-welfare systems with modular, interoperable Comprehensive Child Welfare Information Systems supported by enhanced federal funding and data-quality requirements. As of 21 October 2024, **45 states, the District of Columbia and Puerto Rico had declared CCWIS status** [P1]. “Declared” does not mean complete or uniformly successful; states remain at different planning, development, transition and operation stages.
+
+Integrated eligibility systems attempt to reuse identity, income and household data across Medicaid/CHIP, SNAP, TANF and other programs. KFF reported in 2025 that close to half of states either could not make automated real-time decisions on new Medicaid applications or automated fewer than 10%. Integration can reduce repeat documentation, but a bad data match can propagate error across programs.
+
+The UK’s Universal Credit illustrates both scale and prolonged transition. In May 2026, **8.4 million people** were on Universal Credit, the highest recorded level, up from 7.7 million a year earlier; in February 2026 there were **7.2 million households**, 93% receiving a payment [P2]. Much of the rise came from “Move to Universal Credit” migration rather than sudden need. The program’s formal transformation phase ran from 2010 to March 2025, but operational case management, fraud/error review and claimant support continue.
+
+### Digital public infrastructure
+
+Estonia’s X-Road/X-tee is the canonical federated model: agencies retain data while secure services exchange it. Estonia reported roughly **2.2 billion transactions per year, more than 3,000 e-services and 52,000 organizations as indirect users** [P3]. The World Bank’s 2025 DPI framework identifies reusable identity, payments and trusted data exchange as public infrastructure [P4]. X-Road’s success depends on legal registries, identity, auditability and institutional trust—not simply an API gateway.
+
+### The digital-welfare critique and precedent cases
+
+Philip Alston’s 2019 UN report warned that a “digital welfare state” can become a human-rights-free zone when automation is used to reduce spending, intensify surveillance and shift burdens of proof [P5]. Virginia Eubanks’s *Automating Inequality* documented Indiana benefits automation, Los Angeles homelessness scoring and Allegheny child-welfare analytics as systems that profile and punish poverty [P6]. These works are normative and qualitative, but subsequent cases validate many governance concerns:
+
+* **Allegheny Family Screening Tool (AFST):** uses administrative data to inform hotline screening. County-commissioned research reported improved consistency; ACLU/HRDAG critiques identify poverty surveillance, proxy bias and family-association effects. A 2026 study found significantly worse modeled scores for disabled parents and children, adding disability-bias evidence [P7]. The tool advises, rather than formally replaces, screeners—yet advice can anchor decisions.
+* **SyRI:** on 5 February 2020, The Hague District Court held the Dutch welfare-fraud risk system’s legal regime incompatible with ECHR Article 8 because the intrusion and opacity failed proportionality requirements [P8]. This was a human-rights ruling about the legal system, not proof that every risk model is unlawful.
+* **Robodebt:** Australia’s Royal Commission found that unlawful income averaging produced debts without adequate legal foundation, fairness or candor. The Commission’s report lists 57 recommendations; the government describes accepting or accepting in principle all **56 public recommendations**—the difference reflects a sealed/referral item [P9]. The case shows that a simple automated rule plus organizational pressure can cause mass harm without sophisticated AI.
+* **UK DWP models:** DWP’s 2025 fairness assessment judged its Universal Credit Advances fraud model to pose minimal discrimination concerns and retained random low-risk referrals as a safeguard against confirmation bias. Later transparency records said it was 2.5 times more effective than a random control at identifying fraud risk [P10]. These are departmental assessments; independent access to labels, false positives and claimant outcomes remains limited.
+
+### Workforce pressure and federal cuts
+
+Child-welfare turnover commonly ranges from **20% to 40% annually**, with an estimated national average near 30%; rates at or below 12% are often treated as healthy for human services [P11]. Turnover breaks relationships, transfers tacit knowledge and increases the remaining caseload.
+
+US federal capacity tightened sharply in 2025:
+
+* SSA announced a target of **50,000 staff, down from about 57,000**—a reduction over 12%—while serving 73 million beneficiaries and handling roughly 500 million annual interactions [P12]. The agency said cuts would focus away from mission-critical services; disability advocates and oversight reports documented access and processing concerns. Causation between each service metric and the cuts is still developing.
+* VA officially said it would reduce headcount by nearly **30,000 by the end of FY2025** through attrition, retirement and the hiring freeze, avoiding a larger RIF [P13]. A January 2026 Senate Democratic report alleged larger losses and harm to wait times; it is an oversight/political source, not a neutral impact evaluation.
+
+### Unemployment-insurance modernization
+
+GAO designated the federal-state UI system high risk in 2022 and retained that concern in 2025. Some state systems were about **50 years old** and failed under pandemic volume; modernization also created fraud controls that locked out legitimate claimants. DOL’s 2024 *Building Resilience* plan and ARPA grants support modularity, identity, accessibility and common services, but GAO says DOL still needs standards and measurable state progress [P14].
+
+## B. Key trends, 2024–2026
+
+1. **From monoliths to modular platforms:** CCWIS, UI and eligibility procurement increasingly demand APIs, reusable components and cloud services.
+2. **From digitization to proactive service:** DPI allows agencies to prefill, notify and sometimes grant benefits without a new application.
+3. **Fraud analytics expands faster than transparency:** agencies face fiscal pressure and can quantify prevented payment more easily than claimant burden or chilling effects.
+4. **Human review becomes a legal safeguard—but only if meaningful.** Random low-risk sampling, override logs and appeal channels are replacing a binary “human in loop” label.
+5. **Staffing cuts accelerate automation demand:** simultaneously, reduced frontline knowledge makes safe implementation harder.
+
+## C. Trajectory to 2030–2035
+
+* **Best case:** interoperable registries, reusable identity/payment rails, assisted digital channels and portable consent let caseworkers spend less time re-keying evidence and more time resolving barriers.
+* **Likely case:** hybrid estates persist; modern portals sit over decades-old program rules and batch systems.
+* **Risk case:** fiscal austerity turns risk scoring into presumptive denial and moves discretion from street-level workers to designers, contractors and policy code.
+* By 2030, algorithmic impact assessments, public inventories, model cards, procurement clauses and appeal data should be standard for high-impact public decisions in leading jurisdictions.
+* By 2035, a person may have a cross-program “life event” case rather than separate agency cases—but privacy law and democratic legitimacy will limit fully centralized dossiers.
+
+## D. Controversies and evidence gaps
+
+* **Administrative burden:** completion rate, abandonment, repeat evidence requests and time-to-correction are under-measured.
+* **Poverty as risk:** administrative data are richest for people most surveilled, so more data can mean more scrutiny.
+* **Feedback loops:** investigation creates records that make future investigation more likely.
+* **Vendor accountability:** procurement secrecy can frustrate due process and audit.
+* **Human-review theater:** overwhelmed staff may accept algorithmic flags without independent inquiry.
+* **Workforce causality:** national turnover estimates are dated and inconsistent; agencies often do not publish comparable vacancy/caseload data.
+* **DPI transferability:** Estonia’s institutional scale and registry law cannot be copied by purchasing X-Road software alone.
+
+## E. Selected citable sources (public sector/social services)
+
+1. **[P1]** US Administration for Children and Families. *CCWIS Status of Child Welfare Information Systems.* Status as of 21 October 2024; page updated 2026. https://acf.gov/cb/training-technical-assistance/ccwis-status
+2. **[P2]** UK Department for Work and Pensions. *Universal Credit Quarterly Statistics, 29 April 2013 to 14 May 2026.* 18 August 2026. https://www.gov.uk/government/statistics/universal-credit-quarterly-statistics-29-april-2013-to-14-may-2026/universal-credit-quarterly-statistics-29-april-2013-to-14-may-2026
+3. **[P3]** e-Estonia. *X-Road Interoperability Services.* Updated 10 June 2024. https://e-estonia.com/service/interoperability-services/x-road/
+4. **[P4]** Clark, Julia, Graciela Marin, Oya P. Ardic Alper and Gabriela Galicia Rabadan. *Digital Public Infrastructure and Development: A World Bank Group Approach.* World Bank, 2025. https://documents1.worldbank.org/curated/en/099031025172027713/
+5. **[P5]** Alston, Philip. *Extreme Poverty and Human Rights: The Digital Welfare State.* UN General Assembly A/74/493, 2019. https://www.ohchr.org/en/press-releases/2019/10/world-stumbling-zombie-digital-welfare-dystopia-warns-un-human-rights-expert
+6. **[P6]** Eubanks, Virginia. *Automating Inequality: How High-Tech Tools Profile, Police, and Punish the Poor.* St. Martin’s Press, 2018. https://us.macmillan.com/books/9781250074317/automatinginequality/
+7. **[P7]** ACLU and Human Rights Data Analysis Group. “The Devil Is in the Details: Interrogating Values Embedded in the Allegheny Family Screening Tool.” 21 June 2023; disability-bias follow-up, 2026. https://www.aclu.org/the-devil-is-in-the-details-interrogating-values-embedded-in-the-allegheny-family-screening-tool
+8. **[P8]** District Court of The Hague. *SyRI Judgment*, ECLI:NL:RBDHA:2020:1878, 5 February 2020. https://uitspraken.rechtspraak.nl/details?id=ECLI:NL:RBDHA:2020:1878
+9. **[P9]** Royal Commission into the Robodebt Scheme. *Report.* Commonwealth of Australia, 7 July 2023. https://robodebt.royalcommission.gov.au/publications/report
+10. **[P10]** UK Department for Work and Pensions. *Universal Credit Advances Model—Fairness Assessment, 1 April 2024 to 31 March 2025.* 18 August 2025. https://www.gov.uk/government/publications/fairness-assessment-including-statistical-analysis-of-the-universal-credit-advances-machine-learning-model-1-april-2024-to-31-march-2025/
+11. **[P11]** Casey Family Programs. “How Does Turnover in the Child Welfare Workforce Impact Children and Families?” 29 August 2023. https://www.casey.org/turnover-costs-and-retention-strategies/
+12. **[P12]** Social Security Administration. “Social Security Announces Workforce and Organization Plans.” 28 February 2025. https://www.ssa.gov/news/en/press/releases/2025-02-28.html
+13. **[P13]** US Department of Veterans Affairs. “VA to Reduce Staff by Nearly 30K by End of FY2025.” 7 July 2025. https://news.va.gov/press-room/va-to-reduce-staff-by-nearly-30k-by-end-of-fy2025/
+14. **[P14]** US Government Accountability Office. *Unemployment Insurance: DOL Needs to Further Help States Overcome IT Modernization Challenges.* GAO-23-105478, 2023; retained on 2025 High-Risk List. https://www.gao.gov/products/gao-23-105478
+15. **[P15]** Amnesty International. *Social Protection in the Digital Age.* 2024. https://www.amnesty.org/en/wp-content/uploads/2024/03/POL4077712024ENGLISH.pdf
+
+# 6. Workforce, profession and ethics
+
+## A. Current state and hard numbers
+
+### Workforce supply and demand
+
+The requested BLS 2024–2034 projections show the scale of the professional pipeline:
+
+| Occupation | 2024 employment | 2024 median pay | 2024–34 growth | Average annual openings |
+|---|---:|---:|---:|---:|
+| Registered nurses | 3,391,000 | $93,600 | 5%; +166,100 jobs | 189,100 |
+| Social workers | about 810,900 | $61,330 | 6% | about 74,000 |
+| Community health workers | 65,100 | $51,030 | 11%; to 72,500 | 7,800 |
+
+Sources: BLS/O*NET [W1–W3]. BLS issued 2025–2035 projections in August 2026: social workers 816,100 jobs, 6% growth and 69,100 annual openings; CHWs 64,700 jobs, 13% growth and 7,000 annual openings. Differences reflect a shifted base year and revised data, not a sudden labor-market reversal.
+
+HRSA’s December 2025 2023–2038 model projects a **108,960 FTE national RN shortage (3%) in 2038**, rising to **11% in nonmetropolitan areas** [W4]. The model assumes historical graduation, migration, productivity and attrition patterns; it is a scenario, not destiny. HRSA’s 2025 behavioral-health brief counted about **531,223 social workers in 2023** and projects substantial 2038 shortages in mental-health/substance-use social work and other behavioral-health occupations [W5].
+
+Case-management-specific labor data remain weak because “case manager,” “care manager,” “navigator,” utilization nurse and social-work caseworker map to several occupational codes. CCMC’s 49,789 certificants are a defensible credential count, not a workforce denominator.
+
+### Burnout and turnover
+
+Giménez-Bertomeu et al.’s 2024 meta-analysis included **24 studies, 16,962 social-service workers in seven countries**. Pooled burnout prevalence was **20% (95% CI 13%–27%)**; emotional exhaustion was 50%, depersonalization 45% and low personal accomplishment 39% [W6]. Instruments and thresholds varied, and the samples are not a US national estimate.
+
+Child-welfare turnover’s 20%–40% range (§5) and CCMC’s aging profile create a compound risk: high caseloads lead to departure; departure raises caseloads and erodes supervision. Digital systems that add duplicate documentation can worsen burnout; well-designed ambient capture and task automation may reduce it.
+
+### Professional positions on AI
+
+* **NASW** ties AI use to its Code of Ethics: informed consent, privacy, competence, transparency, bias testing, vendor due diligence, documentation and human accountability [W7].
+* **ANA’s “Ethical Use of AI in Nursing Practice”** (effective 2022, republished/revised in the 2025 OJIN collection) says nurses must help design, evaluate and govern AI, protect dignity and not allow technology to displace professional responsibility [W8].
+* **ACMA’s AI in Case Management position statement** recognizes predictive analytics and LLMs as tools to focus attention and reduce administrative work but stresses validation, transparency, privacy, equity and retained clinical judgment [W9].
+* **CMSA** has not issued an equally formal, standalone AI code, but its 2025–2026 publications call AI literacy a core competency and frame technology as augmenting the human relationship [W10].
+
+### What “human in the loop” must mean
+
+Parasuraman and Riley’s classic taxonomy—automation use, misuse, disuse and abuse—remains directly applicable [W11]. Automation complacency is suboptimal monitoring caused by over-trust; automation bias is the tendency to follow suggestions or omit actions the system fails to prompt.
+
+A meaningful review control therefore requires:
+
+1. a named, competent reviewer;
+2. enough time and access to primary evidence;
+3. a display that shows uncertainty and provenance, not only a recommendation;
+4. authority to override without punishment;
+5. logging and review of overrides, disagreements and near misses;
+6. independent sampling of accepted recommendations, not just errors users catch.
+
+A 2024 meta-analysis of 106 experiments (§7) found human–AI combinations underperformed the better of human or AI alone on average. Adding a person is not a safety guarantee.
+
+### Privacy and trust
+
+The 2024 HHS final rule aligned **42 CFR Part 2** more closely with HIPAA. It became effective 16 April 2024 and compliance was required **16 February 2026** [W12]. It permits one consent for future treatment, payment and healthcare operations and HIPAA-like redisclosure, while adding breach notification, patient rights and enforcement alignment; separate consent/protection remains important for use of SUD records in civil, criminal, administrative and legislative proceedings.
+
+HIPAA policy was unusually unstable. A federal court on 18 June 2025 vacated most of the 2024 reproductive-health privacy rule, while preserving specified Notice of Privacy Practices changes, including Part 2 alignment [W13]. Case systems need versioned legal configuration, not static privacy templates.
+
+Trust evidence supports disclosure and oversight. A 2026 patient-perspective study found **92% wanted transparency that AI was used and 82% wanted clinician oversight** [W14]. Philips’s 2025 industry survey found 79% of health professionals but 59% of patients optimistic that AI could improve outcomes; 52% of patients worried about loss of human touch. Philips is a vendor sponsor, so the direction is more credible than precise population generalization.
+
+## B. Key trends, 2024–2026
+
+1. **AI literacy becomes professional competence.** Case managers need basic model evaluation, prompt/data safety, provenance, bias and escalation skills.
+2. **Documentation work is redistributed.** Ambient and generative tools can return time, but reviewing drafts is new cognitive labor.
+3. **Caseload algorithms move from equal counts to complexity.** A 2026 social-work study identified rotation, count, family/child volume, complexity, competence, interest, safety and supervisor discretion as competing assignment principles [W15].
+4. **Privacy becomes granular and purpose-based.** SUD, reproductive, behavioral, juvenile and legal data cannot be safely handled by one broad “case access” role.
+5. **The profession splits between tool users and tool governors.** Senior case managers will increasingly configure criteria, audit outputs and design exception policy.
+
+## C. Trajectory to 2030–2035
+
+* BLS growth plus HRSA shortages imply persistent demand, especially in rural and behavioral-health settings.
+* Routine clerical tasks will shrink; relationship work, contested decisions, home/community assessment and cross-system advocacy will not.
+* Entry-level workers may gain faster from copilots, as customer-service and BCG experiments suggest, but overreliance can weaken formation of expert judgment.
+* By 2030, accreditation and certification blueprints are likely to include AI/data literacy, cybersecurity, remote assessment and algorithmic advocacy.
+* By 2035, the high-value case manager is an **accountable integrator**: clinically/socially competent, digitally fluent, able to challenge models and trusted by clients.
+
+## D. Controversies and evidence gaps
+
+* **Deskilling versus upskilling:** AI can expose novices to expert patterns or prevent them from learning how to create those patterns.
+* **Productivity extraction:** saved documentation time may be converted into higher caseloads rather than better relationships.
+* **Moral injury:** caseworkers may be held responsible for decisions shaped by opaque policy engines they cannot change.
+* **Caseload fairness:** equal numbers are not equal workload; complexity scores can also encode bias and punish skilled workers with perpetually harder cases.
+* **Consent fatigue:** generic AI notices do not provide meaningful understanding or choice.
+* **Burnout evidence:** studies use inconsistent instruments and are often cross-sectional; intervention studies are limited.
+* **Professional-position gap:** principles are converging, but enforceable practice standards and audit methods lag.
+
+## E. Selected citable sources (workforce/profession/ethics)
+
+1. **[W1]** US Bureau of Labor Statistics. *Registered Nurses, Occupational Outlook Handbook—2024–2034.* 21 August 2025. https://www.bls.gov/ooh/healthcare/registered-nurses.htm
+2. **[W2]** US Bureau of Labor Statistics. *Social Workers, Occupational Outlook Handbook—2024–2034* (archived figures; page now carries 2025–2035). https://www.bls.gov/ooh/community-and-social-service/social-workers.htm
+3. **[W3]** US Bureau of Labor Statistics/O*NET. *Community Health Workers—National Employment Trends, 2024–2034.* https://www.onetonline.org/link/localtrends/21-1094.00
+4. **[W4]** Health Resources and Services Administration. *Nurse Workforce Projections, 2023–2038.* December 2025. https://bhw.hrsa.gov/sites/default/files/bureau-health-workforce/data-research/nursing-projections-factsheet.pdf
+5. **[W5]** Health Resources and Services Administration. *State of the Behavioral Health Workforce, 2025.* December 2025. https://bhw.hrsa.gov/sites/default/files/bureau-health-workforce/data-research/Behavioral-Health-Workforce-Brief-2025.pdf
+6. **[W6]** Giménez-Bertomeu, Víctor M., Francisco Caravaca-Sánchez, Nuria de Alfonseti-Hartmann and Ana J. Ricoy-Cano. “Burnout Among Social Workers in Social Services: A Systematic Review and Meta-Analysis of Prevalence.” *Journal of Social Service Research* 50(4), 2024, 664–683. https://doi.org/10.1080/01488376.2024.2371847
+7. **[W7]** National Association of Social Workers. *AI and Social Work: Ethical Considerations.* Updated 2025/2026. https://www.socialworkers.org/About/Ethics/AI-and-Social-Work
+8. **[W8]** American Nurses Association. “The Ethical Use of Artificial Intelligence in Nursing Practice.” *Online Journal of Issues in Nursing* 30(2), 2025; position effective 2022. https://ojin.nursingworld.org/table-of-contents/volume-30-2025/number-2-may-2025/the-ethical-use-of-artificial-intelligence-in-nursing-practice/
+9. **[W9]** American Case Management Association. *AI in Case Management: ACMA Position Statement.* 2025/2026. https://www.acmaweb.org/section.aspx?sid=179
+10. **[W10]** Case Management Society of America. “Preparing for the Next Generation: AI Literacy for Case Management Professionals.” *CMSA Today*, 21 July 2025. https://cmsatoday.com/2025/07/21/preparing-for-the-next-generation-ai-literacy-for-case-management-professionals/
+11. **[W11]** Parasuraman, Raja and Victor Riley. “Humans and Automation: Use, Misuse, Disuse, Abuse.” *Human Factors* 39(2), 1997, 230–253. https://doi.org/10.1518/001872097778543886
+12. **[W12]** US Department of Health and Human Services. *42 CFR Part 2 Final Rule Fact Sheet.* 8 February 2024, updated 30 January 2026. https://www.hhs.gov/hipaa/for-professionals/regulatory-initiatives/fact-sheet-42-cfr-part-2-final-rule/index.html
+13. **[W13]** US Department of Health and Human Services. *HIPAA Regulatory Initiatives—Reproductive Health Rule Litigation Status.* 27 June 2025. https://www.hhs.gov/hipaa/for-professionals/regulatory-initiatives/index.html
+14. **[W14]** Phelps, Nicholas, et al. “Patient Perspectives About Deployment of Artificial Intelligence Decision Support Tools in a Safety-Net Healthcare System.” *JAMIA Open* 9(2), 2026, ooag029. https://academic.oup.com/jamiaopen/article/9/2/ooag029/8526501
+15. **[W15]** “Case Assignment Principles for Achieving Worker Well-Being, Organizational Justice, and Casework Quality.” *Social Work*, advance article, 2026, swag022. https://academic.oup.com/sw/advance-article/doi/10.1093/sw/swag022/8654269
+
+---
+
+# 7. Theory: a framework for future case management
+
+## A. Current state: what each framework explains
+
+No single theory is sufficient. The future system can be understood as a layered model.
+
+### 1. Coordination and interdependence
+
+Malone and Crowston define coordination as **managing dependencies among activities** [T1]. For a case, the design question is not “who owns the workflow?” but which dependencies exist: shared resources, prerequisites, simultaneity, transfer, fit and task–actor assignment. AI can discover and monitor dependencies, but accountability still requires an actor map.
+
+Gittell’s **relational coordination** adds that high performance under reciprocal interdependence depends on shared goals, shared knowledge, mutual respect and frequent, timely, accurate, problem-solving communication [T2]. A case platform can improve information frequency while degrading respect or shared goals. Message volume is therefore not coordination quality.
+
+### 2. Care-delivery models
+
+Wagner’s **Chronic Care Model** connects informed, activated patients with prepared, proactive teams through self-management support, delivery-system design, decision support, clinical information systems, community resources and health-system leadership [T3]. Case management is one integrative mechanism inside that model, not the entire model.
+
+**Collaborative Care** operationalizes a related design for depression/anxiety: a primary-care clinician, trained case/care manager and psychiatric consultant; a registry; structured plan; measurement-based follow-up; and stepped treatment. The 2012 Cochrane review found better depression and anxiety outcomes than usual care [T4]. Its success depends on the complete team and feedback loop, not merely assigning a navigator.
+
+**Care management versus case management:** usage varies. A defensible distinction is that care management is the broader longitudinal, population/panel and clinical-management function, whereas case management is an intensive, individualized coordination process for a defined person/situation, often spanning medical, social, financial and legal systems. In some nursing and behavioral-health settings the labels reverse or overlap. Procurement and research should define functions rather than infer them from job titles.
+
+**Person-centred care** makes the person’s goals, capabilities, context and preferences the organizing logic. Santana et al.’s framework classifies structures, processes and outcomes [T5]. A “personalized” algorithm is not person-centred if the person cannot set goals, correct data or refuse a proposed path.
+
+### 3. Socio-technical and complexity theories
+
+Socio-technical systems theory requires **joint optimization** of technology, tasks, people, organization and environment. Salwei and Carayon’s healthcare AI framework warns that a model is only one element of a work system [T6]. This explains why a highly accurate risk score can fail when the team lacks capacity or the alert arrives at the wrong time.
+
+A **complex adaptive systems** view treats care and social-service networks as diverse, interdependent actors who learn and adapt. Outcomes are nonlinear; local workarounds can be rational. Command-and-control standardization should therefore be paired with feedback, safe-to-fail experimentation and local adaptation [T7].
+
+Star and Griesemer’s **boundary object** explains the case plan, shared record or risk score: it is sufficiently common to coordinate multiple communities yet flexible enough to retain different meanings [T8]. AI summaries may become powerful boundary objects—but dangerous ones if their apparent coherence erases disagreement.
+
+### 4. Bureaucracy and discretion
+
+Lipsky’s **street-level bureaucracy** says frontline workers make policy through discretion under resource constraints [T9]. Caseload limits, coping routines and triage are not deviations; they are how policy becomes real.
+
+Bovens and Zouridis describe the move from street-level to **screen-level** and then **system-level bureaucracy**, in which discretion shifts from caseworkers to software designers, legal analysts, data teams and managers who encode rules [T10]. Generative agents can create a new “model-level bureaucracy”: policy emerges partly from prompts, retrieval corpora, tool permissions and optimization targets. Democratic control must therefore extend upstream to system design and downstream to appeals.
+
+## B. Human–AI teaming evidence, 2023–2026
+
+NASEM’s 2022 report rejects the idea that a human plus AI automatically forms a team. Effective teaming needs shared mental models, calibrated trust, communication, training, role clarity, adaptability and measures at the team—not component—level [T11].
+
+Three empirical results define the opportunity and limit:
+
+1. **Jagged frontier.** Dell’Acqua et al. randomized **758 BCG consultants**. For 18 tasks inside GPT-4’s capability frontier, users completed 12.2% more tasks, worked 25.1% faster and produced output rated more than 40% higher quality. For a task outside the frontier, AI users were **19 percentage points less likely to be correct** [T12]. “Centaurs” divide work between human and AI; “cyborgs” interweave effort. Neither pattern is universally best.
+2. **Human–AI combinations.** Vaccaro, Almaatouq and Malone’s preregistered meta-analysis covered **106 experiments and 370 effect sizes**. Human–AI systems beat humans alone on average, but performed worse than the better of human or AI (**Hedges’ g −0.23, 95% CI −0.39 to −0.07**). Decision tasks showed losses; creation tasks showed more promise [T13].
+3. **Context-dependent productivity.** Brynjolfsson, Li and Raymond found a **15% average increase in issues resolved per hour** among 5,172 support agents, concentrated among novices [T14]. METR’s 2025 RCT instead found **16 experienced open-source developers working on 246 real tasks took 19% longer** with early-2025 AI, while expecting to be faster [T15]. METR said in 2026 that later tools likely improved, but selection effects made the follow-up unreliable.
+
+### The “AI productivity paradox” and the NANDA claim
+
+MIT Project NANDA’s preliminary 2025 *GenAI Divide* report reviewed more than 300 public initiatives, interviewed representatives from 52 organizations and surveyed 153 leaders. It said **95% of integrated enterprise pilots showed no measurable P&L impact within its observation window**, while 5% generated substantial value [T16]. This is not the same as “95% of all AI pilots technically fail.” The sample was partly convenience/public-announcement based; “failure” was a short-horizon P&L criterion; coding details and representativeness were limited; the report was not a peer-reviewed causal study. It is best read as evidence of an implementation gap, not a universal constant.
+
+These results recreate the classic productivity paradox: task-level gains appear before enterprise-level output because complementary investments—data, workflow redesign, training, incentives and governance—take time.
+
+## C. Projected theoretical trajectory to 2030–2035
+
+A coherent future architecture has six layers:
+
+1. **Person/case goals:** explicit, revisable, with client voice.
+2. **Object/event model:** people, claims, services, evidence and obligations linked over time.
+3. **Dependency map:** what must coordinate with what, and why.
+4. **Rules and authority:** deterministic policy, appeal rights and decision owners.
+5. **Adaptive intelligence:** predictions and agents that propose or perform bounded actions.
+6. **Relational system:** trust, shared knowledge, supervision and cross-boundary communication.
+
+By 2030, leading organizations will measure whether the human–AI **team** produces better case outcomes, not just whether the model is accurate. By 2035, theory will likely shift from one “human in the loop” to **polycentric oversight**: clients, frontline professionals, supervisors, auditors, regulators and courts each hold different review rights.
+
+## D. Controversies and evidence gaps
+
+* **Centaur/cyborg labels oversimplify:** actual work alternates among delegation, fusion, verification and abstention.
+* **Goal conflict:** cost, speed, client goals, legal rights and worker well-being cannot be reduced to one reward function.
+* **Relational effects are under-measured:** AI may save time but alter empathy, voice and perceived legitimacy.
+* **Expertise formation:** the long-run effect on novice learning is largely unknown.
+* **Team benchmarks:** most evaluations compare answer accuracy, not recovery from error, escalation or contested decisions.
+* **Power:** socio-technical analyses sometimes describe roles without asking who can change rules or refuse automation.
+
+## E. Selected citable sources (theory and human–AI teaming)
+
+1. **[T1]** Malone, Thomas W. and Kevin Crowston. “The Interdisciplinary Study of Coordination.” *ACM Computing Surveys* 26(1), 1994, 87–119. https://doi.org/10.1145/174666.174668
+2. **[T2]** Gittell, Jody Hoffer, et al. “Impact of Relational Coordination on Quality of Care, Postoperative Pain and Functioning, and Length of Stay.” *Medical Care* 38(8), 2000, 807–819. https://pubmed.ncbi.nlm.nih.gov/10929993/
+3. **[T3]** Wagner, Edward H., et al. “Improving Chronic Illness Care: Translating Evidence into Action.” *Health Affairs* 20(6), 2001, 64–78. https://doi.org/10.1377/hlthaff.20.6.64
+4. **[T4]** Archer, Janine, et al. “Collaborative Care for Depression and Anxiety Problems.” *Cochrane Database of Systematic Reviews*, 2012, CD006525. https://www.cochrane.org/evidence/CD006525_collaborative-care-people-depression-and-anxiety
+5. **[T5]** Santana, Maria J., et al. “How to Practice Person-Centred Care: A Conceptual Framework.” *Health Expectations* 21(2), 2018, 429–440. https://doi.org/10.1111/hex.12640
+6. **[T6]** Salwei, Megan E. and Pascale Carayon. “A Sociotechnical Systems Framework for the Application of Artificial Intelligence in Health Care Delivery.” *Journal of Cognitive Engineering and Decision Making* 16(4), 2022, 194–206. https://pmc.ncbi.nlm.nih.gov/articles/PMC9873227/
+7. **[T7]** Tsasis, Peter, Jenna M. Evans and Susan Owen. “Reframing the Challenges to Integrated Care: A Complex-Adaptive Systems Perspective.” *International Journal of Integrated Care* 12, 2012. https://ijic.org/articles/10.5334/ijic.843
+8. **[T8]** Star, Susan Leigh and James R. Griesemer. “Institutional Ecology, ‘Translations’ and Boundary Objects.” *Social Studies of Science* 19(3), 1989, 387–420. https://doi.org/10.1177/030631289019003001
+9. **[T9]** Lipsky, Michael. *Street-Level Bureaucracy: Dilemmas of the Individual in Public Services.* Russell Sage Foundation, 1980; 30th anniversary edition, 2010. https://muse.jhu.edu/book/15024
+10. **[T10]** Bovens, Mark and Stavros Zouridis. “From Street-Level to System-Level Bureaucracies: How ICT Is Transforming Administrative Discretion and Constitutional Control.” *Public Administration Review* 62(2), 2002, 174–184. https://doi.org/10.1111/0033-3352.00168
+11. **[T11]** National Academies of Sciences, Engineering, and Medicine. *Human-AI Teaming: State-of-the-Art and Research Needs.* National Academies Press, 2022. https://www.nationalacademies.org/read/26355
+12. **[T12]** Dell’Acqua, Fabrizio, et al. “Navigating the Jagged Technological Frontier: Field Experimental Evidence of the Effects of AI on Knowledge Worker Productivity and Quality.” *Organization Science* 37(2), 2026, 403–423; working-paper version, 2023. https://www.hbs.edu/faculty/Pages/item.aspx?num=64700
+13. **[T13]** Vaccaro, Michelle, Abdullah Almaatouq and Thomas W. Malone. “When Combinations of Humans and AI Are Useful: A Systematic Review and Meta-Analysis.” *Nature Human Behaviour* 8, 2024, 2293–2303. https://www.nature.com/articles/s41562-024-02024-1
+14. **[T14]** Brynjolfsson, Erik, Danielle Li and Lindsey R. Raymond. “Generative AI at Work.” *Quarterly Journal of Economics* 140(2), 2025, 889–942. https://academic.oup.com/qje/article/140/2/889/7990658
+15. **[T15]** Becker, Joel, et al. “Measuring the Impact of Early-2025 AI on Experienced Open-Source Developer Productivity.” METR, 10 July 2025. https://metr.org/blog/2025-07-10-early-2025-ai-experienced-os-dev-study/
+16. **[T16]** Challapally, Aditya, Chris Pease, Ramesh Raskar and Pradyumna Chari. *The GenAI Divide: State of AI in Business 2025.* MIT Project NANDA, preliminary report, July 2025. Archived report: https://blog.fdik.org/2025-12/v0_1_State_of_AI_in_Business_2.pdf
+
+# 8. Market, forecasts, M&A and venture funding
+
+## A. Current state and hard numbers
+
+There is no audited “case-management market.” Published estimates use materially different inclusions, so the useful output is a range with definitions.
+
+| Market label/source | Base estimate | Forecast | CAGR | What it probably includes |
+|---|---:|---:|---:|---|
+| Care management solutions, Grand View Research | $14.67B (2024) | $33.26B (2030) | 14.8% (2025–30) | Software plus services for population/care management [M1] |
+| Care management solutions, Research and Markets/TBRC | $26.86B (2026) | $47.24B (2030) | 15.2% | Broader solution/service bundle [M2] |
+| Case management software, Grand View Research | $7.32B (2023) | $15.00B (2030) | 11.2% (2024–30) | Cross-industry software [M3] |
+| Case management software, 360iResearch | $8.29B (2025) | $19.21B (2032) | 12.74% | Workflow, document, client and care coordination |
+| Legal practice management, TBRC | $2.68B (2025) | $4.66B (2030) | 11.6% | Law-firm practice/matter software [M4] |
+| Legal practice management, Mordor | $2.97B (2025) | $6.96B (2031) | 15.8% | Different legal-software scope [M5] |
+| Court case management, Mordor | $1.96B (2025) | $3.63B (2031) | 10.84% | Court CMS, e-filing and related modules [M6] |
+| BPM, Research and Markets | $16.4B (2024) | $31.2B (2030) | 11.3% | Platforms and services adjacent to enterprise case management [M7] |
+
+Grand View separately estimated the US care-management-solutions market at **$6.63 billion in 2024**, reaching $14.50 billion in 2030 (14.1% CAGR). No credible public study cleanly isolates “government case management software” across benefits, justice, child welfare, licensing and investigations. Reports that quote a government figure often reuse the entire cross-industry case-management market. Treating that as a government-only TAM is an error.
+
+### Major M&A, 2024–2026
+
+* **Transcarent–Accolade:** announced January and closed 8 April 2025; **$621 million equity value**. It combines navigation, advocacy, expert opinion and virtual primary care [M8].
+* **Clio–ShareDo:** closed March 2025; price undisclosed. The deal gave Clio enterprise matter/case capability.
+* **Clio–vLex:** **$1 billion**, completed November 2025, alongside a $500 million Series G at a $5 billion Clio valuation. It joins practice/matter workflow with a global legal-research/AI corpus [M9].
+* **ServiceNow–Moveworks:** **$2.85 billion** cash and stock, announced March 2025, the largest ServiceNow deal at announcement; it adds enterprise conversational search and agent capability [M10].
+* **Salesforce–Informatica:** **about $8 billion equity value**, completed November 2025. Not a case-management acquisition narrowly defined, but strategically important because governed data integration and master data are prerequisites for cross-system Agentforce cases [M11].
+* **2026 smaller vertical consolidation:** Arcadea-backed Computer Information Systems acquired Cohero (coroner/medical-examiner case management); Case IQ acquired WhistleBlower Security; VitalHub listed Buddy Healthcare/B Sharp-type care and social-service workflow assets. Terms were generally undisclosed [M12].
+
+### Venture funding into navigation, coordination and AI
+
+Representative disclosed rounds—not a complete market total—show investors favoring navigation tied to risk, specialty care or labor substitution:
+
+* **2024:** Thyme Care raised **$95 million** for value-based oncology navigation; Maven Clinic raised **$125 million at a $1.7 billion valuation**; Regard raised a **$61 million Series B** for clinical insights; Care Continuity raised $10 million; Homethrive raised more than $20 million [M13].
+* **2025:** Hippocratic AI raised **$141 million Series B**, then **$126 million Series C at a $3.5 billion valuation** in November; Sage Care launched with $20 million; Healthee raised $50 million for benefits navigation. Safety and ROI claims for patient-facing agents remain mainly company-reported [M14].
+* **2026:** Solace Health raised **$130 million Series C** at a valuation above $1 billion for patient advocacy; Garner Health raised a **$100 million Series E**; EZ Health emerged with $26 million for senior navigation; Hera raised $27 million for home-care coordination [M15].
+
+Capital is concentrating on models that can claim a measurable purchaser outcome—medical-cost reduction, avoided leakage, provider quality steering, reduced labor or specialty episode control. Pure “referral directory” propositions are harder to finance because closed-loop completion and economic attribution are weak.
+
+## B. Key trends, 2024–2026
+
+1. **Platform convergence:** care navigation, virtual primary care, analytics and advocacy combine (Transcarent–Accolade).
+2. **Content plus workflow:** legal research and matter management combine (Clio–vLex).
+3. **Data layer becomes strategic:** Informatica and Moveworks deals reflect the importance of governed enterprise context for agents.
+4. **From per-seat to outcome/consumption pricing:** vendors experiment with per conversation, per action, PMPM, shared savings and risk contracts.
+5. **Vertical case models retain value:** coroner, whistleblower, oncology and child-welfare products survive because domain data, forms and regulation are hard to generalize.
+
+## C. Trajectory to 2030–2035
+
+* Published forecasts cluster around **10%–16% annual growth** for narrowly labeled case/care/legal management and around 10%–20% for adjacent BPM/automation. If definitions remain stable, that implies roughly doubling many categories by 2030–2034.
+* Consolidation will continue around four control points: system of record, domain content, interoperability/data fabric and agent orchestration.
+* By 2030, stand-alone copilots without workflow, proprietary data or distribution will face commoditization.
+* Care-navigation funding will migrate toward risk-bearing, specialty and employer-benefit platforms that can document net savings—not engagement alone.
+* Government growth will be procurement-cycle dependent and slower than commercial software, but replacement of CCWIS, UI, court and eligibility systems provides durable demand through 2035.
+
+## D. Controversies and evidence gaps
+
+* **Category error:** “care management solutions” can include services and staffing; “case software” may include CRM/BPM/document management.
+* **Forecast opacity:** most reports do not publish sampling frames, vendor revenue reconciliation, currency assumptions or acquisition adjustments.
+* **Double counting:** Salesforce, ServiceNow, Pega or Microsoft revenue can appear in CRM, low-code, BPM, case management and AI-agent markets simultaneously.
+* **Vendor outcome claims:** savings often lack a counterfactual, confidence interval or detail on fees and regression to the mean.
+* **Funding is not adoption:** large rounds and valuations reflect expected growth, not clinical effectiveness.
+* **2026 deal data are incomplete:** private transaction values and integration outcomes are often undisclosed.
+
+## E. Selected citable sources (market and transactions)
+
+1. **[M1]** Grand View Research. *Care Management Solutions Market Size, Share & Trends Report, 2030.* 2025/2026. https://www.grandviewresearch.com/industry-analysis/care-management-solution-market
+2. **[M2]** Research and Markets/The Business Research Company. *Care Management Solutions Global Market Report 2026.* 2026. https://www.researchandmarkets.com/reports/5752013/care-management-solutions-market-report
+3. **[M3]** Grand View Research. *Case Management Software Market Size, Share & Trends Report, 2030.* 2024. https://www.grandviewresearch.com/industry-analysis/case-management-software-market-report
+4. **[M4]** The Business Research Company. *Legal Practice Management Software Global Market Report 2026.* 2026. https://www.thebusinessresearchcompany.com/report/legal-practice-management-software-global-market-report
+5. **[M5]** Mordor Intelligence. *Legal Practice Management Software Market Size and Share, 2026–2031.* 2026. https://www.mordorintelligence.com/industry-reports/legal-practice-management-software-market
+6. **[M6]** Mordor Intelligence. *Court Case Management Software Market, 2026–2031.* September 2026. https://www.mordorintelligence.com/industry-reports/court-case-management-software-market
+7. **[M7]** Research and Markets. *Business Process Management—Global Strategic Business Report.* 2025. https://www.researchandmarkets.com/reports/1824111/business_process_management_bpm_global
+8. **[M8]** Transcarent. “Transcarent Completes Merger with Accolade.” 8 April 2025. https://transcarent.com/press-releases/transcarent-completes-merger-with-accolade
+9. **[M9]** Clio/vLex. “Clio Completes Landmark $1B vLex Acquisition.” 10 November 2025. https://www.prnewswire.com/news-releases/clio-completes-landmark-1b-vlex-acquisition-and-announces-500m-series-g-funding-round-at-5b-valuation-302609582.html
+10. **[M10]** ServiceNow. “ServiceNow to Acquire Moveworks for $2.85 Billion.” 10 March 2025. https://newsroom.servicenow.com/press-releases/details/2025/ServiceNow-to-extend-leading-agentic-AI-to-every-employee-for-every-corner-of-the-business-with-acquisition-of-Moveworks-03-10-2025-traffic/default.aspx
+11. **[M11]** Salesforce/Informatica. “Salesforce Completes Acquisition of Informatica.” 18 November 2025. https://www.informatica.com/about-us/news/news-releases/2025/11/20251118-salesforce-completes-acquisition-of-informatica.html
+12. **[M12]** Arcadea Group/CIS. “Cohero Joins Computer Information Systems.” 25 June 2026. https://www.businesswire.com/news/home/20260625806540/en/Cohero-Joins-Computer-Information-Systems-Backed-by-Arcadea-Group
+13. **[M13]** Reuters. “Women-Focused Health Startup Maven Valued at $1.7 Billion in Funding Round.” 8 October 2024. https://www.reuters.com/business/healthcare-pharmaceuticals/women-focused-health-startup-maven-valued-17-bln-funding-round-2024-10-08/
+14. **[M14]** Reuters. “Hippocratic AI Valued at $3.5 Billion in Latest Financing Round.” 3 November 2025. https://www.reuters.com/business/hippocratic-ai-valued-35-billion-latest-financing-round-2025-11-03/
+15. **[M15]** MedCity News. “Solace Health Reaches Unicorn Status with $130M Series C.” 10 February 2026. https://medcitynews.com/2026/02/solace-health-unicorn-capital/
+
+---
+
+# Cross-domain conclusions and decision framework
+
+## Ten propositions for leaders
+
+1. **Start with the case outcome and rights, not the model.** Define goals, adverse actions, appeal routes and non-delegable decisions first.
+2. **Map dependencies.** Record which organization, person, datum and event each next action depends on.
+3. **Separate rules, predictions and generation.** Rules need version control; predictions need calibration and subgroup testing; generated text needs provenance and verification.
+4. **Use risk scores to add help before using them to withhold service.** The ethical and statistical bar for an adverse action should be higher.
+5. **Instrument the whole process.** Measure completion, delay, rework, overrides, appeals, repeat contact, client goals, equity and worker burden—not merely model accuracy or handle time.
+6. **Make human review operationally real.** Budget time, training and authority; audit accepted recommendations.
+7. **Preserve contestability.** People need notice, understandable reasons, access to relevant evidence, correction and timely human appeal.
+8. **Design for the workforce you will actually have.** Shortages make augmentation necessary, but raising caseloads can consume the benefit.
+9. **Treat agent autonomy as a permission problem.** Tool access, spend, data scope, decision class and rollback should be explicit.
+10. **Demand evidence proportional to claim.** A vendor usability study can support procurement exploration; it cannot prove mortality reduction, equity or net savings.
+
+## Practical maturity model
+
+| Level | Operating model | Evidence/governance requirement |
+|---|---|---|
+| 0. Digitized file | Documents and notes in one place | Access, retention, search |
+| 1. Routed workflow | Tasks, deadlines, rules and queues | Process conformance, timeliness |
+| 2. Data-informed case | Risk scores, registries, recommended next action | Local validation, subgroup calibration |
+| 3. Copiloted case | Draft summaries/plans/messages; human executes | Provenance, verification, user training |
+| 4. Bounded agentic case | Agent executes approved low-risk tools/actions | Permissioning, durable trace, rollback, sampling |
+| 5. Adaptive case network | Multiple organizations/agents coordinate around goals | Cross-organizational accountability, consent, appeals, systemic outcome evidence |
+
+Movement up the levels should depend on demonstrated safety and value, not vendor nomenclature.
+
+---
+
+# Research method and caveats
+
+* Research was conducted against sources available through **27 September 2026**, prioritizing 2024–2026 official documents, court materials, peer-reviewed studies and major professional bodies, while retaining seminal older theory.
+* Numerical vendor claims are identified as such. Analyst market estimates are reported comparatively because definitions and methods are often proprietary.
+* “Current” legal/regulatory descriptions are jurisdiction-specific and are not legal advice.
+* 2026 publications and web pages may be revised after the cut-off. Court cases described as pending had no final merits ruling located by that date.
+* The source lists are selected rather than exhaustive: each domain contains more than the requested 8–15 references where seminal and current sources were both necessary.
+

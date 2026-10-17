@@ -14,6 +14,9 @@ fair-expanse-493212-h8-138622c839d2.json
 
 # Common ignores
 node_modules
+orchestrator/.venv/
+__pycache__/
+*.pyc
 .next/
 .next-desktop-acceptance/
 .next-obsidian-inspect/

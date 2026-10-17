@@ -1,0 +1,15 @@
+{
+  "name": "temporal-strands (v0 chat)",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "temporal",
+      "command": "export PATH=\"$PATH:$HOME/.temporalio/bin\"; temporal server start-dev --ip 127.0.0.1"
+    },
+    {
+      "name": "web",
+      "command": "pnpm dev"
+    }
+  ],
+  "ports": [3000, 8233, 7233]
+}
